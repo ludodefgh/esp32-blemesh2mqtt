@@ -17,7 +17,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
-#include "driver/gpio.h"
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
@@ -25,13 +24,14 @@
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
-
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
-
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
-#include "driver/uart.h"
+
+#include "debugUART.h"
+#include "debugGPIO.h"
+
 #define TAG "EXAMPLE"
 
 #define LED_OFF 0x0
@@ -50,23 +50,9 @@
 #define APP_KEY_IDX 0x0000
 #define APP_KEY_OCTET 0x12
 
-#define BUTTON_GPIO GPIO_NUM_18  // Use the appropriate GPIO number for your button
-#define BUTTON_GPIO2 GPIO_NUM_19 // Use the appropriate GPIO number for your button
-#define DEBOUNCE_TIME_MS 200     // Debounce time in milliseconds
-
 #define APP_USE_ONOFF_CLIENT
 
-/// @brief button stuff
-static TimerHandle_t debounce_timer;
-static TimerHandle_t debounce_timer2;
-
-// Function prototype
-static void IRAM_ATTR gpio_isr_handler(void *arg);
-static void debounce_timer_callback(TimerHandle_t xTimer);
-
-static void IRAM_ATTR gpio_isr_handler2(void *arg);
-static void debounce_timer_callback2(TimerHandle_t xTimer);
-
+static int16_t NormalizedLevelValue = 0;
 /// @brief Provisioning stuff
 static uint8_t dev_uuid[16];
 
@@ -877,21 +863,7 @@ static esp_err_t ble_mesh_init(void)
     return err;
 }
 
-static void button_task(void *arg)
-{
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Placeholder for your main loop
-    }
-}
 
-// Potentiometer section
-#define POTENTIOMETER_ADC_CHANNEL ADC1_CHANNEL_6 // GPIO34
-#define ADC_WIDTH ADC_WIDTH_BIT_12               // 12-bit ADC (0-4095)
-#define DEFAULT_VREF 1100                        // Use default reference voltage in mV
-static esp_adc_cal_characteristics_t adc_chars;
-int16_t NormalizedLevelValue = 0;
-// Potentiometer section
 
 void SendLevelSet(int16_t level)
 {
@@ -922,9 +894,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 }
 
 #pragma region CLI UART
-#define UART_PORT_NUM UART_NUM_0
-#define UART_BAUD_RATE 115200
-#define UART_BUFFER_SIZE (1024)
+
 
 void cli_task(void *arg)
 {
@@ -955,21 +925,10 @@ void cli_task(void *arg)
             {
                 if (nodes[0].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
                 {
-                    // printf("\nUprovision node:\n");
-                    // esp_ble_mesh_device_delete_t DeleteData;
-                    // memcpy(DeleteData.uuid, nodes[0].uuid, 16);
-                    // DeleteData.flag = BIT1;
-                    // esp_ble_mesh_provisioner_delete_dev(&DeleteData);
-
-                    // printf("\n");
-
                     esp_ble_mesh_node_info_t *node = &nodes[0];
                     esp_ble_mesh_client_common_param_t common = {0};
                     esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-
                     example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
-                    //set_state.app_key_add.net_idx = store.net_idx;
-                   // set_state.app_key_add.app_idx = store.app_idx;
                     
                     int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                     if (err != ESP_OK)
@@ -978,19 +937,6 @@ void cli_task(void *arg)
                     }
                 }
             }
-            // else if (strncmp(input, "select", 6) == 0) {
-            //      int index = atoi(&input[7]);
-            //      if (index >= 0 && index < node_count) {
-            //          current_node_index = index;
-            //          printf("Selected node: %s (0x%04X)\n", mesh_nodes[current_node_index].name, mesh_nodes[current_node_index].unicast_addr);
-            //      } else {
-            //          printf("Invalid index.\n");
-            //      }
-
-            // } else if (strncmp(input, "set", 3) == 0) {
-            //     int level = atoi(&input[4]);
-            //     send_level_set(0, 0, level); // Assuming net_idx and app_idx are 0
-            // }
             else
             {
                 printf("Unknown command. Type 'help' for a list of commands.\n");
@@ -1039,166 +985,69 @@ void app_main(void)
         ESP_LOGE(TAG, "Bluetooth mesh init failed (err %d)", err);
     }
 
-    /////////////////////////////////////////////////////////////////////////////
-    // UART initialization
-    /////////////////////////////////////////////////////////////////////////////
-    const uart_config_t uart_config = {
-        .baud_rate = UART_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
-    uart_driver_install(UART_PORT_NUM, UART_BUFFER_SIZE * 2, 0, 0, NULL, 0);
-    uart_param_config(UART_PORT_NUM, &uart_config);
-    uart_set_pin(UART_PORT_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
+    initUART();
+    initDebugGPIO();
     xTaskCreate(cli_task, "cli_task", 4096, NULL, 5, NULL);
-
-    /////////////////////////////////////////////////////////////////////////////
-    // Button inputs
-    /////////////////////////////////////////////////////////////////////////////
-
-    // Configure button GPIO
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_NEGEDGE, // Interrupt on falling edge
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BUTTON_GPIO),
-        .pull_up_en = GPIO_PULLUP_ENABLE, // Enable internal pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE};
-    gpio_config(&io_conf);
-
-    gpio_config_t io_conf2 = {
-        .intr_type = GPIO_INTR_NEGEDGE, // Interrupt on falling edge
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BUTTON_GPIO2),
-        .pull_up_en = GPIO_PULLUP_ENABLE, // Enable internal pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE};
-    gpio_config(&io_conf2);
-
-    // Create debounce timer
-    debounce_timer = xTimerCreate("debounce_timer", pdMS_TO_TICKS(DEBOUNCE_TIME_MS), pdFALSE, NULL, debounce_timer_callback);
-    debounce_timer2 = xTimerCreate("debounce_timer2", pdMS_TO_TICKS(DEBOUNCE_TIME_MS), pdFALSE, NULL, debounce_timer_callback2);
-
-    // Install GPIO ISR service
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(BUTTON_GPIO, gpio_isr_handler, NULL);
-    gpio_isr_handler_add(BUTTON_GPIO2, gpio_isr_handler2, NULL);
-
-    xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
-
-    /////////////////////////////////////////////////////////////////////////////
-    // Potentiometer inputs
-    /////////////////////////////////////////////////////////////////////////////
-    // Configure ADC
-    adc1_config_width(ADC_WIDTH);
-    adc1_config_channel_atten(POTENTIOMETER_ADC_CHANNEL, ADC_ATTEN_DB_12); // 0-3.3V range
-
-    // Characterize ADC for voltage conversion
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_12, ADC_WIDTH, DEFAULT_VREF, &adc_chars);
 
     while (1)
     {
         // Read raw ADC value
         int raw = adc1_get_raw(POTENTIOMETER_ADC_CHANNEL);
         int16_t filteredValue = (int16_t)map(raw, 0, 4095, 0, 100);
-        // Convert to voltage
-        // uint32_t voltage = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
 
-        // ESP_LOGI(TAG, "Raw: %d, Voltage: %d mV", raw, voltage);
         if (filteredValue < NormalizedLevelValue - 1 || filteredValue > NormalizedLevelValue + 1)
         {
             NormalizedLevelValue = filteredValue;
             // SendLevelSet(NormalizedLevelValue);
         }
-
         vTaskDelay(pdMS_TO_TICKS(1000)); // Delay 500ms
     }
 }
 
-static void gpio_isr_handler(void *arg)
+void SendGenericLevel()
 {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-    // Start debounce timer (from ISR)
-    xTimerStartFromISR(debounce_timer, &xHigherPriorityTaskWoken);
-
-    if (xHigherPriorityTaskWoken)
+    if (nodes[0].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        portYIELD_FROM_ISR();
-    }
-}
+        ESP_LOGI(TAG, "Sending set level : %d", NormalizedLevelValue);
+        esp_ble_mesh_node_info_t *node = &nodes[0];
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
-static void gpio_isr_handler2(void *arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        node->level = NormalizedLevelValue;
 
-    // Start debounce timer (from ISR)
-    xTimerStartFromISR(debounce_timer2, &xHigherPriorityTaskWoken);
-
-    if (xHigherPriorityTaskWoken)
-    {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static void debounce_timer_callback(TimerHandle_t xTimer)
-{
-    if (gpio_get_level(BUTTON_GPIO) == 0)
-    {
-        // Confirm button is still pressed
-        ESP_LOGI(TAG, "Button Press Detected");
-        // Add your button handling logic here
-        if (nodes[0].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+        example_ble_mesh_set_msg_common(&common, node, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
+        set_state.level_set.level = NormalizedLevelValue;
+        set_state.level_set.op_en = false;
+        set_state.level_set.delay = 0;
+        set_state.level_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+        int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+        if (err)
         {
-
-            esp_ble_mesh_node_info_t *node = &nodes[0];
-            esp_ble_mesh_client_common_param_t common = {0};
-            esp_ble_mesh_generic_client_set_state_t set_state = {0};
-            ESP_LOGI(TAG, "Callback Before :  onoff: 0x%02x", node->onoff);
-            // node->onoff = !node->onoff;
-            // ESP_LOGI(TAG, "Callback After :  onoff: 0x%02x", node->onoff);
-            example_ble_mesh_set_msg_common(&common, node, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
-            set_state.onoff_set.op_en = false;
-            set_state.onoff_set.onoff = !node->onoff;
-            set_state.onoff_set.tid = store.tid++;
-            int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-            if (err)
-            {
-                ESP_LOGE(TAG, "%s: debounce_timer_callback : Generic OnOff Set failed", __func__);
-                return;
-            }
+            ESP_LOGE(TAG, "%s: debounce_timer_callback : Generic LEVEL Set failed", __func__);
+            return;
         }
     }
 }
 
-static void debounce_timer_callback2(TimerHandle_t xTimer)
+void SendGenericOnOff()
 {
-    if (gpio_get_level(BUTTON_GPIO2) == 0)
+    if (nodes[0].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        // Confirm button is still pressed
-        ESP_LOGI(TAG, "Button 2 Press Detected");
-        // Add your button handling logic here
-
-        if (nodes[0].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+        esp_ble_mesh_node_info_t *node = &nodes[0];
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_generic_client_set_state_t set_state = {0};
+        ESP_LOGI(TAG, "Callback Before :  onoff: 0x%02x", node->onoff);
+        // node->onoff = !node->onoff;
+        // ESP_LOGI(TAG, "Callback After :  onoff: 0x%02x", node->onoff);
+        example_ble_mesh_set_msg_common(&common, node, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
+        set_state.onoff_set.op_en = false;
+        set_state.onoff_set.onoff = !node->onoff;
+        set_state.onoff_set.tid = store.tid++;
+        int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+        if (err)
         {
-            ESP_LOGI(TAG, "Sending set level : %d", NormalizedLevelValue);
-            esp_ble_mesh_node_info_t *node = &nodes[0];
-            esp_ble_mesh_client_common_param_t common = {0};
-            esp_ble_mesh_generic_client_set_state_t set_state = {0};
-
-            node->level = NormalizedLevelValue;
-
-            example_ble_mesh_set_msg_common(&common, node, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
-            set_state.level_set.level = NormalizedLevelValue;
-            set_state.level_set.op_en = false;
-            set_state.level_set.delay = 0;
-            set_state.level_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-            int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-            if (err)
-            {
-                ESP_LOGE(TAG, "%s: debounce_timer_callback : Generic LEVEL Set failed", __func__);
-                return;
-            }
+            ESP_LOGE(TAG, "%s: debounce_timer_callback : Generic OnOff Set failed", __func__);
+            return;
         }
     }
 }

@@ -18,6 +18,12 @@
     "format": "c",
     "system_error": "c",
     "esp_ble_mesh_common_api.h": "c",
-    "esp_ble_mesh_defs.h": "c"
+    "esp_ble_mesh_defs.h": "c",
+    "debuguart.h": "c",
+    "timers.h": "c",
+    "inttypes.h": "c",
+    "adc.h": "c",
+    "esp_ble_mesh_networking_api.h": "c",
+    "esp_adc_cal.h": "c"
   }
 }
