@@ -1,0 +1,30 @@
+dependencies:
+  esp_adc:
+    dependencies: []
+    source:
+      path: /home/ludovic/esp/esp-idf/components/esp_adc
+      type: local
+    version: '*'
+  example_init:
+    dependencies: []
+    source:
+      path: /home/ludovic/esp/esp-idf/examples/bluetooth/esp_ble_mesh/common_components/example_init
+      type: local
+    version: '*'
+  example_nvs:
+    dependencies: []
+    source:
+      path: /home/ludovic/esp/esp-idf/examples/bluetooth/esp_ble_mesh/common_components/example_nvs
+      type: local
+    version: '*'
+  idf:
+    source:
+      type: idf
+    version: 5.5.0
+direct_dependencies:
+- esp_adc
+- example_init
+- example_nvs
+manifest_hash: 3371a1c31df01e3ccb8c08c47bb23963bc52b87a4d2448f04e2cb783d5547bd4
+target: esp32
+version: 2.0.0

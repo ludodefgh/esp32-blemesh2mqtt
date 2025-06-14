@@ -1,0 +1,23 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPath": "/home/ludovic/esp/esp-idf",
+  "idf.toolsPath": "/home/ludovic/.espressif",
+  "idf.pythonInstallPath": "/usr/bin/python3",
+  "idf.port": "/dev/ttyUSB0",
+  "idf.flashType": "UART",
+  "files.associations": {
+    "esp_ble_mesh_provisioning_api.h": "c",
+    "ble_mesh_example_init.h": "c",
+    "esp_err.h": "c",
+    "esp_log.h": "c",
+    "esp_ble_mesh_config_model_api.h": "c",
+    "atomic": "c",
+    "ble_mesh_example_nvs.h": "c",
+    "freertos.h": "c",
+    "map": "c",
+    "format": "c",
+    "system_error": "c",
+    "esp_ble_mesh_common_api.h": "c",
+    "esp_ble_mesh_defs.h": "c"
+  }
+}
