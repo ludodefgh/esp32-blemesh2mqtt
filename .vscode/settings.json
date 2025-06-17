@@ -24,6 +24,16 @@
     "inttypes.h": "c",
     "adc.h": "c",
     "esp_ble_mesh_networking_api.h": "c",
-    "esp_adc_cal.h": "c"
+    "esp_adc_cal.h": "c",
+    "array": "c",
+    "string": "c",
+    "string_view": "c",
+    "span": "c",
+    "esp_ble_mesh_generic_model_api.h": "c",
+    "nodesmanager.h": "c",
+    "esp_ble_mesh_lighting_model_api.h": "c",
+    "cstdint": "cpp",
+    "task.h": "c",
+    "cstdlib": "c"
   }
 }

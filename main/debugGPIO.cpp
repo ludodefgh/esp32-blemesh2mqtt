@@ -10,8 +10,9 @@
 #define BUTTON_GPIO2 GPIO_NUM_19 // Use the appropriate GPIO number for your button
 #define DEBOUNCE_TIME_MS 200     // Debounce time in milliseconds
 
-extern void SendGenericLevel();
+extern void SendBrightness();
 extern void SendGenericOnOff();
+extern void NextMode();
 
 /// @brief button stuff
 static TimerHandle_t debounce_timer;
@@ -21,10 +22,10 @@ static esp_adc_cal_characteristics_t adc_chars;
 
 // Function prototype
 void IRAM_ATTR gpio_isr_handler(void *arg);
-static void debounce_timer_callback(TimerHandle_t xTimer);
+void debounce_timer_callback(TimerHandle_t xTimer);
 
 static void IRAM_ATTR gpio_isr_handler2(void *arg);
-static void debounce_timer_callback2(TimerHandle_t xTimer);
+void debounce_timer_callback2(TimerHandle_t xTimer);
 
 static void button_task(void *arg)
 {
@@ -35,24 +36,25 @@ static void button_task(void *arg)
 }
 
 
-void initDebugGPIO()
+extern "C" void initDebugGPIO()
 {
     ESP_LOGI(TAG, "initDebugGPIO");
     // Configure button GPIO
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_NEGEDGE, // Interrupt on falling edge
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BUTTON_GPIO),
-        .pull_up_en = GPIO_PULLUP_ENABLE, // Enable internal pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE};
+    gpio_config_t io_conf = {};
+
+        io_conf.intr_type = GPIO_INTR_NEGEDGE; // Interrupt on falling edge
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pin_bit_mask = (1ULL << BUTTON_GPIO);
+        io_conf.pull_up_en = GPIO_PULLUP_ENABLE; // Enable internal pull-up
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf);
 
-    gpio_config_t io_conf2 = {
-        .intr_type = GPIO_INTR_NEGEDGE, // Interrupt on falling edge
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << BUTTON_GPIO2),
-        .pull_up_en = GPIO_PULLUP_ENABLE, // Enable internal pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE};
+    gpio_config_t io_conf2 = {};
+        io_conf2.intr_type = GPIO_INTR_NEGEDGE; // Interrupt on falling edge
+        io_conf2.mode = GPIO_MODE_INPUT;
+        io_conf2.pin_bit_mask = (1ULL << BUTTON_GPIO2);
+        io_conf2.pull_up_en = GPIO_PULLUP_ENABLE; // Enable internal pull-up
+        io_conf2.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf2);
 
     // Create debounce timer
@@ -127,6 +129,7 @@ void debounce_timer_callback2(TimerHandle_t xTimer)
         //ESP_LOGI(TAG, "Button 2 Press Detected");
         // Add your button handling logic here
 
-        SendGenericLevel();
+        //SendGenericLevel();
+        NextMode();
     }
 }

@@ -13,5 +13,11 @@
 // Potentiometer section
 
 
+#ifdef __cplusplus
+extern "C" {
+#endif
  void initDebugGPIO();
-
+ 
+#ifdef __cplusplus
+}
+#endif
