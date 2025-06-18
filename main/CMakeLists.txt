@@ -8,5 +8,5 @@ set(srcs "main.cpp" "debugUART.cpp" "debugGPIO.cpp" "provisioning.cpp" "nodesMan
 set(SOURCES MyFile.h MyFile.cpp)
 
 idf_component_register(SRCS "${srcs}"
-                    PRIV_REQUIRES esp_wifi nvs_flash driver
+                    PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_gpio esp_driver_uart
                     INCLUDE_DIRS  ".")

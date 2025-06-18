@@ -121,12 +121,8 @@ void wifi_init_sta(void)
                                                         &instance_got_ip));
 
     wifi_config_t wifi_config {};
-    const char* SSID = "Cookie";
-    const char* pass = "azertyuioppoiuytreza";
-    //wifi_config.sta.ssid = EXAMPLE_ESP_WIFI_SSID;
-    strlcpy((char *) wifi_config.sta.ssid, SSID, sizeof(wifi_config.sta.ssid));
-    //wifi_config.sta.password = EXAMPLE_ESP_WIFI_PASS;
-    strncpy((char *) wifi_config.sta.password, pass, sizeof(wifi_config.sta.password));
+    strlcpy((char *) wifi_config.sta.ssid, EXAMPLE_ESP_WIFI_SSID, sizeof(wifi_config.sta.ssid));
+    strncpy((char *) wifi_config.sta.password, EXAMPLE_ESP_WIFI_PASS, sizeof(wifi_config.sta.password));
     /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (password len => 8).
         * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
         * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to

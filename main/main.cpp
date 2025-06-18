@@ -15,10 +15,13 @@
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_console.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+//#include "cmd_decl.h"
+
 #include "debugUART.h"
 #include "debugGPIO.h"
 #include "modelsConfig.h"
@@ -705,62 +708,6 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-#pragma region CLI UART
-
-
-void cli_task(void *arg)
-{
-    uint8_t *data = (uint8_t *)malloc(UART_BUFFER_SIZE);
-    if (data == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to allocate UART buffer");
-        vTaskDelete(NULL);
-    }
-
-    ESP_LOGI(TAG, "CLI ready. Type 'help' for commands.");
-
-    while (1)
-    {
-        int len = uart_read_bytes(UART_PORT_NUM, data, UART_BUFFER_SIZE - 1, pdMS_TO_TICKS(100));
-        if (len > 0)
-        {
-            data[len] = '\0'; // Null-terminate input
-            char *input = (char *)data;
-
-            if (strncmp(input, "help", 4) == 0)
-            {
-                printf("\nAvailable commands:\n");
-                printf("  Unprovision              - List provisioned nodes\n");
-                printf("  help              - Show this help message\n\n");
-            }
-            else if (strncmp(input, "Unprovision", 11) == 0 || strncmp(input, "0", 1) == 0)
-            {
-                if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-                {
-                    esp_ble_mesh_node_info_t *node = GetNode(0);
-                    esp_ble_mesh_client_common_param_t common = {0};
-                    esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                    example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
-                    
-                    ShitShowAppKeyBind = 0;
-                    int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-                    if (err != ESP_OK)
-                    {
-                        ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node->uuid, 16));
-                    }
-                }
-            }
-            else
-            {
-                printf("Unknown command. Type 'help' for a list of commands.\n");
-            }
-        }
-    }
-    free(data);
-    vTaskDelete(NULL);
-}
-#pragma endregion
-
 enum ModeType
 {
  BRIGHTNESS,
@@ -933,6 +880,89 @@ void SendHSL(enum ModeType Mode)
 
 extern void wifi_init_sta(void);
 
+static int heap_size(int argc, char **argv)
+{
+    uint32_t heap_size = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+    ESP_LOGI(TAG, "min heap size: %" PRIu32, heap_size);
+    return 0;
+}
+
+// fwd decl
+void SendGenericOnOff();
+static int toggle_on_off(int argc, char **argv)
+{
+    SendGenericOnOff();
+    return 0;
+}
+
+static int unprovision(int argc, char **argv)
+{
+    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_node_info_t *node = GetNode(0);
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+        
+        ShitShowAppKeyBind = 0;
+        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node->uuid, 16));
+        }
+    }
+    return 0;
+}
+
+void RegisterDebugCommands()
+{
+    esp_console_repl_t *repl = NULL;
+    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    // init console REPL environment
+    ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
+
+    /* Register commands */
+    
+    const esp_console_cmd_t heap_cmd = {
+        .command = "heap",
+        .help = "get min free heap size during test",
+        .hint = NULL,
+        .func = &heap_size,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&heap_cmd) );
+
+    const esp_console_cmd_t toggleLight_cmd = {
+        .command = "toggle",
+        .help = "toggle connected lights on/off",
+        .hint = NULL,
+        .func = &toggle_on_off,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&toggleLight_cmd) );
+
+    const esp_console_cmd_t unprovision_cmd = {
+        .command = "unprovision",
+        .help = "unprovisionned paired nodes",
+        .hint = NULL,
+        .func = &unprovision,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&unprovision_cmd) );
+
+
+    // printf("\n ==================================================\n");
+    // printf(" |       Steps to test WiFi throughput            |\n");
+    // printf(" |                                                |\n");
+    // printf(" |  1. Print 'help' to gain overview of commands  |\n");
+    // printf(" |  2. Configure device to station or soft-AP     |\n");
+    // printf(" |  3. Setup WiFi connection                      |\n");
+    // printf(" |  4. Run iperf to test UDP/TCP RX/TX throughput |\n");
+    // printf(" |                                                |\n");
+    // printf(" =================================================\n\n");
+
+    // start console REPL
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+}
+
 //void app_main(void)
 extern "C" void app_main()
 {
@@ -980,9 +1010,8 @@ extern "C" void app_main()
     //ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
-    initUART();
     initDebugGPIO();
-    xTaskCreate(cli_task, "cli_task", 4096, NULL, 5, NULL);
+    RegisterDebugCommands();
 
     while (1)
     {
@@ -1049,69 +1078,3 @@ void SendGenericOnOff()
         }
     }
 }
-
-
-
-// void SEND_LIGHT_HSL_HUE_SERVER()
-// {
-//  if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-//     {
-//         ESP_LOGI(TAG, "SEND_LIGHT_HSL_HUE_SERVER : %d", NormalizedLevelValue);
-//         esp_ble_mesh_node_info_t *node = GetNode(0);
-//         esp_ble_mesh_client_common_param_t common = {0};
-//         //esp_ble_mesh_light_client_set_state_t set_state = {0};
-
-//         // example_ble_mesh_set_msg_common(&common, node, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_HUE_SET);
-//         // common.ctx.addr +=4;
-//         // set_state.hsl_hue_set.hue = NormalizedLevelValue;
-//         // set_state.hsl_hue_set.op_en = false;
-//         // set_state.hsl_hue_set.delay = 0;
-//         // set_state.hsl_hue_set.tid = store.tid++; 
-//         // int err = esp_ble_mesh_light_client_set_state(&common, &set_state);
-//         // if (err)
-//         // {
-//         //     ESP_LOGE(TAG, "%s: Set failed", __func__);
-//         //     return;
-//         // }
-
-//        // node->level = NormalizedLevelValue;
-
-//         esp_ble_mesh_generic_client_set_state_t set_state = {0};
-//         example_ble_mesh_set_msg_common(&common, node, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
-//         common.ctx.addr = node->unicast + 2;
-//         set_state.level_set.level = NormalizedLevelValue;
-//         set_state.level_set.op_en = false;
-//         set_state.level_set.delay = 0;
-//         set_state.level_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-//         int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-//         if (err)
-//         {
-//             ESP_LOGE(TAG, "%s: [TEMPERATURE] : Set failed : %i", __func__, err);
-//             return;
-//         }
-//     }
-// }
-
-// void SEND_LIGHT_HSL_SATURATION_SERVER()
-// {
-// if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-//     {
-//         ESP_LOGI(TAG, "SEND_LIGHT_HSL_SATURATION_SERVER : %d", NormalizedLevelValue);
-//         esp_ble_mesh_node_info_t *node = GetNode(0);
-//         esp_ble_mesh_client_common_param_t common = {0};
-//         esp_ble_mesh_light_client_set_state_t set_state = {0};
-
-//         example_ble_mesh_set_msg_common(&common, node, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SATURATION_SET);
-//         common.ctx.addr +=3;
-//         set_state.hsl_saturation_set.saturation = NormalizedLevelValue;
-//         set_state.hsl_saturation_set.op_en = false;
-//         set_state.hsl_saturation_set.delay = 0;
-//         set_state.hsl_saturation_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-//         int err = esp_ble_mesh_light_client_set_state(&common, &set_state);
-//         if (err)
-//         {
-//             ESP_LOGE(TAG, "%s: Set failed", __func__);
-//             return;
-//         }
-//     }
-// }
