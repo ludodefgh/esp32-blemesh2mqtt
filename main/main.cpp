@@ -931,6 +931,8 @@ void SendHSL(enum ModeType Mode)
     }
 }
 
+extern void wifi_init_sta(void);
+
 //void app_main(void)
 extern "C" void app_main()
 {
@@ -968,6 +970,15 @@ extern "C" void app_main()
     {
         ESP_LOGE(TAG, "Bluetooth mesh init failed (err %d)", err);
     }
+
+     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
+        /* If you only want to open more logs in the wifi module, you need to make the max level greater than the default level,
+         * and call esp_log_level_set() before esp_wifi_init() to improve the log level of the wifi module. */
+        esp_log_level_set("wifi", static_cast<esp_log_level_t>(CONFIG_LOG_MAXIMUM_LEVEL));
+    }
+
+    //ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    wifi_init_sta();
 
     initUART();
     initDebugGPIO();

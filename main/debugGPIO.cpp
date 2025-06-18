@@ -16,7 +16,7 @@ extern void NextMode();
 
 /// @brief button stuff
 static TimerHandle_t debounce_timer;
-static TimerHandle_t debounce_timer2;
+//static TimerHandle_t debounce_timer2;
 
 static esp_adc_cal_characteristics_t adc_chars;
 
@@ -24,16 +24,16 @@ static esp_adc_cal_characteristics_t adc_chars;
 void IRAM_ATTR gpio_isr_handler(void *arg);
 void debounce_timer_callback(TimerHandle_t xTimer);
 
-static void IRAM_ATTR gpio_isr_handler2(void *arg);
-void debounce_timer_callback2(TimerHandle_t xTimer);
+//void IRAM_ATTR gpio_isr_handler2(void *arg);
+//void debounce_timer_callback2(TimerHandle_t xTimer);
 
-static void button_task(void *arg)
-{
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Placeholder for your main loop
-    }
-}
+// static void button_task(void *arg)
+// {
+//     while (1)
+//     {
+//         vTaskDelay(pdMS_TO_TICKS(1000)); // Placeholder for your main loop
+//     }
+// }
 
 
 extern "C" void initDebugGPIO()
@@ -44,27 +44,27 @@ extern "C" void initDebugGPIO()
 
         io_conf.intr_type = GPIO_INTR_NEGEDGE; // Interrupt on falling edge
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << BUTTON_GPIO);
+        io_conf.pin_bit_mask = (1ULL << BUTTON_GPIO) | (1ULL << BUTTON_GPIO2);
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE; // Enable internal pull-up
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf);
 
-    gpio_config_t io_conf2 = {};
-        io_conf2.intr_type = GPIO_INTR_NEGEDGE; // Interrupt on falling edge
-        io_conf2.mode = GPIO_MODE_INPUT;
-        io_conf2.pin_bit_mask = (1ULL << BUTTON_GPIO2);
-        io_conf2.pull_up_en = GPIO_PULLUP_ENABLE; // Enable internal pull-up
-        io_conf2.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    gpio_config(&io_conf2);
+    // gpio_config_t io_conf2 = {};
+    //     io_conf2.intr_type = GPIO_INTR_NEGEDGE; // Interrupt on falling edge
+    //     io_conf2.mode = GPIO_MODE_INPUT;
+    //     io_conf2.pin_bit_mask = (1ULL << BUTTON_GPIO2);
+    //     io_conf2.pull_up_en = GPIO_PULLUP_ENABLE; // Enable internal pull-up
+    //     io_conf2.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    // gpio_config(&io_conf2);
 
     // Create debounce timer
     debounce_timer = xTimerCreate("debounce_timer", pdMS_TO_TICKS(DEBOUNCE_TIME_MS), pdFALSE, NULL, debounce_timer_callback);
-    debounce_timer2 = xTimerCreate("debounce_timer2", pdMS_TO_TICKS(DEBOUNCE_TIME_MS), pdFALSE, NULL, debounce_timer_callback2);
+    //debounce_timer2 = xTimerCreate("debounce_timer2", pdMS_TO_TICKS(DEBOUNCE_TIME_MS), pdFALSE, NULL, debounce_timer_callback2);
 
     // Install GPIO ISR service
     gpio_install_isr_service(0);
     gpio_isr_handler_add(BUTTON_GPIO, gpio_isr_handler, NULL);
-    gpio_isr_handler_add(BUTTON_GPIO2, gpio_isr_handler2, NULL);
+    gpio_isr_handler_add(BUTTON_GPIO2, gpio_isr_handler, NULL);
 
     //xTaskCreate(button_task, "button_task", 4096, NULL, 10, NULL);
 
@@ -93,19 +93,19 @@ void gpio_isr_handler(void *arg)
     }
 }
 
-void gpio_isr_handler2(void *arg)
-{
-    //ESP_LOGI(TAG, "gpio_isr_handler2");
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+// void gpio_isr_handler2(void *arg)
+// {
+//     //ESP_LOGI(TAG, "gpio_isr_handler2");
+//     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-    // Start debounce timer (from ISR)
-    xTimerStartFromISR(debounce_timer2, &xHigherPriorityTaskWoken);
+//     // Start debounce timer (from ISR)
+//     xTimerStartFromISR(debounce_timer2, &xHigherPriorityTaskWoken);
 
-    if (xHigherPriorityTaskWoken)
-    {
-        portYIELD_FROM_ISR();
-    }
-}
+//     if (xHigherPriorityTaskWoken)
+//     {
+//         portYIELD_FROM_ISR();
+//     }
+// }
 
 void debounce_timer_callback(TimerHandle_t xTimer)
 {
@@ -116,6 +116,15 @@ void debounce_timer_callback(TimerHandle_t xTimer)
         //ESP_LOGI(TAG, "Button Press Detected");
 
         SendGenericOnOff();
+        // Add your button handling logic here
+    }
+    
+    if (gpio_get_level(BUTTON_GPIO2) == 0)
+    {
+        // Confirm button is still pressed
+        //ESP_LOGI(TAG, "Button Press Detected");
+
+        NextMode();
         // Add your button handling logic here
     }
 }
