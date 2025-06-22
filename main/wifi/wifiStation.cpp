@@ -20,13 +20,13 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#include "_config.h"
+
 /* The examples use WiFi configuration that you can set via project configuration menu
 
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
-#define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
-#define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define EXAMPLE_ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
 
 #if CONFIG_ESP_STATION_EXAMPLE_WPA3_SAE_PWE_HUNT_AND_PECK
@@ -121,8 +121,8 @@ void wifi_init_sta(void)
                                                         &instance_got_ip));
 
     wifi_config_t wifi_config {};
-    strlcpy((char *) wifi_config.sta.ssid, EXAMPLE_ESP_WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strncpy((char *) wifi_config.sta.password, EXAMPLE_ESP_WIFI_PASS, sizeof(wifi_config.sta.password));
+    strlcpy((char *) wifi_config.sta.ssid, config_wifi_ssid, sizeof(wifi_config.sta.ssid));
+    strncpy((char *) wifi_config.sta.password, config_wifi_pwd, sizeof(wifi_config.sta.password));
     /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (password len => 8).
         * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
         * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
@@ -150,10 +150,10 @@ void wifi_init_sta(void)
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+                 config_wifi_ssid, config_wifi_pwd);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+                 config_wifi_ssid, config_wifi_pwd);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }

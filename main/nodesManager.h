@@ -10,7 +10,6 @@
 #include "freertos/task.h"
 #include "freertos/timers.h"
 
-
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_ble_mesh_networking_api.h"
