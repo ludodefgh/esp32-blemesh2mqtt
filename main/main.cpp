@@ -315,7 +315,21 @@ std::unique_ptr<cJSON> make_discovery_message(esp_ble_mesh_node_info_t *node)
         cJSON_AddItemToObject(root, "stat_t", cJSON_CreateString("~/state"));
         cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
         cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
-        cJSON_AddItemToObject(root, "sup_clrm", cJSON_CreateString("hs"));
+        //cJSON_AddItemToObject(root, "sup_clrm", cJSON_CreateString("hs"));
+         cJSON *sup_clrm = nullptr;
+        cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
+        if (sup_clrm != nullptr)
+        {
+            cJSON_AddItemToArray(sup_clrm,  cJSON_CreateString("hs"));
+            cJSON_AddItemToArray(sup_clrm,  cJSON_CreateString("color_temp"));
+        }
+        
+        cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
+        cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
+        
+        cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
+        
+
     }
 
     return std::unique_ptr<cJSON>{root};
@@ -404,6 +418,17 @@ void ReadJsonResponse(const char *input)
                 if (update_hsl)
                 {
                     SendHSL();
+                }
+
+                 if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
+                {
+                    if (cJSON_IsNumber(color_temp))
+                    {
+                        // FIX-ME : might be related to my buld, or check server config for value range
+                        //uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
+                        GetNode(0)->curr_temp = color_temp->valuedouble;
+                        ble_mesh_ctl_temperature_set(GetNode(0));
+                    }
                 }
             }
             cJSON_Delete(response);
@@ -571,6 +596,7 @@ extern "C" void app_main()
     RegisterDebugCommands();
 
     RegisterProvisioningDebugCommands();
+    RegisterBleMeshDebugCommands();
 
     /* Initialize the Bluetooth Mesh Subsystem */
     err = ble_mesh_init();

@@ -297,6 +297,15 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                 return;
             }
 
+            err = esp_ble_mesh_provisioner_bind_app_key_to_local_model(PROV_OWN_ADDR, store.app_idx,
+                                                                       ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI, ESP_BLE_MESH_CID_NVAL);
+
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI] appkey failed");
+                return;
+            }
+
 //#if defined(APP_USE_ONOFF_CLIENT)
             err = esp_ble_mesh_provisioner_bind_app_key_to_local_model(PROV_OWN_ADDR, store.app_idx,
                                                                        ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI, ESP_BLE_MESH_CID_NVAL);

@@ -24,7 +24,7 @@
 #include "nodesManager.h"
 #include "provisioning.h"
 
-#define TAG "EXAMPLE"
+#define TAG "APP_BLE_MESH"
 
 #define CID_ESP 0x02E5
 
@@ -76,6 +76,7 @@ static esp_ble_mesh_cfg_srv_t config_server = {
 esp_ble_mesh_client_t config_client;
 esp_ble_mesh_client_t onoff_client;
 esp_ble_mesh_client_t level_client;
+esp_ble_mesh_client_t lightness_cli;
 esp_ble_mesh_client_t hsl_cli;
 esp_ble_mesh_client_t ctl_cli;
 
@@ -85,6 +86,7 @@ esp_ble_mesh_client_t ctl_cli;
 static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_CFG_SRV(&config_server),
     ESP_BLE_MESH_MODEL_CFG_CLI(&config_client),
+    ESP_BLE_MESH_MODEL_LIGHT_LIGHTNESS_CLI(NULL, &lightness_cli),
     ESP_BLE_MESH_MODEL_LIGHT_HSL_CLI(NULL, &hsl_cli),
     ESP_BLE_MESH_MODEL_GEN_LEVEL_CLI(NULL, &level_client),
     ESP_BLE_MESH_MODEL_GEN_ONOFF_CLI(NULL, &onoff_client),
@@ -186,6 +188,7 @@ int decode_comp_data(esp_ble_mesh_composition_head *head, esp_ble_mesh_compositi
 
 void Bind_App_Key(esp_ble_mesh_node_info_t *node)
 {
+    ESP_LOGW(TAG, "-----Bind_App_Key-----");
     vTaskDelay(pdMS_TO_TICKS(500)); // Delay 500msw
 
     esp_ble_mesh_client_common_param_t common = {0};
@@ -246,7 +249,7 @@ void Bind_App_Key(esp_ble_mesh_node_info_t *node)
             ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
             return;
         }
-        ESP_LOGW(TAG, "[LIGHTNESS] Bound Gen Level model");
+        ESP_LOGW(TAG, "[Generic level] Bound Gen Level model");
     }
     else if (ShitShowAppKeyBind == 3)
     {
@@ -262,10 +265,67 @@ void Bind_App_Key(esp_ble_mesh_node_info_t *node)
         err = esp_ble_mesh_config_client_set_state(&common, &set_state);
         if (err)
         {
-            ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
+            ESP_LOGE(TAG, "%s: Config Model App (3) Bind failed", __func__);
             return;
         }
         ESP_LOGW(TAG, "[HSL] Bound Light HSL model");
+    }
+    else if (ShitShowAppKeyBind == 4)
+    {
+        // [Lightness]
+        ++ShitShowAppKeyBind;
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        common.ctx.addr = node->unicast;
+        set_state.model_app_bind.element_addr = node->unicast;
+        set_state.model_app_bind.model_app_idx = store.app_idx;
+        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV;
+        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
+            return;
+        }
+        ESP_LOGW(TAG, "[Lightness] Bound model");
+    }
+    else if (ShitShowAppKeyBind == 5)
+    {
+        // [CTl_temp]
+        ++ShitShowAppKeyBind;
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        common.ctx.addr = node->unicast;
+        set_state.model_app_bind.element_addr = node->unicast+1;
+        set_state.model_app_bind.model_app_idx = store.app_idx;
+        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
+        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
+            return;
+        }
+        ESP_LOGW(TAG, "[Light Ctl Temp Server] Bound model");
+    }
+    else if (ShitShowAppKeyBind == 6)
+    {
+        // [CTl_temp]
+        ++ShitShowAppKeyBind;
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        common.ctx.addr = node->unicast;
+        set_state.model_app_bind.element_addr = node->unicast;
+        set_state.model_app_bind.model_app_idx = store.app_idx;
+        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_SRV;
+        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
+            return;
+        }
+        ESP_LOGW(TAG, "[Light Ctl Server] Bound model");
     }
     else
     {
@@ -275,7 +335,7 @@ void Bind_App_Key(esp_ble_mesh_node_info_t *node)
 
 ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////
-static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
+static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                                               esp_ble_mesh_cfg_client_cb_param_t *param)
 {
     esp_ble_mesh_client_common_param_t common = {0};
@@ -440,7 +500,7 @@ static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t
                 return;
             }
 
-            mesh_example_info_store();
+            //mesh_example_info_store();
             break;
         }
         default:
@@ -453,7 +513,7 @@ static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t
     }
 }
 
-static void example_ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
+static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
                                                esp_ble_mesh_generic_client_cb_param_t *param)
 {
     // esp_ble_mesh_client_common_param_t common = {0};
@@ -608,6 +668,52 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 
         }
         break;
+
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET:
+        {
+            //auto bla = param->status_cb.hsl_range_status.hue_range_min;
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS hue_min=%u hue_max=%u sat_min=%u sat_max=%u", 
+                param->status_cb.hsl_range_status.hue_range_min, param->status_cb.hsl_range_status.hue_range_max,
+                param->status_cb.hsl_range_status.saturation_range_min, param->status_cb.hsl_range_status.saturation_range_max);
+        }
+        break;
+
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET:
+        {
+            //auto bla = param->status_cb.hsl_range_status.hue_range_min;
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET lightness_min=%u lightness_max=%u", 
+                param->status_cb.lightness_range_status.range_min, param->status_cb.lightness_range_status.range_max);
+        }
+        break;
+
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET:
+        {
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET temp=%u delta_uv=%u", 
+                param->status_cb.ctl_temperature_status.present_ctl_temperature, param->status_cb.ctl_temperature_status.present_ctl_delta_uv);
+        }
+        break;
+
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET:
+        {
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET range_min=%u range_max=%u", 
+                param->status_cb.ctl_temperature_range_status.range_min, param->status_cb.ctl_temperature_range_status.range_max);
+
+                node->min_temp = param->status_cb.ctl_temperature_range_status.range_min;
+                node->max_temp = param->status_cb.ctl_temperature_range_status.range_max;
+        }
+        break;
+
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET:
+        {
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET present_ctl_lightness=%u present_ctl_temperature=%u remain_time=%u target_ctl_lightness=%u target_ctl_temperature=%u", 
+                param->status_cb.ctl_status.present_ctl_lightness,
+                param->status_cb.ctl_status.present_ctl_temperature,
+                param->status_cb.ctl_status.remain_time,
+                param->status_cb.ctl_status.target_ctl_lightness,
+                param->status_cb.ctl_status.target_ctl_temperature);
+        }
+        break;
+
         default:
         break;
         }
@@ -617,7 +723,20 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
-        ESP_LOGI("LIGHT_CLI", "Set response: Error Code : %i", param->error_code);
+        ESP_LOGI("LIGHT_CLI", "Set state response: Error Code : %i", param->error_code);
+
+           switch (opcode)
+            {
+            case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET:
+            {
+                // node->hsl_h = param->status_cb.hsl_status.hsl_hue;
+                // node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
+                // node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
+                // ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s ,node->hsl_l);
+                ESP_LOGE(TAG, "YOUPEEEEEE");
+            }
+            break;
+            }
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT:
@@ -645,8 +764,8 @@ esp_err_t ble_mesh_init(void)
     memset(prov_key.app_key, APP_KEY_OCTET, sizeof(prov_key.app_key));
 
     esp_ble_mesh_register_prov_callback(example_ble_mesh_provisioning_cb);
-    esp_ble_mesh_register_config_client_callback(example_ble_mesh_config_client_cb);
-    esp_ble_mesh_register_generic_client_callback(example_ble_mesh_generic_client_cb);
+    esp_ble_mesh_register_config_client_callback(ble_mesh_config_client_cb);
+    esp_ble_mesh_register_generic_client_callback(ble_mesh_generic_client_cb);
     esp_ble_mesh_register_light_client_callback(ble_mesh_light_client_cb);
 
     err = esp_ble_mesh_init(&provision, &composition);
@@ -711,6 +830,16 @@ void RefreshNodes()
             ESP_LOGE(TAG, "%s: Generic light Get failed", __func__);
             return;
         }
+
+        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
+        common.ctx.addr = node_info->unicast;
+        err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
+        }
+
+
         ++node_count;
     });
 }
@@ -853,6 +982,26 @@ void SendLightCtl_Temp()
     // }
 }
 
+void ble_mesh_ctl_temperature_set(esp_ble_mesh_node_info_t *node_info)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+
+    example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+    common.ctx.addr = node_info->unicast + 1;
+    
+    set_state_light.ctl_temperature_set.ctl_temperature = node_info->curr_temp;
+    set_state_light.ctl_temperature_set.ctl_delta_uv = 0;
+    set_state_light.ctl_temperature_set.op_en = false;
+    set_state_light.ctl_temperature_set.delay = 0;
+    set_state_light.ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+    if (err)
+    {
+        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Get failed", __func__);
+    }
+}
+
 void SendHSL()
 {
     if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
@@ -928,3 +1077,181 @@ void SendGenericOnOffToggle()
 #pragma endregion LightControl
 
 
+
+int ble_mesh_hsl_range_get(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET);
+        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+int ble_mesh_lightness_range_get(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
+        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+int ble_mesh_ctl_temperature_get(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
+        common.ctx.addr = node_info->unicast + 1;
+        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
+        common.ctx.addr = node_info->unicast;// + 1;
+        //common.ctx .ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+int ble_mesh_ctl_get(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
+        //common.ctx.addr = node_info->unicast + 1;
+        //common.ctx .ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+static uint16_t temp = 2700;
+
+int ble_mesh_ctl_temperature_set(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+        common.ctx.addr = node_info->unicast + 1;
+
+        temp += (6500-2000)/6;
+        if (temp > 6500)
+        {
+            temp = 2000;
+        }
+        
+        set_state_light.ctl_temperature_set.ctl_temperature = temp;
+        set_state_light.ctl_temperature_set.ctl_delta_uv = 0;
+        set_state_light.ctl_temperature_set.op_en = false;
+        set_state_light.ctl_temperature_set.delay = 0;
+        set_state_light.ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+        int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Get failed", __func__);
+        }
+    }
+    return 0;
+}
+
+
+void RegisterBleMeshDebugCommands()
+{
+    /* Register commands */
+
+    const esp_console_cmd_t ble_mesh_hsl_range_get_cmd = {
+        .command = "ble_mesh_hsl_range_get",
+        .help = "Light HSL Range Get",
+        .hint = NULL,
+        .func = &ble_mesh_hsl_range_get,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_hsl_range_get_cmd));
+
+    const esp_console_cmd_t ble_mesh_lightness_range_get_cmd = {
+        .command = "ble_mesh_lightness_range_get",
+        .help = "Lightness Range Get",
+        .hint = NULL,
+        .func = &ble_mesh_lightness_range_get,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_lightness_range_get_cmd));
+
+    const esp_console_cmd_t ble_mesh_ctl_temperature_get_cmd = {
+        .command = "ble_mesh_ctl_temperature_get",
+        .help = "Clt Temperature Get",
+        .hint = NULL,
+        .func = &ble_mesh_ctl_temperature_get,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_get_cmd));
+
+    const esp_console_cmd_t ble_mesh_ctl_temperature_range_get_cmd = {
+        .command = "ble_mesh_ctl_temperature_range_get",
+        .help = "Ctl temperature Range Get",
+        .hint = NULL,
+        .func = &ble_mesh_ctl_temperature_range_get,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_range_get_cmd));
+
+
+    const esp_console_cmd_t ble_mesh_ctl_get_cmd = {
+        .command = "ble_mesh_ctl_get",
+        .help = "Ctl  Get",
+        .hint = NULL,
+        .func = &ble_mesh_ctl_get,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_get_cmd));
+
+    const esp_console_cmd_t ble_mesh_ctl_temperature_set_cmd = {
+        .command = "ble_mesh_ctl_temperature_set",
+        .help = "Ctl temperature Set",
+        .hint = NULL,
+        .func = &ble_mesh_ctl_temperature_set,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_set_cmd));
+
+}

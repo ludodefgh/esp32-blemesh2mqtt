@@ -33,6 +33,9 @@ typedef struct
     uint16_t hsl_h;
     uint16_t hsl_s;
     uint16_t hsl_l;
+    uint16_t min_temp;
+    uint16_t max_temp;
+    uint16_t curr_temp;
     uint8_t elem_num;
     uint8_t onoff;
     int16_t level;
