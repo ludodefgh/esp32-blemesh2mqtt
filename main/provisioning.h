@@ -18,15 +18,6 @@
 //     .tid = 0x0,
 // };
 
-
-__attribute__((packed))  struct example_info_store
-{
-    uint16_t net_idx; /* NetKey Index */
-    uint16_t app_idx; /* AppKey Index */
-    uint8_t onoff;    /* Remote OnOff */
-    uint8_t tid;      /* Message TID */
-};
-
 esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
                                uint16_t unicast, uint8_t elem_num, uint16_t net_idx);
 
