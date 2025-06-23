@@ -20,8 +20,6 @@
 #include "esp_console.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
 
 #include "nodesManager.h"
 #include "provisioning.h"
@@ -43,7 +41,7 @@ static nvs_handle_t NVS_HANDLE;
 static const char *NVS_KEY = "onoff_client";
 bool init_done = true;
 
-static int ShitShowAppKeyBind = 0;
+int ShitShowAppKeyBind = 0;
 extern struct example_info_store store;
 
 static void mesh_example_info_store(void)
@@ -490,12 +488,10 @@ static void example_ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_ev
         {
         case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET:
         {
-#if defined(APP_USE_ONOFF_CLIENT)
             // esp_ble_mesh_generic_client_set_state_t set_state = {0};
             node->onoff = param->status_cb.onoff_status.present_onoff;
             ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET onoff: 0x%02x", node->onoff);
 
-#endif
         }
         break;
 
@@ -574,9 +570,49 @@ static void example_ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_ev
 void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                               esp_ble_mesh_light_client_cb_param_t *param)
 {
+    esp_ble_mesh_node_info_t *node = NULL;
+    uint32_t opcode;
+    uint16_t addr;
+    // int err;
+
+    opcode = param->params->opcode;
+    addr = param->params->ctx.addr;
+
+    ESP_LOGI(TAG, "%s, error_code = 0x%02x, event = 0x%02x, addr: 0x%04x, opcode: 0x%04" PRIx32,
+             __func__, param->error_code, event, param->params->ctx.addr, opcode);
+
+    if (param->error_code)
+    {
+        ESP_LOGE(TAG, "Send light client message failed, opcode 0x%04" PRIx32, opcode);
+        return;
+    }
+
+    node = example_ble_mesh_get_node_info(addr);
+    if (!node)
+    {
+        ESP_LOGE(TAG, "%s: Get node info failed", __func__);
+        return;
+    }
+
     switch (event)
     {
     case ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT:
+     switch (opcode)
+        {
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET:
+        {
+            node->hsl_h = param->status_cb.hsl_status.hsl_hue;
+            node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
+            node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
+            ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s ,node->hsl_l);
+
+        }
+        break;
+        default:
+        break;
+        }
+
+
         ESP_LOGI("LIGHT_CLI", "Get response: ");
         break;
 
@@ -643,29 +679,41 @@ esp_err_t ble_mesh_init(void)
 
     ESP_LOGI(TAG, "BLE Mesh Provisioner initialized");
 
-    const uint8_t Bulduuid[16] = {0xF4, 0xA2, 0x56, 0x8B, 0x1E, 0x42, 0x4A, 0xF0, 0xA0, 0xB9, 0x39, 0x8B, 0x0E, 0x5E, 0xFE, 0x82};
-    // esp_ble_mesh_bd_addr_t addr = {0xb0, 0xce, 0x18, 0xa8, 0xae, 0x87};
-    // esp_ble_mesh_addr_type_t addr_type = 0;
-    // esp_ble_mesh_prov_bearer_t bearer = (esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_GATT);
-    // uint16_t oob_info = 2;
-    uint16_t unicast_addr = 0x05;
-    // int err2 = esp_ble_mesh_provisioner_prov_device_with_addr(Bulduuid, addr, addr_type, bearer, oob_info,unicast_addr);
-    // if (err2 != ESP_OK)
-    // {
-    //    ESP_LOGE(TAG, "Failed to pre-provision ? (err %d)", err);
-    // }
-    // else
-    {
-        memcpy(GetNode(0)->uuid, Bulduuid, 16);
-        GetNode(0)->unicast = unicast_addr;
-        GetNode(0)->elem_num = 4;
-        GetNode(0)->onoff = 1;
-    }
 
     return err;
 }
 
+void RefreshNodes()
+{
+    uint16_t node_count = 0;
+    for_each_provisioned_node([&node_count](const esp_ble_mesh_node_t * node)
+    {
+        esp_ble_mesh_node_info_t* node_info = GetNode(node_count);
+        
+        memcpy(node_info->uuid, node->dev_uuid, 16);
+        node_info->unicast = node->unicast_addr;
+        node_info->elem_num = node->element_num;
 
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_generic_client_get_state_t get_state = {0};
+        example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
+        int err = esp_ble_mesh_generic_client_get_state(&common, &get_state);
+        if (err) {
+            ESP_LOGE(TAG, "%s: Generic OnOff Get failed", __func__);
+            return;
+        }
+
+
+        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
+        esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+        if (err) {
+            ESP_LOGE(TAG, "%s: Generic light Get failed", __func__);
+            return;
+        }
+        ++node_count;
+    });
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // LightControl
@@ -880,21 +928,3 @@ void SendGenericOnOffToggle()
 #pragma endregion LightControl
 
 
-int unprovision(int argc, char **argv)
-{
-    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    {
-        esp_ble_mesh_node_info_t *node = GetNode(0);
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
-
-        ShitShowAppKeyBind = 0;
-        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node->uuid, 16));
-        }
-    }
-    return 0;
-}

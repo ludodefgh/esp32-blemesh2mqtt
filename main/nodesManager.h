@@ -18,8 +18,6 @@
 #include "esp_ble_mesh_lighting_model_api.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
 
 #include "esp_ble_mesh_defs.h"
 

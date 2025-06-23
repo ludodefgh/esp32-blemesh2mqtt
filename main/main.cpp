@@ -10,17 +10,9 @@
 #include "freertos/task.h"
 #include "freertos/timers.h"
 #include "esp_ble_mesh_defs.h"
-#include "esp_ble_mesh_common_api.h"
-#include "esp_ble_mesh_provisioning_api.h"
-#include "esp_ble_mesh_networking_api.h"
-#include "esp_ble_mesh_config_model_api.h"
-#include "esp_ble_mesh_generic_model_api.h"
-#include "esp_ble_mesh_lighting_model_api.h"
 #include "esp_console.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
 
 //// MQTT includes start
 #include "esp_event.h"
@@ -41,17 +33,13 @@
 
 #define TAG "EXAMPLE"
 
-
-
-static int16_t NormalizedLevelValue = 0;
-static int16_t LastRaw = 0;
+// static int16_t NormalizedLevelValue = 0;
+// static int16_t LastRaw = 0;
 extern bool init_done;
 
 /// @brief Provisioning stuff
 
 static nvs_handle_t NVS_HANDLE;
-
-
 
 extern void wifi_init_sta(void);
 
@@ -61,7 +49,6 @@ static int heap_size(int argc, char **argv)
     ESP_LOGI(TAG, "min heap size: %" PRIu32, heap_size);
     return 0;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // MQTT Setup
@@ -103,9 +90,37 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
     .disconnect_reason = 0,
 };
 
-//FWD
+// FWD
 void ReadJsonResponse(const char *input);
-const char *CommandTopic = "homeassistant/light/light01/set";
+
+
+std::string get_command_topic(esp_ble_mesh_node_info_t* node_info)
+{
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    {
+        char buf[64] = {0};
+        snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
+
+        const std::string root_publish = "blemesh2mqtt/" + std::string{buf} + "/set";
+
+        return root_publish;
+    }
+    return {};
+}
+
+std::string get_discovery_id(esp_ble_mesh_node_info_t* node_info)
+{
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    {
+        char buf[64] = {0};
+        snprintf(buf, sizeof(buf), "homeassistant/light/blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
+
+        std::string uniq_id = std::string{buf} + "_light/config";
+
+        return uniq_id;
+    }
+    return {};
+}
 
 /*
  * @brief Event handler registered to receive MQTT events
@@ -130,11 +145,14 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         esp_mqtt5_client_set_publish_property(client, &publish_property);
-       // msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 1);
-       // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        // msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 1);
+        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
 
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
-        msg_id = esp_mqtt_client_subscribe(client, CommandTopic, 0);
+        if (esp_ble_mesh_node_info_t* node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+        {
+            msg_id = esp_mqtt_client_subscribe(client, get_command_topic(node_info).c_str(), 0);
+        }
         ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
         // esp_mqtt5_client_set_unsubscribe_property(client, &unsubscribe_property);
@@ -148,8 +166,8 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         break;
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        //esp_mqtt5_client_set_publish_property(client, &publish_property);
-        //msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
+        // esp_mqtt5_client_set_publish_property(client, &publish_property);
+        // msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
@@ -164,10 +182,10 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         break;
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        ESP_LOGI(TAG, "payload_format_indicator is %d", event->property->payload_format_indicator);
-        ESP_LOGI(TAG, "response_topic is %.*s", event->property->response_topic_len, event->property->response_topic);
-        ESP_LOGI(TAG, "correlation_data is %.*s", event->property->correlation_data_len, event->property->correlation_data);
-        ESP_LOGI(TAG, "content_type is %.*s", event->property->content_type_len, event->property->content_type);
+        // ESP_LOGI(TAG, "payload_format_indicator is %d", event->property->payload_format_indicator);
+        // ESP_LOGI(TAG, "response_topic is %.*s", event->property->response_topic_len, event->property->response_topic);
+        // ESP_LOGI(TAG, "correlation_data is %.*s", event->property->correlation_data_len, event->property->correlation_data);
+        // ESP_LOGI(TAG, "content_type is %.*s", event->property->content_type_len, event->property->content_type);
         ESP_LOGI(TAG, "TOPIC=%.*s", event->topic_len, event->topic);
         ESP_LOGI(TAG, "DATA=%.*s", event->data_len, event->data);
 
@@ -212,7 +230,7 @@ static void mqtt5_app_start(void)
 
     esp_mqtt_client_config_t mqtt5_cfg{}; // = {
 
-    mqtt5_cfg.broker.address.hostname = "192.168.2.194";//CONFIG_BROKER_URL;
+    mqtt5_cfg.broker.address.hostname = "192.168.2.194"; // CONFIG_BROKER_URL;
     mqtt5_cfg.broker.address.transport = esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_TCP;
     mqtt5_cfg.broker.address.port = 1883;
     mqtt5_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;
@@ -240,20 +258,16 @@ static void mqtt5_app_start(void)
 // MQTT messages
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma region MQttMessages
-// Discovery
-const char *object_id = "light01";
-const char *DiscoveryTopic = "homeassistant/light/light01/config";
-const char *StateTopic = "homeassistant/light/light01/state";
 
 namespace std
 {
-    template< >
+    template <>
     struct default_delete<cJSON>
     {
-    void operator()( cJSON* ptr ) const
-    {
-        cJSON_Delete(ptr);
-    }
+        void operator()(cJSON *ptr) const
+        {
+            cJSON_Delete(ptr);
+        }
     };
 }
 
@@ -261,56 +275,74 @@ namespace std
 
 To remove the component, publish an empty string to the discovery topic. This will remove the component and clear the published discovery payload. It will also remove the device entry if there are no further references to it.
 */
-std::unique_ptr<cJSON> make_discovery_message()
+std::unique_ptr<cJSON> make_discovery_message(esp_ble_mesh_node_info_t *node)
 {
     cJSON *root = cJSON_CreateObject();
-    //   cJSON_AddItemToObject(root, "dev", dev=cJSON_CreateObject());
-    //   cJSON_AddItemToObject(root, "o", origin=cJSON_CreateObject());
 
-    cJSON_AddItemToObject(root, "~", cJSON_CreateString("homeassistant/light/light01"));
-    // cJSON_AddItemToObject(root, "name", cJSON_CreateString("light01"));
-    cJSON_AddItemToObject(root, "name", cJSON_CreateString("light01"));
-    cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString("light01uid"));
-    cJSON_AddItemToObject(root, "cmd_t", cJSON_CreateString("~/set"));
-    cJSON_AddItemToObject(root, "stat_t", cJSON_CreateString("~/state"));
-    cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
-    cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
-    cJSON_AddItemToObject(root, "sup_clrm", cJSON_CreateString("hs"));
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid))
+    {
+        char buf[64] = {0};
+        snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
 
-    // cJSON_AddItemToObject(dev, "name", cJSON_CreateString("livingroom light"));
-    // cJSON_AddItemToObject(dev, "ids", cJSON_CreateString("012345789"));
-    // cJSON_AddItemToObject(origin, "name", cJSON_CreateString("blemesh2mqtt"));
-    // cJSON_AddItemToObject(origin, "sw", cJSON_CreateString("0.1"));
+        // Set Device section
+        {
+            cJSON *dev = nullptr;
+            cJSON_AddItemToObject(root, "dev", dev = cJSON_CreateObject());
+            if (dev != nullptr)
+            {
+                cJSON_AddItemToObject(dev, "name", cJSON_CreateString("light"));
+                cJSON_AddItemToObject(dev, "ids", cJSON_CreateString(buf));
+            }
+        }
 
-    // DONT FORGET DELETE
-    // cJSON_Delete(root);
+        // set origin section
+        {
+            cJSON *origin = nullptr;
+            cJSON_AddItemToObject(root, "o", origin = cJSON_CreateObject());
+            if (origin)
+            {
+                cJSON_AddItemToObject(origin, "name", cJSON_CreateString("blemesh2mqtt"));
+                cJSON_AddItemToObject(origin, "sw", cJSON_CreateString("0.0.1"));
+            }
+        }
 
-    //return root;
-    //return cJsonUniquePtr{cJSON_CreateObject(), cJSON_Delete};
+        const std::string root_publish = "blemesh2mqtt/" + std::string{buf};
+        cJSON_AddItemToObject(root, "~", cJSON_CreateString(root_publish.c_str()));
+        cJSON_AddItemToObject(root, "name", cJSON_CreateNull());
+        const std::string uniq_id = std::string{buf} + "_light";
+        cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
+        cJSON_AddItemToObject(root, "cmd_t", cJSON_CreateString("~/set"));
+        cJSON_AddItemToObject(root, "stat_t", cJSON_CreateString("~/state"));
+        cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
+        cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
+        cJSON_AddItemToObject(root, "sup_clrm", cJSON_CreateString("hs"));
+    }
+
     return std::unique_ptr<cJSON>{root};
 }
 
-std::unique_ptr<cJSON>  make_status_message()
+std::unique_ptr<cJSON> make_status_message(esp_ble_mesh_node_info_t* node_info)
 {
     cJSON *root, *color;
     root = cJSON_CreateObject();
 
-    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        cJSON_AddNumberToObject(root, "brightness", (uint16_t)map(GetNode(0)->hsl_l, 0,32767, 0, 255));
+        cJSON_AddNumberToObject(root, "brightness", (uint16_t)map(node_info->hsl_l, 0, 32767, 0, 255));
         cJSON_AddStringToObject(root, "color_mode", "hs");
-        cJSON_AddStringToObject(root, "state", GetNode(0)->onoff ? "ON" : "OFF");
+        cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
 
         cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
 
-        cJSON_AddNumberToObject(color, "h", (uint16_t)map(GetNode(0)->hsl_h, 0,65535, 0, 360));
-        cJSON_AddNumberToObject(color, "s", (uint16_t)map(GetNode(0)->hsl_s, 0,65535, 0, 100));
+        cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, 0, 65535, 0, 360));
+        cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, 0, 65535, 0, 100));
     }
 
-    return std::unique_ptr<cJSON>{root};;
+    return std::unique_ptr<cJSON>{root};
+    ;
 }
 
-//FWD
+// FWD
 int send_status(int argc, char **argv);
 
 void ReadJsonResponse(const char *input)
@@ -325,7 +357,7 @@ void ReadJsonResponse(const char *input)
                 {
                     if (strcmp(name->valuestring, "ON") == 0)
                     {
-                         ESP_LOGI(TAG, "SendGenericOnOff(true)");
+                        ESP_LOGI(TAG, "SendGenericOnOff(true)");
                         SendGenericOnOff(true);
                     }
                     else if (strcmp(name->valuestring, "OFF") == 0)
@@ -373,42 +405,69 @@ void ReadJsonResponse(const char *input)
                 {
                     SendHSL();
                 }
-                
             }
             cJSON_Delete(response);
         }
 
-        send_status(0,nullptr);
+        send_status(0, nullptr);
     }
 }
 
 int send_discovery(int argc, char **argv)
 {
-    std::unique_ptr<cJSON> discovery_message = make_discovery_message();
-    char* json_data = cJSON_PrintUnformatted(discovery_message.get());
-    int msg_id = 0;
-    msg_id = esp_mqtt_client_publish(mqtt_client, DiscoveryTopic, json_data, 0, 0, 0);
-    ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+    if (esp_ble_mesh_node_info_t* node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        std::unique_ptr<cJSON> discovery_message = make_discovery_message(GetNode(0));
+        char *json_data = cJSON_PrintUnformatted(discovery_message.get());
+        int msg_id = 0;
+        msg_id = esp_mqtt_client_publish(mqtt_client, get_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
 
-    cJSON_free(json_data);
+        cJSON_free(json_data);
+    }
+
+    return 0;
+}
+
+int delete_entity(int argc, char **argv)
+{
+    if (esp_ble_mesh_node_info_t* node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        const char *json_data = "";
+        int msg_id = 0;
+        msg_id = esp_mqtt_client_publish(mqtt_client, get_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+    }
+
     return 0;
 }
 
 int send_status(int argc, char **argv)
 {
-    std::unique_ptr<cJSON> status_message = make_status_message();
-    char* json_data = cJSON_PrintUnformatted(status_message.get());
-    int msg_id = 0;
-    msg_id = esp_mqtt_client_publish(mqtt_client, StateTopic, json_data, 0, 0, 0);
-    ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
+    if (esp_ble_mesh_node_info_t* node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+        {
+            char buf[64] = {0};
+            snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
+            const std::string root_publish = "blemesh2mqtt/" + std::string{buf} + "/state";
 
-    cJSON_free(json_data);
+            std::unique_ptr<cJSON> status_message = make_status_message(node_info);
+            char *json_data = cJSON_PrintUnformatted(status_message.get());
+            int msg_id = 0;
+
+            msg_id = esp_mqtt_client_publish(mqtt_client, root_publish.c_str(), json_data, 0, 0, 0);
+            ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
+
+            cJSON_free(json_data);
+        }
+        
+    }
 
     return 0;
 }
 
 #pragma endregion MQttMessages
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // DEBUG
@@ -420,8 +479,6 @@ static int toggle_on_off(int argc, char **argv)
     SendGenericOnOffToggle();
     return 0;
 }
-
-
 
 void RegisterDebugCommands()
 {
@@ -449,46 +506,34 @@ void RegisterDebugCommands()
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&toggleLight_cmd));
 
-    const esp_console_cmd_t unprovision_cmd = {
-        .command = "unprovision",
-        .help = "unprovisionned paired nodes",
-        .hint = NULL,
-        .func = &unprovision,
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&unprovision_cmd));
-
     const esp_console_cmd_t discovery_cmd = {
-        .command = "discovery",
-        .help = "send discovery message",
+        .command = "mqtt_discovery",
+        .help = "[MQTT] send discovery message",
         .hint = NULL,
         .func = &send_discovery,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&discovery_cmd));
 
+    const esp_console_cmd_t delete_entity_cmd = {
+        .command = "mqtt_delete",
+        .help = "[MQTT] delete entity",
+        .hint = NULL,
+        .func = &delete_entity,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&delete_entity_cmd));
 
     const esp_console_cmd_t mqtt_status_cmd = {
-        .command = "status",
-        .help = "send status message",
+        .command = "mqtt_status",
+        .help = "[MQTT] send status message",
         .hint = NULL,
         .func = &send_status,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&mqtt_status_cmd));
 
-    // printf("\n ==================================================\n");
-    // printf(" |       Steps to test WiFi throughput            |\n");
-    // printf(" |                                                |\n");
-    // printf(" |  1. Print 'help' to gain overview of commands  |\n");
-    // printf(" |  2. Configure device to station or soft-AP     |\n");
-    // printf(" |  3. Setup WiFi connection                      |\n");
-    // printf(" |  4. Run iperf to test UDP/TCP RX/TX throughput |\n");
-    // printf(" |                                                |\n");
-    // printf(" =================================================\n\n");
-
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 #pragma endregion Debug
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Main
@@ -523,7 +568,9 @@ extern "C" void app_main()
         return;
     }
 
+    RegisterDebugCommands();
 
+    RegisterProvisioningDebugCommands();
 
     /* Initialize the Bluetooth Mesh Subsystem */
     err = ble_mesh_init();
@@ -542,8 +589,11 @@ extern "C" void app_main()
     // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
+#if defined(DEBUG_USE_GPIO)
     initDebugGPIO();
-    RegisterDebugCommands();
+#endif
+
+    RefreshNodes();
 
     /// MQTT START
     esp_log_level_set("*", ESP_LOG_INFO);

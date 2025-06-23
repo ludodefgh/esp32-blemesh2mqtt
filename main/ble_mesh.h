@@ -7,5 +7,5 @@ void SendGenericOnOff(bool value);
 void SendGenericOnOffToggle();
 void SendHSL();
 
-int unprovision(int argc, char **argv);
 esp_err_t ble_mesh_init(void);
+void RefreshNodes();

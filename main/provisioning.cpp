@@ -12,10 +12,6 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/timers.h"
-
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
@@ -23,6 +19,8 @@
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_console.h"
+#include "esp_mac.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 #include "esp_ble_mesh_local_data_operation_api.h"
@@ -85,8 +83,8 @@ void process_composition_data(esp_ble_mesh_cfg_client_cb_param_t *param)
     const esp_ble_mesh_comp_t *comp = esp_ble_mesh_get_composition_data();
     
     esp_ble_mesh_elem_t *element = NULL;
-    esp_ble_mesh_model_t *model = NULL;
-    int i, j;
+    ///esp_ble_mesh_model_t *model = NULL;
+    int i;
 
     if (!comp) {
         return;
@@ -321,4 +319,80 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     }
 
     return;
+}
+
+void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func)
+{
+    uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
+
+    for (int i = 0; i < node_count; i++)
+    {
+        const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
+        if (node != NULL)
+        {
+          func(node);
+        }
+    }
+}
+
+int list_provisioned_nodes(int argc, char **argv)
+{
+    uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
+    ESP_LOGI(TAG, "Provisioned nodes: %d", node_count);
+
+    for_each_provisioned_node([](const esp_ble_mesh_node_t * node)
+    {
+            ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
+            ESP_LOGI(TAG, "  device name: %s", node->name);
+            ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
+            ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
+            ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
+            ESP_LOGI(TAG, "  NetKey Index: %d", node->net_idx);
+
+    });
+
+    return 0;
+}
+
+extern int ShitShowAppKeyBind;
+int unprovision(int argc, char **argv)
+{
+    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_node_info_t *node = GetNode(0);
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+
+        ShitShowAppKeyBind = 0;
+        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node->uuid, 16));
+        }
+    }
+    return 0;
+}
+
+void RegisterProvisioningDebugCommands()
+{
+    /* Register commands */
+
+    const esp_console_cmd_t list_prov_nodes_cmd = {
+        .command = "prov_list_nodes",
+        .help = "List provisioned nodes",
+        .hint = NULL,
+        .func = &list_provisioned_nodes,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&list_prov_nodes_cmd));
+
+
+    const esp_console_cmd_t unprovision_cmd = {
+        .command = "prov_unprovision_all_nodes",
+        .help = "Unprovisionned all paired nodes",
+        .hint = NULL,
+        .func = &unprovision,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&unprovision_cmd));
+
 }
