@@ -1,13 +1,14 @@
-#include "provisioning.h"
+#include "ble_mesh_provisioning.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
-#include <stdio.h>
-#include <string.h>
-#include <inttypes.h>
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -15,27 +16,19 @@
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
-#include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
 #include "esp_console.h"
 #include "esp_mac.h"
-#include "ble_mesh_example_nvs.h"
-#include "ble_mesh_example_init.h"
 #include "esp_ble_mesh_local_data_operation_api.h"
 
-#include "modelsConfig.h"
-#include "nodesManager.h"
+#include "ble_mesh_node.h"
 
-#define TAG "Provisioning"
+#define TAG "APP_PROV"
 
  extern esp_ble_mesh_client_t config_client;
-// extern esp_ble_mesh_client_t onoff_client;
-// extern esp_ble_mesh_client_t level_client;
-// extern esp_ble_mesh_client_t lightness_cli;
-// extern esp_ble_mesh_client_t hue_cli;
-// extern esp_ble_mesh_client_t saturation_cli;
+
 
 struct example_info_store store = {
     .net_idx = ESP_BLE_MESH_KEY_UNUSED,

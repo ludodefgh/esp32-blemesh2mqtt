@@ -1,4 +1,4 @@
-#include "ble_mesh.h"
+#include "ble_mesh_control.h"
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
@@ -7,9 +7,6 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/timers.h"
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
@@ -21,10 +18,10 @@
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 
-#include "nodesManager.h"
-#include "provisioning.h"
+#include "ble_mesh_node.h"
+#include "ble_mesh_provisioning.h"
 
-#define TAG "APP_BLE_MESH"
+#define TAG "APP_CONTROL"
 
 #define CID_ESP 0x02E5
 
@@ -854,136 +851,32 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-enum ModeType
+void ble_mesh_ctl_set(esp_ble_mesh_node_info_t *node_info)
 {
-    BRIGHTNESS,
-    //  LIGHT_CTL,
-    //  LIGHT_CTL_TEMP,
-    TEMPERATURE,
-    HUE_H,
-    HUE_S,
-    HUE_L,
-    MAX_VALUE
-};
+    node_info->color_mode = color_mode_t::color_temp;
 
-enum ModeType CurrentModeType = BRIGHTNESS;
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-static const char *ModeName[] = {"BRIGHTNESS", "TEMPERATURE", "HUE_H", "HUE_S", "HUE_L", "Light HSL Hue Server",
-                                 "Light HSL Saturation Server"};
-void NextMode()
-{
-    CurrentModeType = (ModeType)(CurrentModeType + 1);
-    if (CurrentModeType == MAX_VALUE)
+    example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
+    
+    set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
+    set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
+    set_state_light.ctl_set.ctl_delta_uv = 0;
+    set_state_light.ctl_set.op_en = false;
+    set_state_light.ctl_set.delay = 0;
+    set_state_light.ctl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+    if (err)
     {
-        CurrentModeType = (ModeType)0;
+        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET Set failed", __func__);
     }
-
-    ESP_LOGW(TAG, "%s: %d : %s", __func__, CurrentModeType, ModeName[CurrentModeType]);
-}
-
-void SendBrightness()
-{
-    // if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    // {
-    //     ESP_LOGI(TAG, "Sending brightness level : %d", LastRaw);
-    //     esp_ble_mesh_node_info_t *node = GetNode(0);
-    //     esp_ble_mesh_client_common_param_t common = {};
-    //     esp_ble_mesh_generic_client_set_state_t set_state = {};
-
-    //     // node->level = (int16_t)map(LastRaw, 0, 4095, -32768, 32767);
-
-    //     example_ble_mesh_set_msg_common(&common, node, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
-    //     set_state.level_set.level = node->level;
-    //     set_state.level_set.op_en = false;
-    //     set_state.level_set.delay = 0;
-    //     set_state.level_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-    //     int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-    //     if (err)
-    //     {
-    //         ESP_LOGE(TAG, "%s: [BRIGHTNESS] : Set failed : %i", __func__, err);
-    //         return;
-    //     }
-    // }
-}
-
-void SendTemperature()
-{
-    // if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    // {
-    //     ESP_LOGI(TAG, "Sending temperature level : %d", LastRaw);
-    //     esp_ble_mesh_node_info_t *node = GetNode(0);
-    //     esp_ble_mesh_client_common_param_t common = {0};
-    //     esp_ble_mesh_generic_client_set_state_t set_state = {0};
-
-    //     example_ble_mesh_set_msg_common(&common, node, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
-    //     common.ctx.addr = node->unicast + 1;
-    //     set_state.level_set.level = (int16_t)map(LastRaw, 0, 4095, -32768, 32767);
-    //     set_state.level_set.op_en = false;
-    //     set_state.level_set.delay = 0;
-    //     set_state.level_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-    //     int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-    //     if (err)
-    //     {
-    //         ESP_LOGE(TAG, "%s: [TEMPERATURE] : Set failed : %i", __func__, err);
-    //         return;
-    //     }
-    // }
-}
-
-void SendLightCtl()
-{
-    // if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    // {
-    //     //ESP_LOGI(TAG, "Sending LightCtl level : %d", LastRaw);
-    //     esp_ble_mesh_node_info_t *node = GetNode(0);
-    //     esp_ble_mesh_client_common_param_t common = {0};
-    //     esp_ble_mesh_light_client_set_state_t set_state = {0};
-
-    //     example_ble_mesh_set_msg_common(&common, node, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
-    //     // common.ctx.addr +=1;// +=3;
-    //     set_state.ctl_set.ctl_temperature = (uint16_t)map(LastRaw, 0, 4095, 0, 65535);
-    //     set_state.ctl_set.ctl_lightness = 16000;
-    //     set_state.ctl_set.ctl_delta_uv = 256;
-    //     set_state.ctl_set.op_en = false;
-    //     set_state.ctl_set.delay = 0;
-    //     set_state.ctl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-    //     int err = esp_ble_mesh_light_client_set_state(&common, &set_state);
-    //     if (err)
-    //     {
-    //         ESP_LOGE(TAG, "%s: [LIGHT_CTL] Set failed", __func__);
-    //         return;
-    //     }
-    // }
-}
-
-void SendLightCtl_Temp()
-{
-    // if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    // {
-    //     ESP_LOGI(TAG, "Sending LIghtCtl level : %d", LastRaw);
-    //     esp_ble_mesh_node_info_t *node = GetNode(0);
-    //     esp_ble_mesh_client_common_param_t common = {0};
-    //     esp_ble_mesh_light_client_set_state_t set_state = {0};
-
-    //     example_ble_mesh_set_msg_common(&common, node, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET);
-    //     common.ctx.addr += 1; // +=3;
-    //     set_state.ctl_temperature_set.ctl_temperature = (uint16_t)map(LastRaw, 0, 4095, 0, 65535);
-    //     // set_state.ctl_temperature_set.ctl_lightness = 32000;
-    //     set_state.ctl_temperature_set.ctl_delta_uv = 256;
-    //     set_state.ctl_temperature_set.op_en = false;
-    //     set_state.ctl_temperature_set.delay = 0;
-    //     set_state.ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-    //     int err = esp_ble_mesh_light_client_set_state(&common, &set_state);
-    //     if (err)
-    //     {
-    //         ESP_LOGE(TAG, "%s: [LIGHT_CTL] debounce_timer_callback : Set failed", __func__);
-    //         return;
-    //     }
-    // }
 }
 
 void ble_mesh_ctl_temperature_set(esp_ble_mesh_node_info_t *node_info)
 {
+    node_info->color_mode = color_mode_t::color_temp;
+
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
@@ -998,7 +891,7 @@ void ble_mesh_ctl_temperature_set(esp_ble_mesh_node_info_t *node_info)
     int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Get failed", __func__);
+        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Set failed", __func__);
     }
 }
 
@@ -1012,23 +905,7 @@ void SendHSL()
 
         example_ble_mesh_set_msg_common(&common, node, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
-        // if (Mode == HUE_H)
-        // {
-        //     uint16_t filteredValue = (uint16_t)map(LastRaw, 0, 4095, 0, 65535);
-        //     node->hsl_h = filteredValue;
-        // }
-        // if (Mode == HUE_S)
-        // {
-        //     uint16_t filteredValue = (uint16_t)map(LastRaw, 0, 4095, 0, 65535);
-        //     node->hsl_s = filteredValue;
-        // }
-
-        // if (Mode == HUE_L)
-        // {
-        //     uint16_t filteredValue = (uint16_t)map(LastRaw, 0, 4095, 0, 65535);
-        //     node->hsl_l = filteredValue;
-       // }
-        ESP_LOGE(TAG, "h=%i s=%i l=%i", node->hsl_h, node->hsl_s, node->hsl_l);
+        node->color_mode = color_mode_t::hs;
         set_state.hsl_set.hsl_hue = node->hsl_h;
         set_state.hsl_set.hsl_saturation = node->hsl_s;
         set_state.hsl_set.hsl_lightness = node->hsl_l;
@@ -1065,13 +942,6 @@ void SendGenericOnOff(bool value)
             return;
         }
     }
-}
-void SendGenericOnOffToggle()
-{
-    //  if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    // {
-    //     SendGenericOnOff(!GetNode(0)->onoff);
-    // }
 }
 
 #pragma endregion LightControl
@@ -1157,8 +1027,6 @@ int ble_mesh_ctl_get(int argc, char **argv)
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
         example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
-        //common.ctx.addr = node_info->unicast + 1;
-        //common.ctx .ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
@@ -1190,7 +1058,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         set_state_light.ctl_temperature_set.ctl_delta_uv = 0;
         set_state_light.ctl_temperature_set.op_en = false;
         set_state_light.ctl_temperature_set.delay = 0;
-        set_state_light.ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+        set_state_light.ctl_temperature_set.tid = store.tid++;
         int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
         if (err)
         {

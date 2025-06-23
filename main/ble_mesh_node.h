@@ -26,6 +26,12 @@
 #define MSG_SEND_TTL 3
 #define MSG_TIMEOUT 4000
 
+enum class color_mode_t : uint8_t
+{
+    hs,
+    color_temp,
+};
+
 typedef struct
 {
     uint8_t uuid[16];
@@ -39,6 +45,8 @@ typedef struct
     uint8_t elem_num;
     uint8_t onoff;
     int16_t level;
+    color_mode_t color_mode = color_mode_t::hs;
+
 } esp_ble_mesh_node_info_t;
 
 esp_ble_mesh_node_info_t* GetNode(int nodeIndex);

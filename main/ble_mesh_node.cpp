@@ -1,12 +1,8 @@
-#include "nodesManager.h"
+#include "ble_mesh_node.h"
 #include <inttypes.h>
 
 #include "esp_log.h"
 #include "nvs_flash.h"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/timers.h"
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
@@ -18,10 +14,9 @@
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 
-#include "provisioning.h"
+#include "ble_mesh_provisioning.h"
 
-
-#define TAG "NodesManager"
+#define TAG "APP_NODE"
 
 extern struct example_info_store store;
 

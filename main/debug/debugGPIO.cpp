@@ -10,13 +10,8 @@
 #define BUTTON_GPIO2 GPIO_NUM_19 // Use the appropriate GPIO number for your button
 #define DEBOUNCE_TIME_MS 200     // Debounce time in milliseconds
 
-extern void SendBrightness();
-extern void SendGenericOnOffToggle();
-extern void NextMode();
-
 /// @brief button stuff
 static TimerHandle_t debounce_timer;
-//static TimerHandle_t debounce_timer2;
 
 static esp_adc_cal_characteristics_t adc_chars;
 
@@ -70,13 +65,13 @@ void gpio_isr_handler(void *arg)
 
 void debounce_timer_callback(TimerHandle_t xTimer)
 {
-    if (gpio_get_level(BUTTON_GPIO) == 0)
-    {
-        SendGenericOnOffToggle();
-    }
+    // if (gpio_get_level(BUTTON_GPIO) == 0)
+    // {
+    //     SendGenericOnOffToggle();
+    // }
     
-    if (gpio_get_level(BUTTON_GPIO2) == 0)
-    {
-        NextMode();
-    }
+    // if (gpio_get_level(BUTTON_GPIO2) == 0)
+    // {
+    //     NextMode();
+    // }
 }
