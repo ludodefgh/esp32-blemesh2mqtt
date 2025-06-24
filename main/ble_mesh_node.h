@@ -1,7 +1,8 @@
 #pragma once
 #include <stdio.h>
-#include <string.h>
+#include <string>
 #include <inttypes.h>
+#include <functional>
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -47,17 +48,19 @@ typedef struct
     int16_t level;
     color_mode_t color_mode = color_mode_t::hs;
 
-} esp_ble_mesh_node_info_t;
+} bm2mqtt_node_info;
 
-esp_ble_mesh_node_info_t* GetNode(int nodeIndex);
+bm2mqtt_node_info* GetNode(int nodeIndex);
+bm2mqtt_node_info* GetNodeFromMac(const std::string& mac);
+void for_each_node(std::function<void( const bm2mqtt_node_info *)> func);
 
 esp_err_t example_ble_mesh_store_node_info(const uint8_t uuid[16], uint16_t unicast,
                                                   uint8_t elem_num, uint8_t onoff_state);
 
 
-esp_ble_mesh_node_info_t *example_ble_mesh_get_node_info(uint16_t unicast);
+bm2mqtt_node_info *example_ble_mesh_get_node_info(uint16_t unicast);
 
 
 esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                                 esp_ble_mesh_node_info_t *node,
+                                                 bm2mqtt_node_info *node,
                                                  esp_ble_mesh_model_t *model, uint32_t opcode);

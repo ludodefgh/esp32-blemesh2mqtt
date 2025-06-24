@@ -6,7 +6,7 @@
 
 #include "esp_log.h"
 #include "nvs_flash.h"
-
+#include "argtable3/argtable3.h"
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
@@ -20,6 +20,7 @@
 
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
+#include "debug_console_common.h"
 
 #define TAG "APP_CONTROL"
 
@@ -183,7 +184,7 @@ int decode_comp_data(esp_ble_mesh_composition_head *head, esp_ble_mesh_compositi
 
 ////////////////////////////////////////////////////////
 
-void Bind_App_Key(esp_ble_mesh_node_info_t *node)
+void Bind_App_Key(bm2mqtt_node_info *node)
 {
     ESP_LOGW(TAG, "-----Bind_App_Key-----");
     vTaskDelay(pdMS_TO_TICKS(500)); // Delay 500msw
@@ -336,7 +337,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                                               esp_ble_mesh_cfg_client_cb_param_t *param)
 {
     esp_ble_mesh_client_common_param_t common = {0};
-    esp_ble_mesh_node_info_t *node = NULL;
+    bm2mqtt_node_info *node = NULL;
     uint32_t opcode;
     uint16_t addr;
     int err;
@@ -480,9 +481,6 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         }
         case ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND:
         {
-            // switch (opcode)
-            // {
-            // }
             esp_ble_mesh_cfg_client_set_state_t set_state = {0};
 
             example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
@@ -513,11 +511,9 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
 static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
                                                esp_ble_mesh_generic_client_cb_param_t *param)
 {
-    // esp_ble_mesh_client_common_param_t common = {0};
-    esp_ble_mesh_node_info_t *node = NULL;
+    bm2mqtt_node_info *node = NULL;
     uint32_t opcode;
     uint16_t addr;
-    // int err;
 
     opcode = param->params->opcode;
     addr = param->params->ctx.addr;
@@ -627,10 +623,9 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
 void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                               esp_ble_mesh_light_client_cb_param_t *param)
 {
-    esp_ble_mesh_node_info_t *node = NULL;
+    bm2mqtt_node_info *node = NULL;
     uint32_t opcode;
     uint16_t addr;
-    // int err;
 
     opcode = param->params->opcode;
     addr = param->params->ctx.addr;
@@ -715,8 +710,6 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
         }
 
-
-        ESP_LOGI("LIGHT_CLI", "Get response: ");
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
@@ -730,7 +723,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                 // node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
                 // node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
                 // ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s ,node->hsl_l);
-                ESP_LOGE(TAG, "YOUPEEEEEE");
+                //ESP_LOGE(TAG, "YOUPEEEEEE");
             }
             break;
             }
@@ -804,7 +797,7 @@ void RefreshNodes()
     uint16_t node_count = 0;
     for_each_provisioned_node([&node_count](const esp_ble_mesh_node_t * node)
     {
-        esp_ble_mesh_node_info_t* node_info = GetNode(node_count);
+        bm2mqtt_node_info* node_info = GetNode(node_count);
         
         memcpy(node_info->uuid, node->dev_uuid, 16);
         node_info->unicast = node->unicast_addr;
@@ -851,7 +844,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void ble_mesh_ctl_set(esp_ble_mesh_node_info_t *node_info)
+void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
 {
     node_info->color_mode = color_mode_t::color_temp;
 
@@ -873,7 +866,7 @@ void ble_mesh_ctl_set(esp_ble_mesh_node_info_t *node_info)
     }
 }
 
-void ble_mesh_ctl_temperature_set(esp_ble_mesh_node_info_t *node_info)
+void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
 {
     node_info->color_mode = color_mode_t::color_temp;
 
@@ -895,20 +888,19 @@ void ble_mesh_ctl_temperature_set(esp_ble_mesh_node_info_t *node_info)
     }
 }
 
-void SendHSL()
+void light_hsl_set(bm2mqtt_node_info * node_info)
 {
-    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_node_info_t *node = GetNode(0);
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state = {0};
 
-        example_ble_mesh_set_msg_common(&common, node, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
+        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
-        node->color_mode = color_mode_t::hs;
-        set_state.hsl_set.hsl_hue = node->hsl_h;
-        set_state.hsl_set.hsl_saturation = node->hsl_s;
-        set_state.hsl_set.hsl_lightness = node->hsl_l;
+        node_info->color_mode = color_mode_t::hs;
+        set_state.hsl_set.hsl_hue = node_info->hsl_h;
+        set_state.hsl_set.hsl_saturation = node_info->hsl_s;
+        set_state.hsl_set.hsl_lightness = node_info->hsl_l;
         set_state.hsl_set.op_en = false;
         set_state.hsl_set.delay = 0;
         set_state.hsl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
@@ -921,19 +913,16 @@ void SendHSL()
     }
 }
 
-void SendGenericOnOff(bool value)
+void gen_onoff_set(bm2mqtt_node_info * node_info)
 {
-    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_node_info_t *node = GetNode(0);
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_generic_client_set_state_t set_state = {0};
-        ESP_LOGI(TAG, "Callback Before :  onoff: 0x%02x NewValue : %d", node->onoff, value);
-        node->onoff = value;
-        // ESP_LOGI(TAG, "Callback After :  onoff: 0x%02x", node->onoff);
-        example_ble_mesh_set_msg_common(&common, node, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
+        
+        example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
         set_state.onoff_set.op_en = false;
-        set_state.onoff_set.onoff = value;
+        set_state.onoff_set.onoff = node_info->onoff;
         set_state.onoff_set.tid = store.tid++;
         int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
         if (err)
@@ -947,10 +936,22 @@ void SendGenericOnOff(bool value)
 #pragma endregion LightControl
 
 
+typedef struct {
+    struct arg_int *temperature;
+    struct arg_end *end;
+} ble_mesh_ctl_temperature_set_args_t;
+ble_mesh_ctl_temperature_set_args_t ctl_temperature_set_args;
 
 int ble_mesh_hsl_range_get(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
@@ -967,7 +968,14 @@ int ble_mesh_hsl_range_get(int argc, char **argv)
 
 int ble_mesh_lightness_range_get(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
@@ -984,7 +992,14 @@ int ble_mesh_lightness_range_get(int argc, char **argv)
 
 int ble_mesh_ctl_temperature_get(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
@@ -1002,14 +1017,21 @@ int ble_mesh_ctl_temperature_get(int argc, char **argv)
 
 int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
         example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
         common.ctx.addr = node_info->unicast;// + 1;
-        //common.ctx .ctl_temperature_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
@@ -1021,7 +1043,14 @@ int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
 
 int ble_mesh_ctl_get(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
@@ -1036,11 +1065,16 @@ int ble_mesh_ctl_get(int argc, char **argv)
     return 0;
 }
 
-static uint16_t temp = 2700;
-
 int ble_mesh_ctl_temperature_set(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &ctl_temperature_set_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ctl_temperature_set_args.end, argv[0]);
+        return 1;
+    }
+    
+    if (bm2mqtt_node_info *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
@@ -1048,13 +1082,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
         common.ctx.addr = node_info->unicast + 1;
 
-        temp += (6500-2000)/6;
-        if (temp > 6500)
-        {
-            temp = 2000;
-        }
-        
-        set_state_light.ctl_temperature_set.ctl_temperature = temp;
+        set_state_light.ctl_temperature_set.ctl_temperature = ctl_temperature_set_args.temperature->ival[0];
         set_state_light.ctl_temperature_set.ctl_delta_uv = 0;
         set_state_light.ctl_temperature_set.op_en = false;
         set_state_light.ctl_temperature_set.delay = 0;
@@ -1073,11 +1101,15 @@ void RegisterBleMeshDebugCommands()
 {
     /* Register commands */
 
+    node_index_args.node_index = arg_int1("n", "node", "<node_index>", "Node index as reported by prov_list_nodes command");
+    node_index_args.end = arg_end(2);
+
     const esp_console_cmd_t ble_mesh_hsl_range_get_cmd = {
         .command = "ble_mesh_hsl_range_get",
         .help = "Light HSL Range Get",
         .hint = NULL,
         .func = &ble_mesh_hsl_range_get,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_hsl_range_get_cmd));
 
@@ -1086,6 +1118,7 @@ void RegisterBleMeshDebugCommands()
         .help = "Lightness Range Get",
         .hint = NULL,
         .func = &ble_mesh_lightness_range_get,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_lightness_range_get_cmd));
 
@@ -1094,6 +1127,7 @@ void RegisterBleMeshDebugCommands()
         .help = "Clt Temperature Get",
         .hint = NULL,
         .func = &ble_mesh_ctl_temperature_get,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_get_cmd));
 
@@ -1102,6 +1136,7 @@ void RegisterBleMeshDebugCommands()
         .help = "Ctl temperature Range Get",
         .hint = NULL,
         .func = &ble_mesh_ctl_temperature_range_get,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_range_get_cmd));
 
@@ -1111,14 +1146,19 @@ void RegisterBleMeshDebugCommands()
         .help = "Ctl  Get",
         .hint = NULL,
         .func = &ble_mesh_ctl_get,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_get_cmd));
+
+    ctl_temperature_set_args.temperature = arg_int1("t", "temp", "<color_temp>", "Temperature of the color in K");
+    ctl_temperature_set_args.end = arg_end(2);
 
     const esp_console_cmd_t ble_mesh_ctl_temperature_set_cmd = {
         .command = "ble_mesh_ctl_temperature_set",
         .help = "Ctl temperature Set",
         .hint = NULL,
         .func = &ble_mesh_ctl_temperature_set,
+        .argtable = &ctl_temperature_set_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_set_cmd));
 

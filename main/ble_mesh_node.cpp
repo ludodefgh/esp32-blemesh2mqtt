@@ -1,5 +1,6 @@
 #include "ble_mesh_node.h"
 #include <inttypes.h>
+#include <string>
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -20,15 +21,47 @@
 
 extern struct example_info_store store;
 
-esp_ble_mesh_node_info_t nodes[CONFIG_BLE_MESH_MAX_PROV_NODES] = {0};
+bm2mqtt_node_info nodes[CONFIG_BLE_MESH_MAX_PROV_NODES] = {0};
 
-esp_ble_mesh_node_info_t* GetNode(int nodeIndex)
+void for_each_node(std::function<void( const bm2mqtt_node_info *)> func)
+{
+    for (auto i = 0; i < ARRAY_SIZE(nodes); i++)
+    {
+        if (nodes[i].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+        {
+           func(&nodes[i]);
+        }
+    }
+}
+
+bm2mqtt_node_info* GetNode(int nodeIndex)
 {
     return &nodes[nodeIndex];
 }
 
+bm2mqtt_node_info* GetNodeFromMac(const std::string& mac)
+{
+    bm2mqtt_node_info* result = nullptr;
+    for_each_provisioned_node([&mac, &result](const esp_ble_mesh_node_t * node)
+    {
+            const std::string inAddr {bt_hex(node->addr, BD_ADDR_LEN)};
+            if (inAddr == mac)
+            {
+                for (auto i = 0; i < ARRAY_SIZE(nodes); i++)
+                {
+                    if (memcmp(nodes[i].uuid, node->dev_uuid, 16) == 0)
+                    {
+                        result =  &nodes[i];
+                    }
+                }
+            }
+    });
+
+    return result;
+}
+
 esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                                 esp_ble_mesh_node_info_t *node,
+                                                 bm2mqtt_node_info *node,
                                                  esp_ble_mesh_model_t *model, uint32_t opcode)
 {
     if (!common || !node || !model)
@@ -92,7 +125,7 @@ esp_err_t example_ble_mesh_store_node_info(const uint8_t uuid[16], uint16_t unic
     return ESP_FAIL;
 }
 
-esp_ble_mesh_node_info_t *example_ble_mesh_get_node_info(uint16_t unicast)
+bm2mqtt_node_info *example_ble_mesh_get_node_info(uint16_t unicast)
 {
     int i;
 

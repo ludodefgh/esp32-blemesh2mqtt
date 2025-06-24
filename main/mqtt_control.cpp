@@ -6,11 +6,11 @@
 #include "protocol_examples_common.h"
 #include "esp_log.h"
 #include "esp_console.h"
-#include "mqtt_client.h"
 //// MQTT includes end
 
 #include "ble_mesh_node.h"
 #include "ble_mesh_control.h"
+#include "debug_console_common.h"
 #include <memory>
 #include <string>
 #include "cJSON.h"
@@ -58,10 +58,7 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
     .disconnect_reason = 0,
 };
 
-// FWD
-void ReadJsonResponse(const char *input);
-
-std::string get_command_topic(esp_ble_mesh_node_info_t *node_info)
+std::string get_command_topic(const bm2mqtt_node_info *node_info)
 {
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
     {
@@ -75,7 +72,7 @@ std::string get_command_topic(esp_ble_mesh_node_info_t *node_info)
     return {};
 }
 
-std::string get_discovery_id(esp_ble_mesh_node_info_t *node_info)
+std::string get_discovery_id(bm2mqtt_node_info *node_info)
 {
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
     {
@@ -87,6 +84,16 @@ std::string get_discovery_id(esp_ble_mesh_node_info_t *node_info)
         return uniq_id;
     }
     return {};
+}
+
+void subscribe_nodes(esp_mqtt_client_handle_t client)
+{
+    for_each_node([&client](const bm2mqtt_node_info *node_info)
+    {
+        int msg_id = esp_mqtt_client_subscribe(client, get_command_topic(node_info).c_str(), 0);
+        //send_status(node_info);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+    });
 }
 
 /*
@@ -116,11 +123,8 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
 
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
-        if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-        {
-            msg_id = esp_mqtt_client_subscribe(client, get_command_topic(node_info).c_str(), 0);
-        }
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+       
+        subscribe_nodes(client);
 
         // esp_mqtt5_client_set_unsubscribe_property(client, &unsubscribe_property);
         // msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos0");
@@ -156,7 +160,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         ESP_LOGI(TAG, "TOPIC=%.*s", event->topic_len, event->topic);
         ESP_LOGI(TAG, "DATA=%.*s", event->data_len, event->data);
 
-        ReadJsonResponse(event->data);
+        parse_mqtt_event_data(event);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -242,7 +246,7 @@ namespace std
 
 To remove the component, publish an empty string to the discovery topic. This will remove the component and clear the published discovery payload. It will also remove the device entry if there are no further references to it.
 */
-std::unique_ptr<cJSON> make_discovery_message(esp_ble_mesh_node_info_t *node)
+std::unique_ptr<cJSON> make_discovery_message(bm2mqtt_node_info *node)
 {
     cJSON *root = cJSON_CreateObject();
 
@@ -299,7 +303,7 @@ std::unique_ptr<cJSON> make_discovery_message(esp_ble_mesh_node_info_t *node)
     return std::unique_ptr<cJSON>{root};
 }
 
-std::unique_ptr<cJSON> make_status_message(esp_ble_mesh_node_info_t *node_info)
+std::unique_ptr<cJSON> make_status_message(const bm2mqtt_node_info *node_info)
 {
     cJSON *root, *color;
     root = cJSON_CreateObject();
@@ -319,105 +323,117 @@ std::unique_ptr<cJSON> make_status_message(esp_ble_mesh_node_info_t *node_info)
     return std::unique_ptr<cJSON>{root};
 }
 
-// FWD
-int send_status(int argc, char **argv);
-
-void ReadJsonResponse(const char *input)
+void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    // FIX-ME : likely slow af
+    const std::string topic{event->topic, static_cast<std::string::size_type>(event->topic_len)};
+    if (auto index_pos = topic.find("blemesh2mqtt_"); index_pos != std::string::npos)
     {
-        if (cJSON *response = cJSON_Parse(input))
+        // +13 : sizeof blemesh2mqtt_
+        // 12 sizeof mac address string
+        const std::string mac{topic, index_pos + 13, 12};
+        if (bm2mqtt_node_info *node_info = GetNodeFromMac(mac))
         {
-            if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response, "state"))
+            if (cJSON *response = cJSON_Parse(event->data))
             {
-                if (cJSON_IsString(name) && (name->valuestring != NULL))
+                if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response, "state"))
                 {
-                    if (strcmp(name->valuestring, "ON") == 0)
+                    if (cJSON_IsString(name) && (name->valuestring != NULL))
                     {
-                        ESP_LOGI(TAG, "SendGenericOnOff(true)");
-                        SendGenericOnOff(true);
-                    }
-                    else if (strcmp(name->valuestring, "OFF") == 0)
-                    {
-                        ESP_LOGI(TAG, "SendGenericOnOff(false)");
-                        SendGenericOnOff(false);
-                    }
-                }
-
-                bool light_value_changed = false;
-                color_mode_t current_mode = node_info->color_mode;
-                if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
-                {
-                    if (cJSON_IsNumber(brightness))
-                    {
-                        // FIX-ME : might be related to my buld, or check server config for value range
-                        uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
-                        node_info->hsl_l = filteredValue;
-                        light_value_changed = true;
-                    }
-                }
-
-                if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
-                {
-                    if (cJSON_IsObject(color))
-                    {
-                        cJSON *hue = cJSON_GetObjectItemCaseSensitive(color, "h");
-                        cJSON *saturation = cJSON_GetObjectItemCaseSensitive(color, "s");
-
-                        if (cJSON_IsNumber(hue))
+                        if (strcmp(name->valuestring, "ON") == 0)
                         {
-                            uint16_t filteredValue = (uint16_t)map(hue->valuedouble, 0, 360, 0, 65535);
-                            node_info->hsl_h = filteredValue;
-                            current_mode = color_mode_t::hs;
-                            light_value_changed = true;
+                            node_info->onoff = true;
+                            gen_onoff_set(node_info);
                         }
-                        if (cJSON_IsNumber(saturation))
+                        else if (strcmp(name->valuestring, "OFF") == 0)
                         {
-                            uint16_t filteredValue = (uint16_t)map(saturation->valuedouble, 0, 100, 0, 65535);
-                            node_info->hsl_s = filteredValue;
-                            current_mode = color_mode_t::hs;
+                            node_info->onoff = false;
+                            gen_onoff_set(node_info);
+                        }
+                    }
+
+                    bool light_value_changed = false;
+                    color_mode_t current_mode = node_info->color_mode;
+                    if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
+                    {
+                        if (cJSON_IsNumber(brightness))
+                        {
+                            // FIX-ME : might be related to my buld, or check server config for value range
+                            uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
+                            node_info->hsl_l = filteredValue;
                             light_value_changed = true;
                         }
                     }
-                }
 
-                if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
-                {
-                    if (cJSON_IsNumber(color_temp))
+                    if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
                     {
-                        // FIX-ME : might be related to my buld, or check server config for value range
-                        // uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
-                        node_info->curr_temp = color_temp->valuedouble;
-                        current_mode = color_mode_t::color_temp;
-                        light_value_changed = true;
-                    }
-                }
+                        if (cJSON_IsObject(color))
+                        {
+                            cJSON *hue = cJSON_GetObjectItemCaseSensitive(color, "h");
+                            cJSON *saturation = cJSON_GetObjectItemCaseSensitive(color, "s");
 
-                if (light_value_changed)
-                {
-                    if (current_mode == color_mode_t::color_temp)
-                    {
-                        // ble_mesh_ctl_temperature_set(node_info);
-                        ble_mesh_ctl_set(node_info);
+                            if (cJSON_IsNumber(hue))
+                            {
+                                uint16_t filteredValue = (uint16_t)map(hue->valuedouble, 0, 360, 0, 65535);
+                                node_info->hsl_h = filteredValue;
+                                current_mode = color_mode_t::hs;
+                                light_value_changed = true;
+                            }
+                            if (cJSON_IsNumber(saturation))
+                            {
+                                uint16_t filteredValue = (uint16_t)map(saturation->valuedouble, 0, 100, 0, 65535);
+                                node_info->hsl_s = filteredValue;
+                                current_mode = color_mode_t::hs;
+                                light_value_changed = true;
+                            }
+                        }
                     }
-                    else if (current_mode == color_mode_t::hs)
+
+                    if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
                     {
-                        SendHSL();
+                        if (cJSON_IsNumber(color_temp))
+                        {
+                            // FIX-ME : might be related to my buld, or check server config for value range
+                            // uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
+                            node_info->curr_temp = color_temp->valuedouble;
+                            current_mode = color_mode_t::color_temp;
+                            light_value_changed = true;
+                        }
+                    }
+
+                    if (light_value_changed)
+                    {
+                        if (current_mode == color_mode_t::color_temp)
+                        {
+                            // ble_mesh_ctl_temperature_set(node_info);
+                            ble_mesh_ctl_set(node_info);
+                        }
+                        else if (current_mode == color_mode_t::hs)
+                        {
+                            light_hsl_set(node_info);
+                        }
                     }
                 }
+                cJSON_Delete(response);
+
+                send_status(node_info);
             }
-            cJSON_Delete(response);
         }
-
-        send_status(0, nullptr);
     }
 }
 
 int send_discovery(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        std::unique_ptr<cJSON> discovery_message = make_discovery_message(GetNode(0));
+        std::unique_ptr<cJSON> discovery_message = make_discovery_message(node_info);
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, get_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
@@ -431,7 +447,14 @@ int send_discovery(int argc, char **argv)
 
 int delete_entity(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         const char *json_data = "";
         int msg_id = 0;
@@ -442,25 +465,37 @@ int delete_entity(int argc, char **argv)
     return 0;
 }
 
+void send_status(const bm2mqtt_node_info *node_info)
+{
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    {
+        char buf[64] = {0};
+        snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
+        const std::string root_publish = "blemesh2mqtt/" + std::string{buf} + "/state";
+
+        std::unique_ptr<cJSON> status_message = make_status_message(node_info);
+        char *json_data = cJSON_PrintUnformatted(status_message.get());
+        int msg_id = 0;
+
+        msg_id = esp_mqtt_client_publish(mqtt_client, root_publish.c_str(), json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
+
+        cJSON_free(json_data);
+    }
+}
+
 int send_status(int argc, char **argv)
 {
-    if (esp_ble_mesh_node_info_t *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
-        {
-            char buf[64] = {0};
-            snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
-            const std::string root_publish = "blemesh2mqtt/" + std::string{buf} + "/state";
-
-            std::unique_ptr<cJSON> status_message = make_status_message(node_info);
-            char *json_data = cJSON_PrintUnformatted(status_message.get());
-            int msg_id = 0;
-
-            msg_id = esp_mqtt_client_publish(mqtt_client, root_publish.c_str(), json_data, 0, 0, 0);
-            ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
-
-            cJSON_free(json_data);
-        }
+       send_status(node_info);
     }
 
     return 0;
@@ -470,11 +505,15 @@ int send_status(int argc, char **argv)
 
 void RegisterMQTTDebugCommands()
 {
+    node_index_args.node_index = arg_int1("n", "node", "<node_index>", "Node index as reported by prov_list_nodes command");
+    node_index_args.end = arg_end(2);
+
     const esp_console_cmd_t discovery_cmd = {
         .command = "mqtt_discovery",
         .help = "[MQTT] send discovery message",
         .hint = NULL,
         .func = &send_discovery,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&discovery_cmd));
 
@@ -483,6 +522,7 @@ void RegisterMQTTDebugCommands()
         .help = "[MQTT] delete entity",
         .hint = NULL,
         .func = &delete_entity,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&delete_entity_cmd));
 
@@ -491,6 +531,7 @@ void RegisterMQTTDebugCommands()
         .help = "[MQTT] send status message",
         .hint = NULL,
         .func = &send_status,
+        .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&mqtt_status_cmd));
 }

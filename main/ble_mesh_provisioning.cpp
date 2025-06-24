@@ -24,6 +24,7 @@
 #include "esp_ble_mesh_local_data_operation_api.h"
 
 #include "ble_mesh_node.h"
+#include "debug_console_common.h"
 
 #define TAG "APP_PROV"
 
@@ -102,7 +103,7 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
 {
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-    esp_ble_mesh_node_info_t *node = NULL;
+    bm2mqtt_node_info *node = NULL;
     char name[11] = {0};
     int err;
 
@@ -359,18 +360,24 @@ int list_provisioned_nodes(int argc, char **argv)
 extern int ShitShowAppKeyBind;
 int unprovision(int argc, char **argv)
 {
-    if (GetNode(0)->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+    
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_node_info_t *node = GetNode(0);
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
         ShitShowAppKeyBind = 0;
         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node->uuid, 16));
+            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
         }
     }
     return 0;

@@ -20,8 +20,6 @@
 
 #define TAG "EXAMPLE"
 
-// static int16_t NormalizedLevelValue = 0;
-// static int16_t LastRaw = 0;
 extern bool init_done;
 
 /// @brief Provisioning stuff
@@ -42,12 +40,7 @@ static int heap_size(int argc, char **argv)
 // DEBUG
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma region Debug
-// fwd decl
-static int toggle_on_off(int argc, char **argv)
-{
-    //SendGenericOnOffToggle();
-    return 0;
-}
+
 
 void RegisterDebugCommands()
 {
@@ -66,15 +59,6 @@ void RegisterDebugCommands()
         .func = &heap_size,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&heap_cmd));
-
-    const esp_console_cmd_t toggleLight_cmd = {
-        .command = "toggle",
-        .help = "toggle connected lights on/off",
-        .hint = NULL,
-        .func = &toggle_on_off,
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&toggleLight_cmd));
-
 
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
@@ -154,46 +138,5 @@ extern "C" void app_main()
 
     mqtt5_app_start();
     /// MQTT END
-
-    // while (1)
-    // {
-    //     // Read raw ADC value
-    //     int16_t raw = adc1_get_raw(POTENTIOMETER_ADC_CHANNEL);
-    //     if (abs(raw - LastRaw) > 400 && init_done)
-    //     {
-    //         // ESP_LOGE(TAG, "RAW MOTHERFUCKER Last : %i  New : %i)",LastRaw, raw);
-    //         LastRaw = raw;
-    //         // int16_t filteredValue = (int16_t)map(raw, 0, 4095, -32768, 32767);
-    //         NormalizedLevelValue = (int16_t)map(raw, 0, 4095, 0, 65535);
-    //         switch (CurrentModeType)
-    //         {
-    //         case BRIGHTNESS:
-    //            // SendBrightness();
-    //             break;
-    //         // case LIGHT_CTL:
-    //         //     SendLightCtl();
-    //         //     break;
-    //         // case LIGHT_CTL_TEMP:
-    //         //  SendLightCtl_Temp();
-    //         //  break;
-    //         case TEMPERATURE:
-    //            // SendTemperature();
-    //             break;
-    //         case HUE_H:
-    //            // SendHSL(CurrentModeType);
-    //             break;
-    //         case HUE_S:
-    //            // SendHSL(CurrentModeType);
-    //             break;
-    //         case HUE_L:
-    //            // SendHSL(CurrentModeType);
-    //             break;
-    //             break;
-    //         default:
-    //             break;
-    //         }
-    //     }
-    //     vTaskDelay(pdMS_TO_TICKS(100)); // Delay 500msw
-    // }
 }
 #pragma endregion Main
