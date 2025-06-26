@@ -10,8 +10,6 @@
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
-#include "esp_ble_mesh_generic_model_api.h"
-#include "esp_ble_mesh_lighting_model_api.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 

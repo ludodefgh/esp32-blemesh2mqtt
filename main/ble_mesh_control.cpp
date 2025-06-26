@@ -78,9 +78,6 @@ esp_ble_mesh_client_t lightness_cli;
 esp_ble_mesh_client_t hsl_cli;
 esp_ble_mesh_client_t ctl_cli;
 
-// ESP_BLE_MESH_MODEL_PUB_DEFINE(level_pub, 2 + 4, ROLE_NODE);
-// ESP_BLE_MESH_MODEL_PUB_DEFINE(lightness_cli_pub, 2 + 3, ROLE_NODE);
-
 static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_CFG_SRV(&config_server),
     ESP_BLE_MESH_MODEL_CFG_CLI(&config_client),
@@ -741,6 +738,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
     }
 }
+bool enable_provisioning = false;
 
 esp_err_t ble_mesh_init(void)
 {
@@ -771,7 +769,7 @@ esp_err_t ble_mesh_init(void)
     //     return err;
     // }
 
-    // err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+
     err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
     if (err != ESP_OK)
     {
@@ -942,6 +940,18 @@ typedef struct {
 } ble_mesh_ctl_temperature_set_args_t;
 ble_mesh_ctl_temperature_set_args_t ctl_temperature_set_args;
 
+typedef struct {
+    struct arg_int *lightness;
+    struct arg_end *end;
+} ble_mesh_ctl_lightness_set_args_t;
+ble_mesh_ctl_lightness_set_args_t ctl_lightness_set_args;
+
+typedef struct {
+    struct arg_int *truefalse;
+    struct arg_end *end;
+} ble_mesh_ctl_bool_set_args_t;
+ble_mesh_ctl_bool_set_args_t ctl_bool_set_args;
+
 int ble_mesh_hsl_range_get(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
@@ -1065,6 +1075,36 @@ int ble_mesh_ctl_get(int argc, char **argv)
     return 0;
 }
 
+int ble_mesh_ctl_lightness_set(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &ctl_lightness_set_args);
+
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ctl_lightness_set_args.end, argv[0]);
+        return 1;
+    }
+    
+    if (bm2mqtt_node_info *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+        common.ctx.addr = node_info->unicast;
+
+        set_state_light.lightness_set.lightness = ctl_lightness_set_args.lightness->ival[0];
+        set_state_light.lightness_set.op_en = false;
+        set_state_light.lightness_set.delay = 0;
+        set_state_light.lightness_set.tid = store.tid++;
+        int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
+        }
+    }
+    return 0;
+}
+
 int ble_mesh_ctl_temperature_set(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &ctl_temperature_set_args);
@@ -1096,6 +1136,43 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
     return 0;
 }
 
+int ble_mesh_set_provisioning_enabled(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &ctl_bool_set_args);
+
+    if (nerrors != 0)
+    {
+        arg_print_errors(stderr, ctl_bool_set_args.end, argv[0]);
+        return 1;
+    }
+
+    bool enabled_value = ctl_bool_set_args.truefalse->ival[0] != 0;
+    if (enabled_value != enable_provisioning)
+    {
+        enable_provisioning = enabled_value;
+
+        if (enable_provisioning)
+        {
+            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            if (err != ESP_OK)
+            {
+                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
+                return err;
+            }
+        }
+        else if (!enable_provisioning)
+        {
+            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            if (err != ESP_OK)
+            {
+                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
+                return err;
+            }
+        }
+    }
+
+    return 0;
+}
 
 void RegisterBleMeshDebugCommands()
 {
@@ -1121,6 +1198,20 @@ void RegisterBleMeshDebugCommands()
         .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_lightness_range_get_cmd));
+    
+
+    ctl_lightness_set_args.lightness = arg_int1("l", "lightness", "<lightness>", "lightness");
+    ctl_lightness_set_args.end = arg_end(2);
+
+    const esp_console_cmd_t ble_mesh_ctl_lightness_set_cmd = {
+        .command = "ble_mesh_ctl_lightness_set",
+        .help = "Ctl temperature Set",
+        .hint = NULL,
+        .func = &ble_mesh_ctl_lightness_set,
+        .argtable = &ctl_lightness_set_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_lightness_set_cmd));
+
 
     const esp_console_cmd_t ble_mesh_ctl_temperature_get_cmd = {
         .command = "ble_mesh_ctl_temperature_get",
@@ -1161,5 +1252,18 @@ void RegisterBleMeshDebugCommands()
         .argtable = &ctl_temperature_set_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_set_cmd));
+
+
+    ctl_bool_set_args.truefalse = arg_int1("v", "value", "<true_false>", "0 for false, anything else for true");
+    ctl_bool_set_args.end = arg_end(2);
+
+    const esp_console_cmd_t ble_mesh_toggle_provisioning_cmd = {
+        .command = "ble_mesh_set_provisioning_enabled",
+        .help = "Toggle the provisioning functionality",
+        .hint = NULL,
+        .func = &ble_mesh_set_provisioning_enabled,
+        .argtable = &ctl_bool_set_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_toggle_provisioning_cmd));
 
 }

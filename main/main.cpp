@@ -11,8 +11,6 @@
 #include "ble_mesh_example_init.h"
 
 #include "ble_mesh_control.h"
-#include "debug/debugUART.h"
-#include "debug/debugGPIO.h"
 #include "ble_mesh_provisioning.h"
 #include "ble_mesh_node.h"
 #include "mqtt_control.h"
