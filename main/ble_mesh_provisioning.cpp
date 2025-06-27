@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#include <vector>
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
@@ -29,7 +30,20 @@
 #define TAG "APP_PROV"
 
  extern esp_ble_mesh_client_t config_client;
+std::vector<ble2mqtt_unprovisioned_device> unprovisioned_devices;
 
+void remove_unprovisioned_device(const uint8_t uuid[16])
+{
+    //for(auto index =0; index < unprovisioned_devices.size(); ++index)
+    for (auto it = unprovisioned_devices.begin(); it != unprovisioned_devices.end(); ++it)
+    {
+       if(memcmp(it->dev_uuid, uuid, 16) == 0)
+       {
+            unprovisioned_devices.erase(it);
+            break;
+       }
+    }
+}
 
 struct example_info_store store = {
     .net_idx = ESP_BLE_MESH_KEY_UNUSED,
@@ -153,6 +167,8 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
      * just before restoring it.
      */
 
+     remove_unprovisioned_device(uuid);
+
     return ESP_OK;
 }
 
@@ -167,6 +183,54 @@ void prov_link_close(esp_ble_mesh_prov_bearer_t bearer, uint8_t reason)
              bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT", reason);
 }
 
+void for_each_unprovisioned_node(std::function<void( const ble2mqtt_unprovisioned_device& unprov_device)> func)
+{
+    for(const auto& unprov_dev : unprovisioned_devices)
+    //for(auto index =0; index < unprovisioned_devices.size(); ++index)
+    {
+        func(unprov_dev);
+    }
+}
+
+void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device& unprov_device)
+{
+    bool already_registered = false;
+    //for(const ble_mesh_provisioner_recv_unprov_adv_pkt_param& unprov_dev : unprovisioned_devices)
+    for(auto index = 0; index < unprovisioned_devices.size(); ++index)
+    {
+        if (memcmp(unprovisioned_devices[index].dev_uuid, unprov_device.dev_uuid, 16) == 0)
+        {
+            already_registered = true;
+            break;
+        }
+    }
+
+    if (!already_registered)
+    {
+        unprovisioned_devices.emplace_back(unprov_device);
+    }
+}
+
+void provision_device(uint8_t uuid[16])
+{
+    ble2mqtt_unprovisioned_device* device = nullptr;
+    for(auto index = 0; index < unprovisioned_devices.size(); ++index)
+    {
+        if (memcmp(unprovisioned_devices[index].dev_uuid, uuid, 16) == 0)
+        {
+            device = &unprovisioned_devices[index];
+            break;
+        }
+    }
+
+    if(device != nullptr)
+    {
+        recv_unprov_adv_pkt(device->dev_uuid, device->addr,
+                            device->addr_type, device->oob_info,
+                            device->adv_type, device->bearer);
+    }
+
+}
 void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
                                 esp_ble_mesh_addr_type_t addr_type, uint16_t oob_info,
                                 uint8_t adv_type, esp_ble_mesh_prov_bearer_t bearer)
@@ -218,12 +282,18 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         break;
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT:
         ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
-        if (enable_provisioning)
-        {
-        recv_unprov_adv_pkt(param->provisioner_recv_unprov_adv_pkt.dev_uuid, param->provisioner_recv_unprov_adv_pkt.addr,
-                            param->provisioner_recv_unprov_adv_pkt.addr_type, param->provisioner_recv_unprov_adv_pkt.oob_info,
-                            param->provisioner_recv_unprov_adv_pkt.adv_type, param->provisioner_recv_unprov_adv_pkt.bearer);
-        }
+        
+        ble2mqtt_unprovisioned_device new_entry;
+        memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
+
+        recv_unprov_adv_pkt(new_entry);
+
+        // if (enable_provisioning)
+        // {
+        // recv_unprov_adv_pkt(param->provisioner_recv_unprov_adv_pkt.dev_uuid, param->provisioner_recv_unprov_adv_pkt.addr,
+        //                     param->provisioner_recv_unprov_adv_pkt.addr_type, param->provisioner_recv_unprov_adv_pkt.oob_info,
+        //                     param->provisioner_recv_unprov_adv_pkt.adv_type, param->provisioner_recv_unprov_adv_pkt.bearer);
+        // }
         
         
         break;
@@ -361,8 +431,30 @@ int list_provisioned_nodes(int argc, char **argv)
 
     return 0;
 }
-
 extern int ShitShowAppKeyBind;
+
+
+void unprovision_device(uint8_t uuid[16])
+{
+    if (bm2mqtt_node_info *node_info = GetNode(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+
+        ShitShowAppKeyBind = 0;
+        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid, 16));
+        }
+        else
+        {
+            remove_provisioned_node(uuid);
+        }
+    }
+}
+
 int unprovision(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &node_index_args);

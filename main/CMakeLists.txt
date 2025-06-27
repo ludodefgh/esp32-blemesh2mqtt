@@ -7,5 +7,5 @@ set(CMAKE_C_FLAGS "-Wno-missing-field-initializers -Wno-implicit-fallthrough -Wn
 set(srcs "main.cpp" "debug/debugUART.cpp" "debug/debugGPIO.cpp" "ble_mesh_node.cpp" "wifi/wifiStation.cpp")
 
 idf_component_register(SRCS "mqtt_control.cpp" "ble_mesh_control.cpp" "ble_mesh_provisioning.cpp" "${srcs}"
-                    PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_gpio esp_driver_uart esp_netif mqtt json
+                    PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_uart esp_netif mqtt json esp_http_server
                     INCLUDE_DIRS  ".")

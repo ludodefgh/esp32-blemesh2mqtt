@@ -1105,6 +1105,29 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
     return 0;
 }
 
+int ble_mesh_ctl_lightness_set(int lightness_value, uint8_t uuid[16])
+{
+    if (bm2mqtt_node_info *node_info = GetNode(uuid); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+
+        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+        common.ctx.addr = node_info->unicast;
+
+        set_state_light.lightness_set.lightness = lightness_value;
+        set_state_light.lightness_set.op_en = false;
+        set_state_light.lightness_set.delay = 0;
+        set_state_light.lightness_set.tid = store.tid++;
+        int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
+        }
+    }
+    return 0;
+}
+
 int ble_mesh_ctl_temperature_set(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &ctl_temperature_set_args);
@@ -1136,6 +1159,31 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
     return 0;
 }
 
+void ble_mesh_set_provisioning_enabled(bool enabled_value)
+{
+    if (enabled_value != enable_provisioning)
+    {
+        enable_provisioning = enabled_value;
+
+        if (enable_provisioning)
+        {
+            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            if (err != ESP_OK)
+            {
+                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
+            }
+        }
+        else if (!enable_provisioning)
+        {
+            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            if (err != ESP_OK)
+            {
+                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
+            }
+        }
+    }
+}
+
 int ble_mesh_set_provisioning_enabled(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &ctl_bool_set_args);
@@ -1147,30 +1195,7 @@ int ble_mesh_set_provisioning_enabled(int argc, char **argv)
     }
 
     bool enabled_value = ctl_bool_set_args.truefalse->ival[0] != 0;
-    if (enabled_value != enable_provisioning)
-    {
-        enable_provisioning = enabled_value;
-
-        if (enable_provisioning)
-        {
-            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
-            if (err != ESP_OK)
-            {
-                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
-                return err;
-            }
-        }
-        else if (!enable_provisioning)
-        {
-            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
-            if (err != ESP_OK)
-            {
-                ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
-                return err;
-            }
-        }
-    }
-
+    ble_mesh_set_provisioning_enabled(enabled_value);
     return 0;
 }
 

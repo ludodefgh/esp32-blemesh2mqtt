@@ -32,6 +32,18 @@ void for_each_node(std::function<void( const bm2mqtt_node_info *)> func)
     }
 }
 
+bm2mqtt_node_info* GetNode(uint8_t uuid[16])
+{
+    for (auto i = 0; i < ARRAY_SIZE(nodes); i++)
+    {
+        if (memcmp(nodes[i].uuid, uuid, 16) == 0)
+        {
+           return &nodes[i];
+        }
+    }
+    return nullptr;
+}
+
 bm2mqtt_node_info* GetNode(int nodeIndex)
 {
     return &nodes[nodeIndex];
@@ -56,6 +68,18 @@ bm2mqtt_node_info* GetNodeFromMac(const std::string& mac)
     });
 
     return result;
+}
+
+void remove_provisioned_node(uint8_t uuid[16])
+{
+    for (auto i = 0; i < ARRAY_SIZE(nodes); i++)
+    {
+        if (memcmp(nodes[i].uuid, uuid, 16) == 0)
+        {
+            ESP_LOGW(TAG, "%s: Remove provisioned device 0x%04x", __func__, nodes[i].unicast);
+            nodes[i].unicast = ESP_BLE_MESH_ADDR_UNASSIGNED;
+        }
+    }
 }
 
 esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,

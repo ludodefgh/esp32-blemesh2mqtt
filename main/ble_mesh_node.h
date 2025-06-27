@@ -51,6 +51,8 @@ typedef struct
 } bm2mqtt_node_info;
 
 bm2mqtt_node_info* GetNode(int nodeIndex);
+bm2mqtt_node_info* GetNode(uint8_t uuid[16]);
+
 bm2mqtt_node_info* GetNodeFromMac(const std::string& mac);
 void for_each_node(std::function<void( const bm2mqtt_node_info *)> func);
 
@@ -64,3 +66,6 @@ bm2mqtt_node_info *example_ble_mesh_get_node_info(uint16_t unicast);
 esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
                                                  bm2mqtt_node_info *node,
                                                  esp_ble_mesh_model_t *model, uint32_t opcode);
+
+
+void remove_provisioned_node(uint8_t uuid[16]);
