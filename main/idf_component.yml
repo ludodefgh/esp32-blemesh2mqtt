@@ -7,3 +7,4 @@ dependencies:
     path: ${IDF_PATH}/components/esp_adc
   protocol_examples_common:
     path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  joltwallet/littlefs: ^1.20.0
