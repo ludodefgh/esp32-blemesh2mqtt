@@ -1,0 +1,15 @@
+body {
+  font-family: sans-serif;
+  margin: 20px;
+}
+.node {
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin-bottom: 15px;
+}
+output {
+  margin-left: 10px;
+}
+button {
+  margin-top: 10px;
+}

@@ -9,3 +9,5 @@ set(srcs "main.cpp" "debug/debugUART.cpp" "debug/debugGPIO.cpp" "ble_mesh_node.c
 idf_component_register(SRCS "mqtt_control.cpp" "ble_mesh_control.cpp" "ble_mesh_provisioning.cpp" "${srcs}"
                     PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_uart esp_netif mqtt json esp_http_server
                     INCLUDE_DIRS  ".")
+
+littlefs_create_partition_image(storage ./littlefs FLASH_IN_PROJECT)

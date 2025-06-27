@@ -7,6 +7,7 @@
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_console.h"
+#include "esp_littlefs.h"
 #include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 
@@ -283,6 +284,49 @@ esp_err_t unprovision_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t nodes_json_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr_chunk(req, "{ \"provisioned\": [");
+
+    // List provisioned nodes
+    uint16_t count = esp_ble_mesh_provisioner_get_prov_node_count();
+    for (int i = 0; i < count; i++) {
+        const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
+        if (!node) continue;
+
+        char uuid_str[33];
+        for (int j = 0; j < 16; j++) sprintf(&uuid_str[j * 2], "%02X", node->dev_uuid[j]);
+
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "%s{ \"uuid\": \"%s\", \"name\": \"%s\" }",
+            i > 0 ? "," : "", uuid_str, node->name);
+        httpd_resp_sendstr_chunk(req, buf);
+    }
+
+    httpd_resp_sendstr_chunk(req, "], \"unprovisioned\": [");
+
+    // List unprovisioned nodes
+    bool first = true;
+    for_each_unprovisioned_node([&](const ble2mqtt_unprovisioned_device& dev) {
+        char uuid_str[33];
+        for (int j = 0; j < 16; j++) sprintf(&uuid_str[j * 2], "%02X", dev.dev_uuid[j]);
+
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "%s{ \"uuid\": \"%s\", \"rssi\": %d }",
+            first ? "" : ",", uuid_str, dev.rssi);
+
+        httpd_resp_sendstr_chunk(req, buf);
+        first = false;
+    });
+
+    httpd_resp_sendstr_chunk(req, "] }");
+    httpd_resp_sendstr_chunk(req, NULL);  // end of response
+    return ESP_OK;
+}
+
 httpd_uri_t nodes_uri = {
     .uri = "/nodes",
     .method = HTTP_GET,
@@ -307,20 +351,87 @@ httpd_uri_t set_unprovision_uri = {
     .handler = unprovision_handler,
 };
 
+httpd_uri_t json_nodes_uri = {
+    .uri = "/nodes.json",
+    .method = HTTP_GET,
+    .handler = nodes_json_handler,
+};
+
+const char *get_content_type(const char *filename)
+{
+    if (strstr(filename, ".html")) return "text/html";
+    if (strstr(filename, ".js"))   return "application/javascript";
+    if (strstr(filename, ".css"))  return "text/css";
+    if (strstr(filename, ".png"))  return "image/png";
+    if (strstr(filename, ".ico"))  return "image/x-icon";
+    if (strstr(filename, ".json")) return "application/json";
+    return "text/plain";
+}
+
+esp_err_t static_handler(httpd_req_t *req)
+{
+    char filepath[640];
+    //snprintf(filepath, sizeof(filepath), "/littlefs%s", req->uri[0] == '/' ? req->uri : "/index.html");
+    snprintf(filepath, sizeof(filepath), "/littlefs%s", req->uri[0] == '/' ? req->uri : "/index.html");
+
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
+        ESP_LOGI(TAG, "Failed to open file: %s", filepath);
+        ESP_LOGE(TAG, "FUCK ME: [%s]", req->uri);
+        return ESP_FAIL;
+    }
+
+    const char *content_type = get_content_type(filepath);
+    httpd_resp_set_type(req, content_type);
+
+    char chunk[512];
+    size_t read_bytes;
+    while ((read_bytes = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+        httpd_resp_send_chunk(req, chunk, read_bytes);
+    }
+    fclose(file);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+
+// void register_static_routes(httpd_handle_t server)
+// {
+//     httpd_uri_t static_uri = {
+//         .uri = "/*",
+//         .method = HTTP_GET,
+//         .handler = static_handler,
+//     };
+//     httpd_register_uri_handler(server, &static_uri);
+// }
+
+httpd_uri_t static_uri = {
+        .uri = "/*",
+        .method = HTTP_GET,
+        .handler = static_handler,
+    };
+
 void start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     httpd_handle_t server = NULL;
 
+     config.uri_match_fn = httpd_uri_match_wildcard;
+
     if (httpd_start(&server, &config) == ESP_OK)
     {
-        httpd_register_uri_handler(server, &hello);
+        // httpd_register_uri_handler(server, &hello);
         httpd_register_uri_handler(server, &nodes_uri);
         httpd_register_uri_handler(server, &set_lightness_uri);
         httpd_register_uri_handler(server, &set_provision_uri);
         httpd_register_uri_handler(server, &set_unprovision_uri);
+        httpd_register_uri_handler(server, &json_nodes_uri);
+        //register_static_routes(server);
+        httpd_register_uri_handler(server, &static_uri);
     }
 }
+
 
 #pragma endregion WebServer
 
@@ -328,6 +439,20 @@ void start_webserver(void)
 // Main
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma region Main
+
+    esp_vfs_littlefs_conf_t conf = {
+        .base_path = "/littlefs",
+        .partition_label = "storage",
+        .format_if_mount_failed = true,
+        .dont_mount = false,
+    };
+
+void mount_littlefs(void)
+{
+
+
+    ESP_ERROR_CHECK(esp_vfs_littlefs_register(&conf));
+}
 
 extern "C" void app_main()
 {
@@ -355,6 +480,17 @@ extern "C" void app_main()
     if (err)
     {
         return;
+    }
+
+    mount_littlefs();
+
+     size_t total = 0, used = 0;
+    err = esp_littlefs_info(conf.partition_label, &total, &used);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get LittleFS partition information (%s)", esp_err_to_name(err));
+        esp_littlefs_format(conf.partition_label);
+    } else {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
     }
 
     RegisterDebugCommands();
