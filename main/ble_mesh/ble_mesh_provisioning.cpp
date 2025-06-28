@@ -186,7 +186,6 @@ void prov_link_close(esp_ble_mesh_prov_bearer_t bearer, uint8_t reason)
 void for_each_unprovisioned_node(std::function<void( const ble2mqtt_unprovisioned_device& unprov_device)> func)
 {
     for(const auto& unprov_dev : unprovisioned_devices)
-    //for(auto index =0; index < unprovisioned_devices.size(); ++index)
     {
         func(unprov_dev);
     }
@@ -195,7 +194,6 @@ void for_each_unprovisioned_node(std::function<void( const ble2mqtt_unprovisione
 void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device& unprov_device)
 {
     bool already_registered = false;
-    //for(const ble_mesh_provisioner_recv_unprov_adv_pkt_param& unprov_dev : unprovisioned_devices)
     for(auto index = 0; index < unprovisioned_devices.size(); ++index)
     {
         if (memcmp(unprovisioned_devices[index].dev_uuid, unprov_device.dev_uuid, 16) == 0)
@@ -287,15 +285,6 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
 
         recv_unprov_adv_pkt(new_entry);
-
-        // if (enable_provisioning)
-        // {
-        // recv_unprov_adv_pkt(param->provisioner_recv_unprov_adv_pkt.dev_uuid, param->provisioner_recv_unprov_adv_pkt.addr,
-        //                     param->provisioner_recv_unprov_adv_pkt.addr_type, param->provisioner_recv_unprov_adv_pkt.oob_info,
-        //                     param->provisioner_recv_unprov_adv_pkt.adv_type, param->provisioner_recv_unprov_adv_pkt.bearer);
-        // }
-        
-        
         break;
     case ESP_BLE_MESH_PROVISIONER_PROV_LINK_OPEN_EVT:
         prov_link_open(param->provisioner_prov_link_open.bearer);
@@ -480,6 +469,34 @@ int unprovision(int argc, char **argv)
     return 0;
 }
 
+extern bool get_composition_data_debug;
+int get_composition_data(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&node_index_args);
+
+    if (nerrors != 0)
+    {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+
+        get_composition_data_debug = true;
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_cfg_client_get_state_t get_state = {0};
+        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+        get_state.comp_data_get.page = COMP_DATA_PAGE_0;
+        auto err = esp_ble_mesh_config_client_get_state(&common, &get_state);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: Send config comp data get failed", __func__);
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
+}
+
 void RegisterProvisioningDebugCommands()
 {
     /* Register commands */
@@ -500,5 +517,18 @@ void RegisterProvisioningDebugCommands()
         .func = &unprovision,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&unprovision_cmd));
+
+
+    node_index_args.node_index = arg_int1("n", "node", "<node_index>", "Node index as reported by prov_list_nodes command");
+    node_index_args.end = arg_end(2);
+
+    const esp_console_cmd_t get_composition_data_cmd = {
+        .command = "get_composition_data",
+        .help = "Get the composition data of a node",
+        .hint = NULL,
+        .func = &get_composition_data,
+        .argtable = &node_index_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&get_composition_data_cmd));
 
 }
