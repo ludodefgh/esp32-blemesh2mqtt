@@ -21,6 +21,7 @@
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
 #include "debug_console_common.h"
+#include "mqtt/mqtt_bridge.h"
 
 #define TAG "APP_CONTROL"
 
@@ -1161,6 +1162,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
 
 void ble_mesh_set_provisioning_enabled(bool enabled_value)
 {
+    ESP_LOGI(TAG, "[%s] Current Value : %s Requested Value : %s", __func__, enable_provisioning ? "ON" : "OFF", enabled_value ? "ON" : "OFF");
     if (enabled_value != enable_provisioning)
     {
         enable_provisioning = enabled_value;
@@ -1172,6 +1174,7 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
             {
                 ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
             }
+            mqtt_publish_provisioning_enabled(enable_provisioning);
         }
         else if (!enable_provisioning)
         {
@@ -1180,6 +1183,7 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
             {
                 ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
             }
+            mqtt_publish_provisioning_enabled(enable_provisioning);
         }
     }
 }

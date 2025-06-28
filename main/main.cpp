@@ -16,7 +16,7 @@
 #include "ble_mesh_control.h"
 #include "ble_mesh_provisioning.h"
 #include "ble_mesh_node.h"
-#include "mqtt_control.h"
+#include "mqtt/mqtt_control.h"
 #include "_config.h"
 
 #define TAG "EXAMPLE"
@@ -449,8 +449,6 @@ void start_webserver(void)
 
 void mount_littlefs(void)
 {
-
-
     ESP_ERROR_CHECK(esp_vfs_littlefs_register(&conf));
 }
 

@@ -11,6 +11,7 @@
 #include "ble_mesh_node.h"
 #include "ble_mesh_control.h"
 #include "debug_console_common.h"
+#include "mqtt_bridge.h"
 #include <memory>
 #include <string>
 #include "cJSON.h"
@@ -125,6 +126,9 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
        
         subscribe_nodes(client);
+        mqtt_bridge_subscribe(client);
+
+         start_periodic_publish_timer();
 
         // esp_mqtt5_client_set_unsubscribe_property(client, &unsubscribe_property);
         // msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos0");
@@ -180,6 +184,11 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
 }
 esp_mqtt_client_handle_t mqtt_client;
 
+esp_mqtt_client_handle_t get_mqtt_client()
+{
+    return mqtt_client;
+}
+
 void mqtt5_app_start(void)
 {
     ESP_LOGI(TAG, "mqtt5_app_start");
@@ -208,9 +217,9 @@ void mqtt5_app_start(void)
     mqtt5_cfg.network.disable_auto_reconnect = true;
     mqtt5_cfg.credentials.username = config_mqtt_user;
     mqtt5_cfg.credentials.authentication.password = config_mqtt_pwd;
-    mqtt5_cfg.session.last_will.topic = "/topic/will";
-    mqtt5_cfg.session.last_will.msg = "i will leave";
-    mqtt5_cfg.session.last_will.msg_len = 12;
+    mqtt5_cfg.session.last_will.topic = "blemesh2mqtt/bridge/state";
+    mqtt5_cfg.session.last_will.msg = "offline";
+    mqtt5_cfg.session.last_will.msg_len = 8;
     mqtt5_cfg.session.last_will.qos = 1;
     mqtt5_cfg.session.last_will.retain = true;
 
@@ -222,6 +231,19 @@ void mqtt5_app_start(void)
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(mqtt_client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID), mqtt5_event_handler, NULL);
     esp_mqtt_client_start(mqtt_client);
+
+    {
+        int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "blemesh2mqtt/bridge/state", "on", 0, 0, 0);
+        ESP_LOGI(TAG, "Sent state message, msg_id=%d", msg_id);
+    }
+
+    {
+        send_bridge_discovery();
+    }
+    // {
+    //     mqtt_init_periodic_info();
+    // }
+    
 }
 #pragma endregion MQTTSetup
 
@@ -325,6 +347,16 @@ std::unique_ptr<cJSON> make_status_message(const bm2mqtt_node_info *node_info)
 
 void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 {
+    if (strncmp(event->topic, "blemesh2mqtt/bridge/auto_provision/set", event->topic_len) == 0)
+    {
+        //buffer_length = strlen(event->data) + sizeof("");
+        ESP_LOGI(TAG, "Received auto_provision command from MQTT: [%.*s]", event->data_len, event->data  );
+
+        ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON",event->data_len) == 0);
+   
+        return;
+    }
+
     // FIX-ME : likely slow af
     const std::string topic{event->topic, static_cast<std::string::size_type>(event->topic_len)};
     if (auto index_pos = topic.find("blemesh2mqtt_"); index_pos != std::string::npos)
