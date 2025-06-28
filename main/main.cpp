@@ -13,9 +13,9 @@
 
 #include "esp_http_server.h"
 
-#include "ble_mesh_control.h"
-#include "ble_mesh_provisioning.h"
-#include "ble_mesh_node.h"
+#include "ble_mesh/ble_mesh_control.h"
+#include "ble_mesh/ble_mesh_provisioning.h"
+#include "ble_mesh/ble_mesh_node.h"
 #include "mqtt/mqtt_control.h"
 #include "_config.h"
 

@@ -8,8 +8,8 @@
 #include "esp_console.h"
 //// MQTT includes end
 
-#include "ble_mesh_node.h"
-#include "ble_mesh_control.h"
+#include "ble_mesh/ble_mesh_node.h"
+#include "ble_mesh/ble_mesh_control.h"
 #include "debug_console_common.h"
 #include "mqtt_bridge.h"
 #include <memory>
