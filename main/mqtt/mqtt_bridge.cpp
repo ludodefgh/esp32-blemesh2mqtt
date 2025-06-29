@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include <memory>
+#include <wifi/wifi_station.h>
 
 #define TAG "APP_MQTT_BRIDGE"
 
@@ -37,9 +38,17 @@ CJsonPtr create_auto_provision_json()
     cJSON_AddStringToObject(device, "model", "BLEMesh2MQTT Bridge");
     cJSON_AddStringToObject(device, "name", "BLE Mesh Bridge");
     cJSON_AddStringToObject(device, "sw_version", "0.1.0");
+    cJSON_AddStringToObject(device, "configuration_url", get_ip_address());
 
     // Add device to root
     cJSON_AddItemToObject(root.get(), "device", device);
+
+    cJSON *origin = cJSON_CreateObject();
+    cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
+    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "url", get_ip_address());
+
+    cJSON_AddItemToObject(root.get(), "origin", origin);
 
     return root;
 }
@@ -74,12 +83,51 @@ CJsonPtr create_uptime_json()
     // Add device to root
     cJSON_AddItemToObject(root.get(), "device", device);
 
+    cJSON *origin = cJSON_CreateObject();
+    cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
+    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "url", get_ip_address());
+
+    cJSON_AddItemToObject(root.get(), "origin", origin);
+
+    return root;
+}
+
+CJsonPtr create_mem_json()
+{
+    CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
+
+    // Top-level fields
+    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Bridge Memory");
+    cJSON_AddStringToObject(root.get(), "unique_id", "blemesh2mqtt_memory");
+    cJSON_AddStringToObject(root.get(), "state_topic", "blemesh2mqtt/bridge/info");
+    cJSON_AddStringToObject(root.get(), "unit_of_measurement", "b");
+    cJSON_AddStringToObject(root.get(), "value_template", "{{ value_json.heap_free }}");
+    cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
+    cJSON_AddStringToObject(root.get(), "availability_topic", "blemesh2mqtt/bridge/state");
+    cJSON_AddStringToObject(root.get(), "payload_available", "on");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "off");
+    
+
+    // Device object
+    cJSON *device = cJSON_CreateObject();
+    cJSON *identifiers = cJSON_CreateArray();
+    cJSON_AddItemToArray(identifiers, cJSON_CreateString("blemesh2mqtt-bridge"));
+
+    cJSON_AddItemToObject(device, "identifiers", identifiers);
+    cJSON_AddStringToObject(device, "manufacturer", "YourName");
+    cJSON_AddStringToObject(device, "model", "BLEMesh2MQTT Bridge");
+    cJSON_AddStringToObject(device, "name", "BLE Mesh Bridge");
+    cJSON_AddStringToObject(device, "sw_version", "0.1.0");
+
+    // Add device to root
+    cJSON_AddItemToObject(root.get(), "device", device);
+
     return root;
 }
 
 CJsonPtr create_bridge_info_json(int devices_provisioned, const char *version)
 {
-
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
     // Uptime in seconds
@@ -96,6 +144,14 @@ CJsonPtr create_bridge_info_json(int devices_provisioned, const char *version)
     std::string build_datetime = std::string(__DATE__) + " " + __TIME__;
     cJSON_AddStringToObject(root.get(), "build_date", build_datetime.c_str());
 
+    // Origin
+    cJSON *origin = cJSON_CreateObject();
+    cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
+    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "url", get_ip_address());
+
+    cJSON_AddItemToObject(root.get(), "origin", origin);
+
     return root;
 }
 
@@ -104,7 +160,7 @@ void publish_bridge_info(int devices_provisioned, const char *version)
     CJsonPtr bridge_info_json = create_bridge_info_json(devices_provisioned, version);
     char *json_data = cJSON_PrintUnformatted(bridge_info_json.get());
     int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "blemesh2mqtt/bridge/info", json_data, 0, 0, 0);
-    ESP_LOGI(TAG, "sent bridge info publish successful, msg_id=%d", msg_id);
+    ESP_LOGV(TAG, "sent bridge info publish successful, msg_id=%d", msg_id);
     cJSON_free(json_data);
 }
 
@@ -125,6 +181,14 @@ void send_bridge_discovery()
         char *json_data = cJSON_PrintUnformatted(uptime_json.get());
         int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "homeassistant/sensor/blemesh2mqtt/uptime/config", json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent uptime discovery publish successful, msg_id=%d", msg_id);
+        cJSON_free(json_data);
+    }
+
+    {
+        CJsonPtr mem_json = create_mem_json();
+        char *json_data = cJSON_PrintUnformatted(mem_json.get());
+        int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "homeassistant/sensor/blemesh2mqtt/memory/config", json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent memory discovery publish successful, msg_id=%d", msg_id);
         cJSON_free(json_data);
     }
 
