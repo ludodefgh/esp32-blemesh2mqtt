@@ -40,9 +40,7 @@ static uint8_t dev_uuid[16];
 
 static nvs_handle_t NVS_HANDLE;
 static const char *NVS_KEY = "onoff_client";
-bool init_done = true;
 
-int ShitShowAppKeyBind = 0;
 extern struct example_info_store store;
 
 static void mesh_example_info_store(void)
@@ -123,12 +121,11 @@ static esp_ble_mesh_prov_t provision = {
 ////////////////////////////////////////////////////////
 typedef enum
 {
-    FEATURE_ONOFF = 1 << 0,
-    FEATURE_LIGHTNESS = 1 << 1,
-    FEATURE_HSL = 1 << 2,
-    FEATURE_CTL = 1 << 3,
-    FEATURE_VENDOR = 1 << 4,
-} node_features_t;
+    FEATURE_GENERIC_ONOFF = 1 << 0,
+    FEATURE_LIGHT_LIGHTNESS = 1 << 1,
+    FEATURE_LIGHT_HSL = 1 << 2,
+    FEATURE_LIGHT_CTL = 1 << 3,
+} node_supported_features_t;
 
 typedef struct
 {
@@ -160,10 +157,14 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
     ESP_LOGI(TAG, "CID: 0x%04X (%s)", cid, company_name);
     ESP_LOGI(TAG, "PID: 0x%04X, VID: 0x%04X", pid, vid);
     ESP_LOGI(TAG, "CRPL: %d, Features: 0x%04X", crpl, features);
-    if (features & BIT(0)) ESP_LOGI(TAG, "  - Relay feature supported");
-    if (features & BIT(1)) ESP_LOGI(TAG, "  - Proxy feature supported");
-    if (features & BIT(2)) ESP_LOGI(TAG, "  - Friend feature supported");
-    if (features & BIT(3)) ESP_LOGI(TAG, "  - Low Power feature supported");
+    if (features & BIT(0))
+        ESP_LOGI(TAG, "  - Relay feature supported");
+    if (features & BIT(1))
+        ESP_LOGI(TAG, "  - Proxy feature supported");
+    if (features & BIT(2))
+        ESP_LOGI(TAG, "  - Friend feature supported");
+    if (features & BIT(3))
+        ESP_LOGI(TAG, "  - Low Power feature supported");
 
     // Skip Composition Header:
     // CID (2), PID (2), VID (2), CRPL (2), Features (2)
@@ -176,7 +177,7 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
 
         // Each element begins with:
         // Location (2), Num SIG Models (1), Num Vendor Models (1)
-        uint16_t loc = data[offset] | (data[offset + 1] << 8);
+        // uint16_t loc = data[offset] | (data[offset + 1] << 8);
         uint8_t num_sig = data[offset + 2];
         uint8_t num_vendor = data[offset + 3];
         offset += 4;
@@ -190,52 +191,72 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
             offset += 2;
 
             ESP_LOGW(TAG, "Found model ID 0x%04X: %s", model_id, lookup_model_name(model_id));
+            if (model_id == ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV)
+            {
+                info.features |= FEATURE_GENERIC_ONOFF;
+            }
+            else if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV)
+            {
+                info.features |= FEATURE_LIGHT_LIGHTNESS;
+            }
+            else if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_SRV)
+            {
+                info.features |= FEATURE_LIGHT_HSL;
+            }
+            else if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_SRV)
+            {
+                info.features |= FEATURE_LIGHT_CTL;
+            }
         }
 
         // Vendor models: each 4 bytes
         for (int i = 0; i < num_vendor && offset + 4 <= length; i++)
         {
             offset += 4;
-            info.features |= FEATURE_VENDOR;
+            // info.features |= FEATURE_VENDOR;
         }
     }
 
     return info;
 }
+void node_state_query_task(void *arg);
+
 ////////////////////////////////////////////////////////
 void Bind_App_Key(bm2mqtt_node_info *node)
 {
-    ESP_LOGW(TAG, "-----Bind_App_Key-----");
+    ESP_LOGW(TAG, "[%s] features_to_bind : [%d]", __func__, node->features_to_bind);
     vTaskDelay(pdMS_TO_TICKS(500)); // Delay 500msw
 
     esp_ble_mesh_client_common_param_t common = {0};
     int err = 0;
 
-    if (ShitShowAppKeyBind == 0)
+    // if (ShitShowAppKeyBind == 0)
+    // {
+    //     // Brightness
+    //     esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+    //     node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+    //     set_state.model_app_bind.element_addr = node->unicast;
+    //     set_state.model_app_bind.model_app_idx = store.app_idx;
+    //     set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
+    //     set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+    //     err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+    //     if (err)
+    //     {
+    //         ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
+    //         return;
+    //     }
+    //     ESP_LOGW(TAG, "[BRIGHTNESS] Bound Gen Level model");
+    //     ++ShitShowAppKeyBind;
+    // }
+    // else if (ShitShowAppKeyBind == 1)
+    if ((node->features_to_bind & FEATURE_GENERIC_ONOFF) != 0)
     {
-        // Brightness
+        // [ONOFF]
+        node->features_to_bind &= ~FEATURE_GENERIC_ONOFF; // Clear the feature to avoid rebinding
+ vTaskDelay(pdMS_TO_TICKS(150));
+        ESP_LOGW(TAG, "[ONOFF] Binding Gen ONOFF model");
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-        set_state.model_app_bind.element_addr = node->unicast;
-        set_state.model_app_bind.model_app_idx = store.app_idx;
-        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
-        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
-        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
-            return;
-        }
-        ESP_LOGW(TAG, "[BRIGHTNESS] Bound Gen Level model");
-        ++ShitShowAppKeyBind;
-    }
-    else if (ShitShowAppKeyBind == 1)
-    {
-        ++ShitShowAppKeyBind;
-// Now request to bind the second shit
-#if defined(APP_USE_ONOFF_CLIENT)
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
         set_state.model_app_bind.element_addr = node->unicast;
         set_state.model_app_bind.model_app_idx = store.app_idx;
         set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV;
@@ -247,33 +268,36 @@ void Bind_App_Key(bm2mqtt_node_info *node)
             return;
         }
         ESP_LOGW(TAG, "Bound Gen ONOFF model");
-#endif
+        return;
     }
-    else if (ShitShowAppKeyBind == 2)
-    {
-        //[TEMPERATURE]
-        ++ShitShowAppKeyBind;
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-        common.ctx.addr = node->unicast;
-        set_state.model_app_bind.element_addr = node->unicast + 1;
-        set_state.model_app_bind.model_app_idx = store.app_idx;
-        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
-        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
-        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
-            return;
-        }
-        ESP_LOGW(TAG, "[Generic level] Bound Gen Level model");
-    }
-    else if (ShitShowAppKeyBind == 3)
+
+    // else if (ShitShowAppKeyBind == 2)
+    // {
+    //     //[TEMPERATURE]
+    //     ++ShitShowAppKeyBind;
+    //     esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+    //     node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+    //     common.ctx.addr = node->unicast;
+    //     set_state.model_app_bind.element_addr = node->unicast + 1;
+    //     set_state.model_app_bind.model_app_idx = store.app_idx;
+    //     set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
+    //     set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+    //     err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+    //     if (err)
+    //     {
+    //         ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
+    //         return;
+    //     }
+    //     ESP_LOGW(TAG, "[Generic level] Bound Gen Level model");
+    // }
+    // else if (ShitShowAppKeyBind == 3)
+    if ((node->features_to_bind & FEATURE_LIGHT_HSL) != 0)
     {
         // [HSL]
-        ++ShitShowAppKeyBind;
+        node->features_to_bind &= ~FEATURE_LIGHT_HSL; // Clear the feature to avoid rebinding
+ vTaskDelay(pdMS_TO_TICKS(150));
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
         common.ctx.addr = node->unicast;
         set_state.model_app_bind.element_addr = node->unicast;
         set_state.model_app_bind.model_app_idx = store.app_idx;
@@ -286,13 +310,17 @@ void Bind_App_Key(bm2mqtt_node_info *node)
             return;
         }
         ESP_LOGW(TAG, "[HSL] Bound Light HSL model");
+        return;
     }
-    else if (ShitShowAppKeyBind == 4)
+
+    // else if (ShitShowAppKeyBind == 4)
+    if ((node->features_to_bind & FEATURE_LIGHT_LIGHTNESS) != 0)
     {
         // [Lightness]
-        ++ShitShowAppKeyBind;
+        node->features_to_bind &= ~FEATURE_LIGHT_LIGHTNESS; // Clear the feature to avoid rebinding
+ vTaskDelay(pdMS_TO_TICKS(150));
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
         common.ctx.addr = node->unicast;
         set_state.model_app_bind.element_addr = node->unicast;
         set_state.model_app_bind.model_app_idx = store.app_idx;
@@ -305,32 +333,38 @@ void Bind_App_Key(bm2mqtt_node_info *node)
             return;
         }
         ESP_LOGW(TAG, "[Lightness] Bound model");
+        return;
     }
-    else if (ShitShowAppKeyBind == 5)
+
+    // else if (ShitShowAppKeyBind == 5)
+    // if((node->features_to_bind & FEATURE_LIGHT_CTL) != 0)
+    // {
+    //     // [CTl_temp]
+    //     node->features_to_bind &= ~FEATURE_LIGHT_CTL; // Clear the feature to avoid rebinding
+
+    //     esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+    //     node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+    //     common.ctx.addr = node->unicast;
+    //     set_state.model_app_bind.element_addr = node->unicast + 1;
+    //     set_state.model_app_bind.model_app_idx = store.app_idx;
+    //     set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
+    //     set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+    //     err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+    //     if (err)
+    //     {
+    //         ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
+    //         return;
+    //     }
+    //     ESP_LOGW(TAG, "[Light Ctl Temp Server] Bound model");
+    // }
+    if ((node->features_to_bind & FEATURE_LIGHT_CTL) != 0)
     {
         // [CTl_temp]
-        ++ShitShowAppKeyBind;
+        node->features_to_bind &= ~FEATURE_LIGHT_CTL; // Clear the feature to avoid rebinding
+
+        vTaskDelay(pdMS_TO_TICKS(150));
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-        common.ctx.addr = node->unicast;
-        set_state.model_app_bind.element_addr = node->unicast + 1;
-        set_state.model_app_bind.model_app_idx = store.app_idx;
-        set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
-        set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
-        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: Config Model App (4) Bind failed", __func__);
-            return;
-        }
-        ESP_LOGW(TAG, "[Light Ctl Temp Server] Bound model");
-    }
-    else if (ShitShowAppKeyBind == 6)
-    {
-        // [CTl_temp]
-        ++ShitShowAppKeyBind;
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
         common.ctx.addr = node->unicast;
         set_state.model_app_bind.element_addr = node->unicast;
         set_state.model_app_bind.model_app_idx = store.app_idx;
@@ -343,11 +377,86 @@ void Bind_App_Key(bm2mqtt_node_info *node)
             return;
         }
         ESP_LOGW(TAG, "[Light Ctl Server] Bound model");
+
     }
-    else
+
+    if (node->features_to_bind == 0)
     {
-        init_done = true;
+        ESP_LOGW(TAG, "[%s] All features bound, no more binding needed", __func__);
+        
+        //refresh_node(node, nullptr);
+        //node_manager().mark_node_info_dirty();
+
+        xTaskCreate(&node_state_query_task, "query_node_state", 4096, node, 5, NULL);
     }
+}
+
+
+void node_state_query_task(void *arg) {
+    bm2mqtt_node_info *node_info = static_cast<bm2mqtt_node_info *>(arg);
+
+    esp_ble_mesh_client_common_param_t common = {0};
+
+    // Add delays between messages to avoid congestion
+    
+    if (node_info->features & FEATURE_GENERIC_ONOFF)
+    {
+         vTaskDelay(pdMS_TO_TICKS(250));
+        ESP_LOGI(TAG, "[%s] Refreshing ON/OFF for node 0x%04X", __func__, node_info->unicast);
+
+        esp_ble_mesh_generic_client_get_state_t get_state = {0};
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
+        int err = esp_ble_mesh_generic_client_get_state(&common, &get_state);
+        if (err)
+        {
+            ESP_LOGE(TAG, "%s: Generic OnOff Get failed", __func__);
+            return;
+        }
+    }
+// Add delays between messages to avoid congestion
+
+    if (node_info->features & FEATURE_LIGHT_HSL)
+    {
+        {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            ESP_LOGI(TAG, "[%s] Refreshing HSL for node 0x%04X", __func__, node_info->unicast);
+
+            esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+            node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
+            int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+            if (err)
+            {
+                ESP_LOGE(TAG, "%s: Refreshing HSL failed", __func__);
+                return;
+            }
+        }
+        {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            ESP_LOGI(TAG, "[%s] Refreshing HSL Range for node 0x%04X", __func__, node_info->unicast);
+            ble_mesh_hsl_range_get(node_info);
+        }
+    }
+// Add delays between messages to avoid congestion
+   
+    if (node_info->features & FEATURE_LIGHT_CTL)
+    {
+        {
+             vTaskDelay(pdMS_TO_TICKS(250));
+            ESP_LOGI(TAG, "[%s] Refreshing CTL for node 0x%04X", __func__, node_info->unicast);
+            ble_mesh_ctl_temperature_range_get(node_info);
+        }
+        {
+             vTaskDelay(pdMS_TO_TICKS(250));
+            ESP_LOGI(TAG, "[%s] Refreshing CTL Temperature for node 0x%04X", __func__, node_info->unicast);
+            ble_mesh_ctl_temperature_get(node_info);
+        }
+    }
+
+
+    node_manager().mark_node_info_dirty();
+    // etc.
+
+    vTaskDelete(NULL); // kill the task when done
 }
 
 ////////////////////////////////////////////////////////
@@ -356,18 +465,15 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                                       esp_ble_mesh_cfg_client_cb_param_t *param)
 {
     esp_ble_mesh_client_common_param_t common = {0};
-    bm2mqtt_node_info *node = NULL;
-    uint32_t opcode;
-    uint16_t addr;
     int err;
 
-    opcode = param->params->opcode;
-    addr = param->params->ctx.addr;
+    uint32_t opcode = param->params->opcode;
+    uint16_t addr = param->params->ctx.addr;
 
     ESP_LOGI(TAG, "%s, error_code = 0x%02x, event = 0x%02x, addr: 0x%04x, opcode: 0x%04" PRIx32,
              __func__, param->error_code, event, param->params->ctx.addr, opcode);
 
-    node = example_ble_mesh_get_node_info(addr);
+    bm2mqtt_node_info *node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -376,8 +482,12 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
 
     if (param->error_code)
     {
-        Bind_App_Key(node);
+
         ESP_LOGE(TAG, "Send config client message failed, opcode 0x%04" PRIx32, opcode);
+        if (node->features_to_bind != 0)
+        {
+            Bind_App_Key(node);
+        }
         return;
     }
 
@@ -388,11 +498,6 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         {
         case ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET:
         {
-            if (!get_composition_data_debug)
-            {
-                init_done = false;
-            }
-
             ESP_LOGI(TAG, "composition data %s", bt_hex(param->status_cb.comp_data_status.composition_data->data, param->status_cb.comp_data_status.composition_data->len));
 
             uint16_t addr = param->params->ctx.addr;
@@ -406,32 +511,12 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             ESP_LOGI(TAG, "Parsed node 0x%04X: elements=%d features=0x%02X",
                      node_info.unicast_addr, node_info.element_count, node_info.features);
 
-            if (node_info.features & FEATURE_HSL)
-            {
-                // esp_ble_mesh_provisioner_set_node_name_by_addr(addr, "RGB Light");
-                ESP_LOGI(TAG, "HSL feature detected, setting node name to 'RGB Light'");
-            }
-            if (node_info.features & FEATURE_LIGHTNESS)
-            {
-                // esp_ble_mesh_provisioner_set_node_name_by_addr(addr, "Dimmable Light");
-                ESP_LOGI(TAG, "Lightness feature detected, setting node name to 'Dimmable Light'");
-            }
-            if (node_info.features & FEATURE_ONOFF)
-            {
-                // esp_ble_mesh_provisioner_set_node_name_by_addr(addr, "Switch");
-                ESP_LOGI(TAG, "OnOff feature detected, setting node name to 'Switch'");
-            }
-            else
-            {
-                // esp_ble_mesh_provisioner_set_node_name_by_addr(addr, "Unknown Device");
-            }
-
-            // process_composition_data(param);
+            node->features = node_info.features;
 
             if (!get_composition_data_debug)
             {
                 esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
+                node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
                 set_state.app_key_add.net_idx = store.net_idx;
                 set_state.app_key_add.app_idx = store.app_idx;
                 memcpy(set_state.app_key_add.app_key, prov_key.app_key, 16);
@@ -445,6 +530,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             get_composition_data_debug = false;
             break;
         }
+
         default:
             break;
         }
@@ -454,31 +540,29 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         {
         case ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD:
         {
+            ESP_LOGV(TAG, "ESP_BLE_MESH_CFG_CLIENT_SET_STATE_EVT -- > ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD");
+            node->features_to_bind = node->features;
             Bind_App_Key(node);
-            if (ShitShowAppKeyBind == 0)
-            {
-                // Brightness
-                esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                set_state.model_app_bind.element_addr = node->unicast;
-                set_state.model_app_bind.model_app_idx = store.app_idx;
-                set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
-                set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
-                err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-                if (err)
-                {
-                    ESP_LOGE(TAG, "%s: Config Model App (2) Bind failed", __func__);
-                    return;
-                }
-                ESP_LOGW(TAG, "[BRIGHTNESS] Bound Gen Level model");
-                ++ShitShowAppKeyBind;
-            }
-            break;
         }
+        break;
         case ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND:
         {
-            Bind_App_Key(node);
+            ESP_LOGV(TAG, "ESP_BLE_MESH_CFG_CLIENT_SET_STATE_EVT -- > ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND");
+            if (node->features_to_bind != 0)
+            {
+                Bind_App_Key(node);
+            }
         }
+        break;
+
+        case ESP_BLE_MESH_MODEL_OP_NODE_RESET:
+        {
+            ESP_LOGI(TAG, "Node reset successfully");
+            node_manager().remove_node(node->uuid);
+            esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid);
+            node_manager().mark_node_info_dirty();  
+        };
+        break;
         default:
             break;
         }
@@ -492,7 +576,6 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                                param->status_cb.comp_data_status.composition_data->len);
             // esp_ble_mesh_composition_head head = {0};
             // esp_ble_mesh_composition_decode data = {0};
-
         }
         break;
         case ESP_BLE_MESH_MODEL_OP_APP_KEY_STATUS:
@@ -507,7 +590,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         case ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET:
         {
             esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-            example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+            node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
             get_state.comp_data_get.page = COMP_DATA_PAGE_0;
             err = esp_ble_mesh_config_client_get_state(&common, &get_state);
             if (err)
@@ -517,10 +600,11 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             }
             break;
         }
+
         case ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD:
         {
             esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-            example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
+            node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
             set_state.app_key_add.net_idx = store.net_idx;
             set_state.app_key_add.app_idx = store.app_idx;
             memcpy(set_state.app_key_add.app_key, prov_key.app_key, 16);
@@ -537,7 +621,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         {
             esp_ble_mesh_cfg_client_set_state_t set_state = {0};
 
-            example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+            node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
             set_state.model_app_bind.element_addr = node->unicast;
             set_state.model_app_bind.model_app_idx = store.app_idx;
             set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
@@ -581,7 +665,7 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         return;
     }
 
-    node = example_ble_mesh_get_node_info(addr);
+    node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -692,7 +776,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         return;
     }
 
-    node = example_ble_mesh_get_node_info(addr);
+    node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -786,7 +870,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT:
-        ESP_LOGE("LIGHT_CLI", "Message timeout ");
+        ESP_LOGE("LIGHT_CLI", "Timeout event received for opcode 0x%04" PRIx32, opcode);
         break;
 
     default:
@@ -845,43 +929,77 @@ esp_err_t ble_mesh_init(void)
 
 void RefreshNodes()
 {
-    uint16_t node_count = 0;
-    for_each_provisioned_node([&node_count](const esp_ble_mesh_node_t *node)
+    for_each_provisioned_node([](const esp_ble_mesh_node_t *node)
                               {
-        bm2mqtt_node_info* node_info = GetNode(node_count);
-        
+        if (bm2mqtt_node_info *node_info = node_manager().get_or_create(node->dev_uuid))
+        {
+            refresh_node(node_info, node);
+        } });
+}
+
+void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
+{
+    if (node != nullptr)
+    {
         memcpy(node_info->uuid, node->dev_uuid, 16);
         node_info->unicast = node->unicast_addr;
         node_info->elem_num = node->element_num;
+    }
 
-        esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_client_common_param_t common = {0};
+
+    if (node_info->features & FEATURE_GENERIC_ONOFF)
+    {
+        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGI(TAG, "[%s] Refreshing ON/OFF for node 0x%04X", __func__, node_info->unicast);
+
+        
         esp_ble_mesh_generic_client_get_state_t get_state = {0};
-        example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
         int err = esp_ble_mesh_generic_client_get_state(&common, &get_state);
-        if (err) {
+        if (err)
+        {
             ESP_LOGE(TAG, "%s: Generic OnOff Get failed", __func__);
             return;
         }
+    }
 
-
-        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
-        esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err) {
-            ESP_LOGE(TAG, "%s: Generic light Get failed", __func__);
-            return;
-        }
-
-        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
-        common.ctx.addr = node_info->unicast;
-        err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err)
+    if (node_info->features & FEATURE_LIGHT_HSL)
+    {
         {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            ESP_LOGI(TAG, "[%s] Refreshing HSL for node 0x%04X", __func__, node_info->unicast);
+
+            esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+            node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
+            int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+            if (err)
+            {
+                ESP_LOGE(TAG, "%s: Refreshing HSL failed", __func__);
+                return;
+            }
         }
+        {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            ESP_LOGI(TAG, "[%s] Refreshing HSL Range for node 0x%04X", __func__, node_info->unicast);
 
+            ble_mesh_hsl_range_get(node_info);
+        }
+    }
 
-        ++node_count; });
+    if (node_info->features & FEATURE_LIGHT_CTL)
+    {
+        {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            ESP_LOGI(TAG, "[%s] Refreshing CTL for node 0x%04X", __func__, node_info->unicast);
+            ble_mesh_ctl_temperature_range_get(node_info);
+        }
+        {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            ESP_LOGI(TAG, "[%s] Refreshing CTL Temperature for node 0x%04X", __func__, node_info->unicast);
+            ble_mesh_ctl_temperature_get(node_info);
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -896,12 +1014,13 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
 void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
 {
+    ESP_LOGI(TAG, "[%s] Setting CTL for node 0x%04X", __func__, node_info->unicast);
     node_info->color_mode = color_mode_t::color_temp;
 
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-    example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
 
     set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
     set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
@@ -918,12 +1037,13 @@ void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
 
 void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
 {
+    ESP_LOGI(TAG, "[%s] Setting CTL Temperature for node 0x%04X", __func__, node_info->unicast);
     node_info->color_mode = color_mode_t::color_temp;
 
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-    example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
     common.ctx.addr = node_info->unicast + 1;
 
     set_state_light.ctl_temperature_set.ctl_temperature = node_info->curr_temp;
@@ -940,12 +1060,13 @@ void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
 
 void light_hsl_set(bm2mqtt_node_info *node_info)
 {
-    if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    ESP_LOGI(TAG, "[%s] Setting HSL for node 0x%04X", __func__, node_info->unicast);
+   // if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
         node_info->color_mode = color_mode_t::hs;
         set_state.hsl_set.hsl_hue = node_info->hsl_h;
@@ -965,12 +1086,13 @@ void light_hsl_set(bm2mqtt_node_info *node_info)
 
 void gen_onoff_set(bm2mqtt_node_info *node_info)
 {
-    if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    ESP_LOGI(TAG, "[%s] Setting OnOff for node 0x%04X", __func__, node_info->unicast);
+    //if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
         set_state.onoff_set.op_en = false;
         set_state.onoff_set.onoff = node_info->onoff;
         set_state.onoff_set.tid = store.tid++;
@@ -1016,19 +1138,24 @@ int ble_mesh_hsl_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-
-        example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET);
-        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET Get failed", __func__);
-        }
+        ble_mesh_hsl_range_get(node_info);
     }
     return 0;
+}
+
+void ble_mesh_hsl_range_get(bm2mqtt_node_info *node_info)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET);
+    int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+    if (err)
+    {
+        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET Get failed", __func__);
+    }
 }
 
 int ble_mesh_lightness_range_get(int argc, char **argv)
@@ -1041,12 +1168,12 @@ int ble_mesh_lightness_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
@@ -1066,20 +1193,25 @@ int ble_mesh_ctl_temperature_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-
-        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
-        common.ctx.addr = node_info->unicast + 1;
-        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
-        }
+        ble_mesh_ctl_temperature_get(node_info);
     }
     return 0;
+}
+
+void ble_mesh_ctl_temperature_get(bm2mqtt_node_info *node_info)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
+    common.ctx.addr = node_info->unicast + 1;
+    int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+    if (err)
+    {
+        ESP_LOGE(TAG, "%s: failed", __func__);
+    }
 }
 
 int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
@@ -1092,21 +1224,26 @@ int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-
-        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
-        common.ctx.addr = node_info->unicast; // + 1;
-
-        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET Get failed", __func__);
-        }
+        ble_mesh_ctl_temperature_range_get(node_info);
     }
     return 0;
+}
+
+void ble_mesh_ctl_temperature_range_get(bm2mqtt_node_info *node_info)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
+    common.ctx.addr = node_info->unicast; // + 1;
+
+    int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+    if (err)
+    {
+        ESP_LOGE(TAG, "%s: failed", __func__);
+    }
 }
 
 int ble_mesh_ctl_get(int argc, char **argv)
@@ -1119,12 +1256,12 @@ int ble_mesh_ctl_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
@@ -1144,12 +1281,12 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
         common.ctx.addr = node_info->unicast;
 
         set_state_light.lightness_set.lightness = ctl_lightness_set_args.lightness->ival[0];
@@ -1167,12 +1304,12 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
 
 int ble_mesh_ctl_lightness_set(int lightness_value, uint8_t uuid[16])
 {
-    if (bm2mqtt_node_info *node_info = GetNode(uuid); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
         common.ctx.addr = node_info->unicast;
 
         set_state_light.lightness_set.lightness = lightness_value;
@@ -1198,12 +1335,12 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
         common.ctx.addr = node_info->unicast + 1;
 
         set_state_light.ctl_temperature_set.ctl_temperature = ctl_temperature_set_args.temperature->ival[0];
@@ -1260,6 +1397,12 @@ int ble_mesh_set_provisioning_enabled(int argc, char **argv)
 
     bool enabled_value = ctl_bool_set_args.truefalse->ival[0] != 0;
     ble_mesh_set_provisioning_enabled(enabled_value);
+    return 0;
+}
+
+int print_nodes(int argc, char **argv)
+{
+    node_manager().print_nodes();
     return 0;
 }
 
@@ -1350,4 +1493,13 @@ void RegisterBleMeshDebugCommands()
         .argtable = &ctl_bool_set_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_toggle_provisioning_cmd));
+
+    const esp_console_cmd_t print_nodes_cmd = {
+        .command = "print_nodes",
+        .help = "print all tracked nodes",
+        .hint = NULL,
+        .func = &print_nodes,
+        .argtable = &ctl_bool_set_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&print_nodes_cmd));
 }

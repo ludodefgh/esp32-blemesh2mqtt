@@ -89,7 +89,7 @@ std::string get_discovery_id(bm2mqtt_node_info *node_info)
 
 void subscribe_nodes(esp_mqtt_client_handle_t client)
 {
-    for_each_node([&client](const bm2mqtt_node_info *node_info)
+    node_manager().for_each_node([&client](const bm2mqtt_node_info *node_info)
     {
         int msg_id = esp_mqtt_client_subscribe(client, get_command_topic(node_info).c_str(), 0);
         //send_status(node_info);
@@ -364,7 +364,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
         // +13 : sizeof blemesh2mqtt_
         // 12 sizeof mac address string
         const std::string mac{topic, index_pos + 13, 12};
-        if (bm2mqtt_node_info *node_info = GetNodeFromMac(mac))
+        if (bm2mqtt_node_info *node_info = node_manager().get_node(mac))
         {
             if (cJSON *response = cJSON_Parse(event->data))
             {
@@ -463,7 +463,7 @@ int send_discovery(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         std::unique_ptr<cJSON> discovery_message = make_discovery_message(node_info);
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
@@ -486,7 +486,7 @@ int delete_entity(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         const char *json_data = "";
         int msg_id = 0;
@@ -525,7 +525,7 @@ int send_status(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
        send_status(node_info);
     }

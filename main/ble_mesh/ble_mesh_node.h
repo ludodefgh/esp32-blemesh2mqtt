@@ -21,6 +21,7 @@
 #include "ble_mesh_example_init.h"
 
 #include "esp_ble_mesh_defs.h"
+#include <esp_timer.h>
 
 #define LED_OFF 0x0
 #define LED_ON 0x1
@@ -36,36 +37,69 @@ enum class color_mode_t : uint8_t
 typedef struct
 {
     uint8_t uuid[16];
-    uint16_t unicast;
-    uint16_t hsl_h;
-    uint16_t hsl_s;
-    uint16_t hsl_l;
-    uint16_t min_temp;
-    uint16_t max_temp;
-    uint16_t curr_temp;
-    uint8_t elem_num;
-    uint8_t onoff;
-    int16_t level;
+    uint16_t unicast{0};
+    uint16_t hsl_h{0};
+    uint16_t hsl_s{0};
+    uint16_t hsl_l{0};
+    uint16_t min_temp{0};
+    uint16_t max_temp{0};
+    uint16_t curr_temp{0};
+    uint8_t elem_num{0};
+    uint8_t onoff{0};
+    int16_t level{0};
+    uint16_t features{0};
+    uint16_t features_to_bind{0};
     color_mode_t color_mode = color_mode_t::hs;
 
 } bm2mqtt_node_info;
 
-bm2mqtt_node_info* GetNode(int nodeIndex);
-bm2mqtt_node_info* GetNode(uint8_t uuid[16]);
+class ble2mqtt_node_manager final
+{
+public:
+    ble2mqtt_node_manager() = default;
+    ~ble2mqtt_node_manager() = default;
 
-bm2mqtt_node_info* GetNodeFromMac(const std::string& mac);
-void for_each_node(std::function<void( const bm2mqtt_node_info *)> func);
+    bm2mqtt_node_info *get_node(int nodeIndex);
+    bm2mqtt_node_info *get_node(const uint8_t uuid[16]);
+    bm2mqtt_node_info *get_node(const std::string &mac);
+    bm2mqtt_node_info *get_node(uint16_t unicast);
+    bm2mqtt_node_info* get_or_create(const uint8_t uuid[16]);
 
-esp_err_t example_ble_mesh_store_node_info(const uint8_t uuid[16], uint16_t unicast,
-                                                  uint8_t elem_num, uint8_t onoff_state);
+    
+    void for_each_node(std::function<void(const bm2mqtt_node_info *)> func);
 
+    esp_err_t store_node_info(const uint8_t uuid[16], uint16_t unicast,
+                                               uint8_t elem_num, uint8_t onoff_state);
 
-bm2mqtt_node_info *example_ble_mesh_get_node_info(uint16_t unicast);
+    void remove_node(uint8_t uuid[16]);
 
+    esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
+                                              bm2mqtt_node_info *node,
+                                              esp_ble_mesh_model_t *model, uint32_t opcode);
 
-esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                                 bm2mqtt_node_info *node,
-                                                 esp_ble_mesh_model_t *model, uint32_t opcode);
+    void print_nodes();
 
+    void Initialize();
+    void mark_node_info_dirty();
+private:
+    // Disable copy and move constructors and assignment operators
+    ble2mqtt_node_manager(const ble2mqtt_node_manager &) = delete;
+    ble2mqtt_node_manager &operator=(const ble2mqtt_node_manager &) = delete;
+    ble2mqtt_node_manager(ble2mqtt_node_manager &&) = delete;
+    ble2mqtt_node_manager &operator=(ble2mqtt_node_manager &&) = delete;
 
-void remove_provisioned_node(uint8_t uuid[16]);
+    static void save_timer_callback(void* arg);
+    void on_timer_callback();
+    
+    void init_node_save_timer();
+
+    esp_err_t save_node_info_vector();
+    esp_err_t load_node_info_vector();
+
+    std::vector<bm2mqtt_node_info> tracked_nodes{};
+
+    esp_timer_handle_t save_timer;
+    bool node_info_dirty = false;
+};
+
+ble2mqtt_node_manager& node_manager();

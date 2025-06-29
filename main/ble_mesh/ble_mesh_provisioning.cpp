@@ -85,33 +85,6 @@ void print_model_name(uint16_t model_id)
     }
 }
 
-void process_composition_data(esp_ble_mesh_cfg_client_cb_param_t *param)
-{
-
-    const esp_ble_mesh_comp_t *comp = esp_ble_mesh_get_composition_data();
-    
-    esp_ble_mesh_elem_t *element = NULL;
-    ///esp_ble_mesh_model_t *model = NULL;
-    int i;
-
-    if (!comp) {
-        return;
-    }
-   // uint16_t node_addr = param->params->ctx.addr;
-    //uint8_t elem_count = comp->element_count; // number of pages/elements
-     for (i = 0; i < comp->element_count; i++)
-     {
-        element = &comp->elements[i];
-        ESP_LOGI(TAG, "element_addr: 0x%x, sig_model_count: %u, vnd_model_count: %u",
-             element->element_addr, element->sig_model_count, element->vnd_model_count);
-    
-             // ESP_LOGI(TAG, "device uuid: %s", bt_hex(uuid, 16));
-
-    //     ESP_LOGI(TAG, "  SIG Model: 0x%04X", model_id);
-        
-     }
-
-}
 esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
                                uint16_t unicast, uint8_t elem_num, uint16_t net_idx)
 {
@@ -133,21 +106,21 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
         return ESP_FAIL;
     }
 
-    err = example_ble_mesh_store_node_info(uuid, unicast, elem_num, LED_OFF);
+    err = node_manager().store_node_info(uuid, unicast, elem_num, LED_OFF);
     if (err)
     {
         ESP_LOGE(TAG, "%s: Store node info failed", __func__);
         return ESP_FAIL;
     }
 
-    node = example_ble_mesh_get_node_info(unicast);
+    node = node_manager().get_node(unicast);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
         return ESP_FAIL;
     }
 
-    example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+    node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
     get_state.comp_data_get.page = COMP_DATA_PAGE_0;
     err = esp_ble_mesh_config_client_get_state(&common, &get_state);
     if (err)
@@ -205,6 +178,9 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device& unprov_device)
 
     if (!already_registered)
     {
+        ESP_LOGI(TAG, "[%s] Received unprovisioned device: %s, address: %s, address type: %d, adv type: %d",
+                 __func__,bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
+                 unprov_device.addr_type, unprov_device.adv_type);
         unprovisioned_devices.emplace_back(unprov_device);
     }
 }
@@ -279,7 +255,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_DISABLE_COMP_EVT, err_code %d", param->provisioner_prov_disable_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
+        //ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
         
         ble2mqtt_unprovisioned_device new_entry;
         memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
@@ -420,18 +396,15 @@ int list_provisioned_nodes(int argc, char **argv)
 
     return 0;
 }
-extern int ShitShowAppKeyBind;
-
 
 void unprovision_device(uint8_t uuid[16])
 {
-    if (bm2mqtt_node_info *node_info = GetNode(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid))
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
-        ShitShowAppKeyBind = 0;
         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
         if (err != ESP_OK)
         {
@@ -439,33 +412,54 @@ void unprovision_device(uint8_t uuid[16])
         }
         else
         {
-            remove_provisioned_node(uuid);
+            //node_manager().remove_node(uuid);
         }
     }
+     //esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
 }
 
-int unprovision(int argc, char **argv)
+int unprovision_all_nodes(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
 
-    if (nerrors != 0) {
-        arg_print_errors(stderr, node_index_args.end, argv[0]);
-        return 1;
+    struct node_uuid
+    {
+       uint8_t  dev_uuid[16];
+    };
+    std::vector<node_uuid> uuids_to_remove;
+
+
+    for_each_provisioned_node([&](const esp_ble_mesh_node_t * node)
+    {
+            ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
+            ESP_LOGI(TAG, "  device name: %s", node->name);
+            ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
+            ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
+            ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
+            ESP_LOGI(TAG, "  NetKey Index: %d", node->net_idx);
+
+            uuids_to_remove.emplace_back(node_uuid{});
+            memcpy( uuids_to_remove.back().dev_uuid, node->dev_uuid, 16);
+
+    });
+
+    for (auto& bla :  uuids_to_remove)
+    {
+        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla.dev_uuid); node_info )
+        {
+            esp_ble_mesh_client_common_param_t common = {0};
+            esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+            node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+
+            int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
+            }
+        }
+
+         //esp_ble_mesh_provisioner_delete_node_with_uuid(bla.dev_uuid);
     }
     
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
-
-        ShitShowAppKeyBind = 0;
-        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
-        }
-    }
     return 0;
 }
 
@@ -479,13 +473,13 @@ int get_composition_data(int argc, char **argv)
         arg_print_errors(stderr, node_index_args.end, argv[0]);
         return 1;
     }
-    if (bm2mqtt_node_info *node_info = GetNode(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
 
         get_composition_data_debug = true;
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-        example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
         get_state.comp_data_get.page = COMP_DATA_PAGE_0;
         auto err = esp_ble_mesh_config_client_get_state(&common, &get_state);
         if (err)
@@ -514,7 +508,7 @@ void RegisterProvisioningDebugCommands()
         .command = "prov_unprovision_all_nodes",
         .help = "Unprovisionned all paired nodes",
         .hint = NULL,
-        .func = &unprovision,
+        .func = &unprovision_all_nodes,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&unprovision_cmd));
 

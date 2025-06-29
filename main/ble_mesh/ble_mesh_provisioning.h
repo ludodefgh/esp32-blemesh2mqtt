@@ -41,8 +41,6 @@ void for_each_unprovisioned_node(std::function<void( const ble2mqtt_unprovisione
 void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                                              esp_ble_mesh_prov_cb_param_t *param);
 
-void process_composition_data(esp_ble_mesh_cfg_client_cb_param_t *param);
-
 int list_provisioned_nodes(int argc = 0, char **argv = nullptr);
 
 void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func);
