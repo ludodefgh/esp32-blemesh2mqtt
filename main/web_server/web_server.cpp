@@ -4,7 +4,7 @@
 #include "esp_log.h"
 #include <esp_ble_mesh_networking_api.h>
 #include <ble_mesh/ble_mesh_provisioning.h>
-#include <ble_mesh/ble_mesh_control.h>
+#include <ble_mesh/ble_mesh_commands.h>
 
 #define TAG "WEB_SERVER"
 

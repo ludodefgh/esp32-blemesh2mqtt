@@ -16,6 +16,7 @@
 #include <string>
 #include "cJSON.h"
 #include "_config.h"
+#include <ble_mesh/ble_mesh_commands.h>
 
 #define TAG "APP_MQTT"
 

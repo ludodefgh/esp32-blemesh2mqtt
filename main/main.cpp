@@ -17,6 +17,7 @@
 #include "mqtt/mqtt_control.h"
 #include "web_server/web_server.h"
 #include "_config.h"
+#include "ble_mesh/ble_mesh_commands.h"
 
 #define TAG "EXAMPLE"
 
@@ -127,6 +128,7 @@ extern "C" void app_main()
 
     RegisterProvisioningDebugCommands();
     RegisterBleMeshDebugCommands();
+    RegisterBleMeshCommandsDebugCommands();
     RegisterMQTTDebugCommands();
 
     /* Initialize the Bluetooth Mesh Subsystem */
@@ -150,7 +152,7 @@ extern "C" void app_main()
     initDebugGPIO();
 #endif
 
-    RefreshNodes();
+    refresh_all_nodes();
 
     /// MQTT START
     esp_log_level_set("*", ESP_LOG_INFO);

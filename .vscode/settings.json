@@ -6,6 +6,7 @@
   "idf.port": "/dev/ttyUSB0",
   "idf.flashType": "UART",
   "files.associations": {
+    "COMMIT_EDITMSG": "plaintext",
     "esp_ble_mesh_provisioning_api.h": "c",
     "ble_mesh_example_init.h": "c",
     "esp_err.h": "c",
@@ -95,7 +96,8 @@
     "thread": "cpp",
     "cinttypes": "cpp",
     "variant": "cpp",
-    "*.inc": "cpp"
+    "*.inc": "cpp",
+    "queue": "cpp"
   },
   "files.autoSave": "afterDelay",
   "editor.fontSize": 13

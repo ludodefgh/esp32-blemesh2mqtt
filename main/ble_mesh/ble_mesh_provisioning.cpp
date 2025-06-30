@@ -415,7 +415,7 @@ void unprovision_device(uint8_t uuid[16])
             //node_manager().remove_node(uuid);
         }
     }
-     //esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
+    esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
 }
 
 int unprovision_all_nodes(int argc, char **argv)
@@ -444,7 +444,7 @@ int unprovision_all_nodes(int argc, char **argv)
 
     for (auto& bla :  uuids_to_remove)
     {
-        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla.dev_uuid); node_info )
+        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla.dev_uuid) )
         {
             esp_ble_mesh_client_common_param_t common = {0};
             esp_ble_mesh_cfg_client_set_state_t set_state = {0};
@@ -457,7 +457,7 @@ int unprovision_all_nodes(int argc, char **argv)
             }
         }
 
-         //esp_ble_mesh_provisioner_delete_node_with_uuid(bla.dev_uuid);
+        esp_ble_mesh_provisioner_delete_node_with_uuid(bla.dev_uuid);
     }
     
     return 0;
