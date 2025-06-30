@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include "_config.h"
 #include <ble_mesh/ble_mesh_commands.h>
+#include "debug/debug_commands_registry.h"
 
 #define TAG "APP_MQTT"
 
@@ -568,3 +569,5 @@ void RegisterMQTTDebugCommands()
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&mqtt_status_cmd));
 }
+
+REGISTER_DEBUG_COMMAND(RegisterMQTTDebugCommands);

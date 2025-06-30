@@ -18,6 +18,7 @@
 #include "web_server/web_server.h"
 #include "_config.h"
 #include "ble_mesh/ble_mesh_commands.h"
+#include "debug/debug_commands_registry.h"
 
 #define TAG "EXAMPLE"
 
@@ -62,6 +63,7 @@ void RegisterDebugCommands()
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
+REGISTER_DEBUG_COMMAND(RegisterDebugCommands);
 #pragma endregion Debug
 
 
@@ -124,12 +126,7 @@ extern "C" void app_main()
         ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
     }
 
-    RegisterDebugCommands();
-
-    RegisterProvisioningDebugCommands();
-    RegisterBleMeshDebugCommands();
-    RegisterBleMeshCommandsDebugCommands();
-    RegisterMQTTDebugCommands();
+    debug_command_registry::run_all();
 
     /* Initialize the Bluetooth Mesh Subsystem */
     err = ble_mesh_init();

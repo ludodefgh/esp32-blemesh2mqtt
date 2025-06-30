@@ -26,6 +26,7 @@
 
 #include "ble_mesh_node.h"
 #include "debug_console_common.h"
+#include "debug/debug_commands_registry.h"
 
 #define TAG "APP_PROV"
 
@@ -526,3 +527,5 @@ void RegisterProvisioningDebugCommands()
     ESP_ERROR_CHECK(esp_console_cmd_register(&get_composition_data_cmd));
 
 }
+
+REGISTER_DEBUG_COMMAND(RegisterProvisioningDebugCommands);

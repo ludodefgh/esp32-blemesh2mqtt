@@ -5,7 +5,8 @@
 #include <esp_err.h>
 #include <esp_console.h>
 #include <argtable3/argtable3.h>
-#include <debug_console_common.h>
+#include "debug_console_common.h"
+#include "debug/debug_commands_registry.h"
 
 #define TAG "MESH_COMMANDS"
 
@@ -439,3 +440,4 @@ void RegisterBleMeshCommandsDebugCommands()
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_set_cmd));
 
 }
+REGISTER_DEBUG_COMMAND(RegisterBleMeshCommandsDebugCommands);

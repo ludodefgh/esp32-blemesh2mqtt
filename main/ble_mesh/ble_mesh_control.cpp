@@ -26,6 +26,7 @@
 #include "sig_companies/company_map.h"
 #include "message_queue.h"
 #include "ble_mesh_commands.h"
+#include "debug/debug_commands_registry.h"
 
 #define TAG "APP_CONTROL"
 
@@ -995,3 +996,5 @@ void RegisterBleMeshDebugCommands()
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&print_nodes_cmd));
 }
+
+REGISTER_DEBUG_COMMAND(RegisterBleMeshDebugCommands);
