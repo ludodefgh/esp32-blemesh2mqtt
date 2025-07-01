@@ -22,6 +22,7 @@
 
 #include "esp_ble_mesh_defs.h"
 #include <esp_timer.h>
+#include "Uui128.h"
 
 #define LED_OFF 0x0
 #define LED_ON 0x1
@@ -36,7 +37,7 @@ enum class color_mode_t : uint8_t
 
 typedef struct
 {
-    uint8_t uuid[16];
+    Uuid128 uuid;
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t hsl_s{0};
@@ -61,7 +62,7 @@ public:
     ~ble2mqtt_node_manager() = default;
 
     bm2mqtt_node_info *get_node(int nodeIndex);
-    bm2mqtt_node_info *get_node(const uint8_t uuid[16]);
+    bm2mqtt_node_info *get_node(const Uuid128& uuid);
     bm2mqtt_node_info *get_node(const std::string &mac);
     bm2mqtt_node_info *get_node(uint16_t unicast);
     bm2mqtt_node_info* get_or_create(const uint8_t uuid[16]);
@@ -69,10 +70,10 @@ public:
     
     void for_each_node(std::function<void(const bm2mqtt_node_info *)> func);
 
-    esp_err_t store_node_info(const uint8_t uuid[16], uint16_t unicast,
+    esp_err_t store_node_info(const Uuid128& uuid, uint16_t unicast,
                                                uint8_t elem_num, uint8_t onoff_state);
 
-    void remove_node(uint8_t uuid[16]);
+    void remove_node(const Uuid128& uuid);
 
     esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
                                               bm2mqtt_node_info *node,

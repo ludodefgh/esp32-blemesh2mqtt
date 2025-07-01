@@ -34,12 +34,11 @@
  extern esp_ble_mesh_client_t config_client;
 std::vector<ble2mqtt_unprovisioned_device> unprovisioned_devices;
 
-void remove_unprovisioned_device(const uint8_t uuid[16])
+void remove_unprovisioned_device(const Uuid128& uuid)
 {
-    //for(auto index =0; index < unprovisioned_devices.size(); ++index)
     for (auto it = unprovisioned_devices.begin(); it != unprovisioned_devices.end(); ++it)
     {
-       if(memcmp(it->dev_uuid, uuid, 16) == 0)
+       if(memcmp(it->dev_uuid, uuid.raw(), 16) == 0)
        {
             unprovisioned_devices.erase(it);
             break;
@@ -107,7 +106,8 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
         return ESP_FAIL;
     }
 
-    err = node_manager().store_node_info(uuid, unicast, elem_num, LED_OFF);
+    const Uuid128 uuid128 {uuid};
+    err = node_manager().store_node_info(uuid128, unicast, elem_num, LED_OFF);
     if (err)
     {
         ESP_LOGE(TAG, "%s: Store node info failed", __func__);
@@ -152,8 +152,8 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
      * info here, the wrong app_idx (initialized with 0xFFFF) will be stored in nvs
      * just before restoring it.
      */
-
-     remove_unprovisioned_device(uuid);
+    
+    remove_unprovisioned_device(uuid128);
 
     return ESP_OK;
 }
@@ -406,7 +406,7 @@ int list_provisioned_nodes_esp(int argc, char **argv)
     return 0;
 }
 
-void unprovision_device(uint8_t uuid[16])
+void unprovision_device(const Uuid128& uuid)
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid))
     {
@@ -422,7 +422,7 @@ void unprovision_device(uint8_t uuid[16])
                                         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                         if (err != ESP_OK)
                                         {
-                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid, 16));
+                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid.raw(), 16));
                                         }
                                     },
                                     .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
@@ -431,18 +431,14 @@ void unprovision_device(uint8_t uuid[16])
     }
     else
     {
-        esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
+        esp_ble_mesh_provisioner_delete_node_with_uuid(uuid.raw());
     }
     
 }
 
 int unprovision_all_nodes(int argc, char **argv)
 {
-    struct node_uuid
-    {
-       uint8_t  dev_uuid[16];
-    };
-    std::vector<node_uuid> uuids_to_remove;
+    std::vector<Uuid128> uuids_to_remove;
 
 
     for_each_provisioned_node([&](const esp_ble_mesh_node_t * node)
@@ -454,14 +450,12 @@ int unprovision_all_nodes(int argc, char **argv)
             ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
             ESP_LOGI(TAG, "  NetKey Index: %d", node->net_idx);
 
-            uuids_to_remove.emplace_back(node_uuid{});
-            memcpy( uuids_to_remove.back().dev_uuid, node->dev_uuid, 16);
+            uuids_to_remove.emplace_back(Uuid128{node->dev_uuid});
+   });
 
-    });
-
-    for (auto& bla :  uuids_to_remove)
+    for (Uuid128& bla :  uuids_to_remove)
     {
-        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla.dev_uuid) )
+        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla) )
         {
             message_queue().enqueue(node_info->unicast, message_payload{
                                    .send = [node_info]()
@@ -473,7 +467,7 @@ int unprovision_all_nodes(int argc, char **argv)
                                         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                         if (err != ESP_OK)
                                         {
-                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
+                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid.raw(), 16));
                                         }
                                    },
                                    .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
@@ -483,7 +477,7 @@ int unprovision_all_nodes(int argc, char **argv)
            
         }
 
-        esp_ble_mesh_provisioner_delete_node_with_uuid(bla.dev_uuid);
+        esp_ble_mesh_provisioner_delete_node_with_uuid(bla.raw());
     }
     
     return 0;

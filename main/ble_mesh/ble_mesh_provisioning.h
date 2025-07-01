@@ -47,5 +47,5 @@ void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)>
 
 void RegisterProvisioningDebugCommands();
 
-void unprovision_device(uint8_t uuid[16]);
+void unprovision_device(const Uuid128& dev_uuid);
 void provision_device(const uint8_t uuid[16]);

@@ -63,7 +63,7 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
 
 std::string get_command_topic(const bm2mqtt_node_info *node_info)
 {
-    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
         snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
@@ -77,7 +77,7 @@ std::string get_command_topic(const bm2mqtt_node_info *node_info)
 
 std::string get_discovery_id(bm2mqtt_node_info *node_info)
 {
-    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
         snprintf(buf, sizeof(buf), "homeassistant/light/blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
@@ -274,7 +274,7 @@ std::unique_ptr<cJSON> make_discovery_message(bm2mqtt_node_info *node)
 {
     cJSON *root = cJSON_CreateObject();
 
-    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid))
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid.raw()))
     {
         char buf[64] = {0};
         snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
@@ -501,7 +501,7 @@ int delete_entity(int argc, char **argv)
 
 void send_status(const bm2mqtt_node_info *node_info)
 {
-    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid))
+    if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
         snprintf(buf, sizeof(buf), "blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));

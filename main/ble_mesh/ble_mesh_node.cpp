@@ -38,11 +38,11 @@ void ble2mqtt_node_manager::for_each_node(std::function<void(const bm2mqtt_node_
     }
 }
 
-bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const uint8_t uuid[16])
+bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const Uuid128& uuid)
 {
     for (auto i = 0; i < tracked_nodes.size(); i++)
     {
-        if (memcmp(tracked_nodes[i].uuid, uuid, 16) == 0)
+        if (tracked_nodes[i].uuid == uuid)
         {
             return &tracked_nodes[i];
         }
@@ -52,16 +52,17 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const uint8_t uuid[16])
 
 bm2mqtt_node_info *ble2mqtt_node_manager::get_or_create(const uint8_t uuid[16])
 {
+    const Uuid128 inuuid{uuid};
     for (auto i = 0; i < tracked_nodes.size(); i++)
     {
-        if (memcmp(tracked_nodes[i].uuid, uuid, 16) == 0)
+        if (tracked_nodes[i].uuid == inuuid)
         {
             return &tracked_nodes[i];
         }
     }
 
     tracked_nodes.emplace_back();
-    memcpy(tracked_nodes.back().uuid, uuid, 16);
+    tracked_nodes.back().uuid = inuuid;
 
     return &tracked_nodes.back();
 }
@@ -81,7 +82,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const std::string &mac)
             {
                 for (auto i = 0; i < tracked_nodes.size(); i++)
                 {
-                    if (memcmp(tracked_nodes[i].uuid, node->dev_uuid, 16) == 0)
+                    if (memcmp(tracked_nodes[i].uuid.raw(), node->dev_uuid, 16) == 0)
                     {
                         result =  &tracked_nodes[i];
                     }
@@ -91,11 +92,11 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const std::string &mac)
     return result;
 }
 
-void ble2mqtt_node_manager::remove_node(uint8_t uuid[16])
+void ble2mqtt_node_manager::remove_node(const Uuid128& uuid)
 {
     for (std::vector<bm2mqtt_node_info>::iterator it = tracked_nodes.begin(); it != tracked_nodes.end();)
     {
-        if (memcmp(it->uuid, uuid, 16) == 0)
+        if((it->uuid) == uuid)
         {
             ESP_LOGW(TAG, "%s: Remove unprovisioned device 0x%04x", __func__, it->unicast);
             it = tracked_nodes.erase(it);
@@ -126,12 +127,12 @@ esp_err_t ble2mqtt_node_manager::example_ble_mesh_set_msg_common(esp_ble_mesh_cl
     return ESP_OK;
 }
 
-esp_err_t ble2mqtt_node_manager::store_node_info(const uint8_t uuid[16], uint16_t unicast,
+esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128& uuid, uint16_t unicast,
                                                  uint8_t elem_num, uint8_t onoff_state)
 {
     int i;
 
-    if (!uuid || !ESP_BLE_MESH_ADDR_IS_UNICAST(unicast))
+    if ( !ESP_BLE_MESH_ADDR_IS_UNICAST(unicast))
     {
         return ESP_ERR_INVALID_ARG;
     }
@@ -139,7 +140,7 @@ esp_err_t ble2mqtt_node_manager::store_node_info(const uint8_t uuid[16], uint16_
     /* Judge if the device has been provisioned before */
     for (i = 0; i < tracked_nodes.size(); i++)
     {
-        if (!memcmp(tracked_nodes[i].uuid, uuid, 16))
+        if(tracked_nodes[i].uuid != uuid)
         {
             ESP_LOGW(TAG, "%s: reprovisioned device 0x%04x", __func__, unicast);
             tracked_nodes[i].unicast = unicast;
@@ -153,7 +154,7 @@ esp_err_t ble2mqtt_node_manager::store_node_info(const uint8_t uuid[16], uint16_
     }
 
     tracked_nodes.emplace_back();
-    memcpy(tracked_nodes.back().uuid, uuid, 16);
+    tracked_nodes.back().uuid = uuid;
     tracked_nodes.back().unicast = unicast;
     tracked_nodes.back().elem_num = elem_num;
     tracked_nodes.back().onoff = onoff_state;
@@ -189,7 +190,7 @@ void ble2mqtt_node_manager::print_registered_nodes()
     ESP_LOGI(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
-        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node.uuid, 16));
+        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node.uuid.raw(), 16));
         ESP_LOGI(TAG, "  Primary Address: 0x%04X", node.unicast);
         ESP_LOGI(TAG, "  Element Count: %d", node.elem_num);
         ESP_LOGI(TAG, "  On/Off State: %d", node.onoff);

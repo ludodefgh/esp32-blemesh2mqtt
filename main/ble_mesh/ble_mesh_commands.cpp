@@ -8,6 +8,7 @@
 #include "debug_console_common.h"
 #include "debug/debug_commands_registry.h"
 #include "message_queue.h"
+#include "Uui128.h"
 
 #define TAG "MESH_COMMANDS"
 
@@ -330,7 +331,7 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
     return 0;
 }
 
-int ble_mesh_ctl_lightness_set(int lightness_value, uint8_t uuid[16])
+int ble_mesh_ctl_lightness_set(int lightness_value, const Uuid128& uuid)
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {

@@ -148,7 +148,8 @@ esp_err_t provision_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    provision_device(uuid);  // Starts provisioning
+    const Uuid128 uuid128{uuid};
+    provision_device(uuid128.raw());  // Starts provisioning
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -197,7 +198,8 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
 
     // Optional: use node->unicast_addr or other data
     printf("Lightness for UUID: %s → %d\n", uuid_str, lightness);
-    ble_mesh_ctl_lightness_set(lightness, uuid); // Extend this to accept node?
+    const Uuid128 dev_uuid{uuid};
+    ble_mesh_ctl_lightness_set(lightness, dev_uuid); // Extend this to accept node?
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -218,7 +220,8 @@ esp_err_t unprovision_handler(httpd_req_t *req)
     }
 
     // Call your function to re-provision the node
-    unprovision_device(uuid); // Your unprovisioning function
+    const Uuid128 dev_uuid{uuid};
+    unprovision_device(dev_uuid); // Your unprovisioning function
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;

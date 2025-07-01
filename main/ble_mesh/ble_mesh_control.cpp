@@ -433,13 +433,13 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             {
                 ESP_LOGI(TAG, "Node reset successfully");
                 node_manager().remove_node(node->uuid);
-                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid);
+                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
                 node_manager().mark_node_info_dirty();
             }
             else
             {
                 ESP_LOGE(TAG, "Node not found for reset");
-                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid);
+                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
             }
         };
         break;
@@ -838,7 +838,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
 {
     if (node != nullptr)
     {
-        memcpy(node_info->uuid, node->dev_uuid, 16);
+        node_info->uuid = Uuid128{node->dev_uuid};
         node_info->unicast = node->unicast_addr;
         node_info->elem_num = node->element_num;
     }
