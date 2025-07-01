@@ -184,12 +184,12 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(uint16_t unicast)
     return nullptr;
 }
 
-void ble2mqtt_node_manager::print_nodes()
+void ble2mqtt_node_manager::print_registered_nodes()
 {
     ESP_LOGI(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
-        ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node.uuid, 16));
+        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node.uuid, 16));
         ESP_LOGI(TAG, "  Primary Address: 0x%04X", node.unicast);
         ESP_LOGI(TAG, "  Element Count: %d", node.elem_num);
         ESP_LOGI(TAG, "  On/Off State: %d", node.onoff);

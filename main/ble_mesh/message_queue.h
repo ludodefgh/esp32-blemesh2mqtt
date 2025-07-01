@@ -3,7 +3,7 @@
 #include <functional>
 #include <cstdint>
 #include <map>
-
+#include <esp_timer.h>
 
 struct message_payload {
     std::function<void()> send;
@@ -19,10 +19,16 @@ public:
 
     size_t size() const { return queue.size(); }
     bool is_waiting() const { return waiting; }
+    const std::queue<message_payload> &get_queue() const { return queue; }
 private:
     void try_send_next();
 
+     void ensure_failsafe_timer();
+    static void failsafe_callback(void *arg);
+    void on_failsafe_trigger();
+
     std::queue<message_payload> queue;
+    esp_timer_handle_t failsafe_timer = nullptr;
     bool waiting = false;
 };
 

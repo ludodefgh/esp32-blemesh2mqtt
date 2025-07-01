@@ -41,11 +41,11 @@ void for_each_unprovisioned_node(std::function<void( const ble2mqtt_unprovisione
 void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                                              esp_ble_mesh_prov_cb_param_t *param);
 
-int list_provisioned_nodes(int argc = 0, char **argv = nullptr);
+int list_provisioned_nodes_esp(int argc = 0, char **argv = nullptr);
 
 void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func);
 
 void RegisterProvisioningDebugCommands();
 
 void unprovision_device(uint8_t uuid[16]);
-void provision_device(uint8_t uuid[16]);
+void provision_device(const uint8_t uuid[16]);

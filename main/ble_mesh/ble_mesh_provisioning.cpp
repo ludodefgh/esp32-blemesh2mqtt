@@ -27,6 +27,7 @@
 #include "ble_mesh_node.h"
 #include "debug_console_common.h"
 #include "debug/debug_commands_registry.h"
+#include "message_queue.h"
 
 #define TAG "APP_PROV"
 
@@ -89,8 +90,7 @@ void print_model_name(uint16_t model_id)
 esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
                                uint16_t unicast, uint8_t elem_num, uint16_t net_idx)
 {
-    esp_ble_mesh_client_common_param_t common = {0};
-    esp_ble_mesh_cfg_client_get_state_t get_state = {0};
+   
     bm2mqtt_node_info *node = NULL;
     char name[11] = {0};
     int err;
@@ -121,14 +121,26 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
         return ESP_FAIL;
     }
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
-    get_state.comp_data_get.page = COMP_DATA_PAGE_0;
-    err = esp_ble_mesh_config_client_get_state(&common, &get_state);
-    if (err)
-    {
-        ESP_LOGE(TAG, "%s: Send config comp data get failed", __func__);
-        return ESP_FAIL;
-    }
+    message_queue().enqueue(node->unicast,
+                            message_payload{
+                                .send = [node]()
+                                {
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_cfg_client_get_state_t get_state = {0};
+                                    ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node->unicast);
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+                                    get_state.comp_data_get.page = COMP_DATA_PAGE_0;
+                                    esp_err_t err = esp_ble_mesh_config_client_get_state(&common, &get_state);
+                                    if (err)
+                                    {
+                                        ESP_LOGE(TAG, "%s: Send config comp data get failed", __func__);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET,
+                                .retries_left = 3,
+                            });
+
+    
 
     store.net_idx = net_idx;
     /* mesh_example_info_store() shall not be invoked here, because if the device
@@ -186,7 +198,7 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device& unprov_device)
     }
 }
 
-void provision_device(uint8_t uuid[16])
+void provision_device(const uint8_t uuid[16])
 {
     ble2mqtt_unprovisioned_device* device = nullptr;
     for(auto index = 0; index < unprovisioned_devices.size(); ++index)
@@ -341,7 +353,6 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                 return;
             }
 
-//#if defined(APP_USE_ONOFF_CLIENT)
             err = esp_ble_mesh_provisioner_bind_app_key_to_local_model(PROV_OWN_ADDR, store.app_idx,
                                                                        ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI, ESP_BLE_MESH_CID_NVAL);
             if (err != ESP_OK)
@@ -349,7 +360,6 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                     ESP_LOGE(TAG, "Provisioner bind local on-off model [ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI] appkey failed");
                 return;
             }
-//#endif
         }
         break;
     }
@@ -367,26 +377,24 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
 void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func)
 {
-    uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
-
-    for (int i = 0; i < node_count; i++)
+    for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
-        if (node != NULL)
+        if (node != nullptr)
         {
           func(node);
         }
     }
 }
 
-int list_provisioned_nodes(int argc, char **argv)
+int list_provisioned_nodes_esp(int argc, char **argv)
 {
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
     ESP_LOGI(TAG, "Provisioned nodes: %d", node_count);
 
     for_each_provisioned_node([](const esp_ble_mesh_node_t * node)
     {
-            ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
+            ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node->dev_uuid, 16));
             ESP_LOGI(TAG, "  device name: %s", node->name);
             ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
             ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
@@ -402,26 +410,34 @@ void unprovision_device(uint8_t uuid[16])
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid))
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+        message_queue().enqueue(node_info->unicast,
+                                message_payload{
+                                    .send = [node_info]()
+                                    {
+                                        ESP_LOGW(TAG, "unprovision_device for node 0x%04X", __func__, node_info->unicast);
+                                        esp_ble_mesh_client_common_param_t common = {0};
+                                        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+                                        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
-        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid, 16));
-        }
-        else
-        {
-            //node_manager().remove_node(uuid);
-        }
+                                        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+                                        if (err != ESP_OK)
+                                        {
+                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid, 16));
+                                        }
+                                    },
+                                    .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
+                                    .retries_left = 2,
+                                });
     }
-    esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
+    else
+    {
+        esp_ble_mesh_provisioner_delete_node_with_uuid(uuid);
+    }
+    
 }
 
 int unprovision_all_nodes(int argc, char **argv)
 {
-
     struct node_uuid
     {
        uint8_t  dev_uuid[16];
@@ -447,15 +463,24 @@ int unprovision_all_nodes(int argc, char **argv)
     {
         if (bm2mqtt_node_info *node_info = node_manager().get_node(bla.dev_uuid) )
         {
-            esp_ble_mesh_client_common_param_t common = {0};
-            esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-            node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+            message_queue().enqueue(node_info->unicast, message_payload{
+                                   .send = [node_info]()
+                                   {
+                                        esp_ble_mesh_client_common_param_t common = {0};
+                                        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+                                        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
-            int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-            if (err != ESP_OK)
-            {
-                ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
-            }
+                                        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+                                        if (err != ESP_OK)
+                                        {
+                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid, 16));
+                                        }
+                                   },
+                                   .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
+                                   .retries_left = 3,
+                               });
+
+           
         }
 
         esp_ble_mesh_provisioner_delete_node_with_uuid(bla.dev_uuid);
@@ -492,15 +517,50 @@ int get_composition_data(int argc, char **argv)
     return ESP_OK;
 }
 
+int provision_device_index(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&node_index_args);
+
+    if (nerrors != 0)
+    {
+        arg_print_errors(stderr, node_index_args.end, argv[0]);
+        return 1;
+    }
+
+    if (node_index_args.node_index->ival[0] < 0 || node_index_args.node_index->ival[0] >= unprovisioned_devices.size())
+    {
+        ESP_LOGE(TAG, "Invalid node index: %d", node_index_args.node_index->ival[0]);
+        return 1;
+    }
+
+    const ble2mqtt_unprovisioned_device& unprov_device = unprovisioned_devices[node_index_args.node_index->ival[0]];
+    provision_device(unprov_device.dev_uuid);
+
+    return 0;
+}
+int list_unprovisionned_devices(int argc, char **argv)
+{
+    ESP_LOGI(TAG, "Unprovisionned devices: %d", unprovisioned_devices.size());
+
+    for_each_unprovisioned_node([](const ble2mqtt_unprovisioned_device& unprov_device)
+    {
+        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(unprov_device.dev_uuid, 16));
+        ESP_LOGI(TAG, "  address: %s, address type: %d, adv type: %d",
+                 bt_hex(unprov_device.addr, BD_ADDR_LEN), unprov_device.addr_type, unprov_device.adv_type);
+    });
+
+    return 0;
+}
+
 void RegisterProvisioningDebugCommands()
 {
     /* Register commands */
 
     const esp_console_cmd_t list_prov_nodes_cmd = {
-        .command = "prov_list_nodes",
-        .help = "List provisioned nodes",
+        .command = "list_provisionned_devices",
+        .help = "List provisioned nodes at esp level",
         .hint = NULL,
-        .func = &list_provisioned_nodes,
+        .func = &list_provisioned_nodes_esp,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&list_prov_nodes_cmd));
 
@@ -525,6 +585,23 @@ void RegisterProvisioningDebugCommands()
         .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&get_composition_data_cmd));
+
+    const esp_console_cmd_t list_unprovisionned_cmd = {
+        .command = "list_unprovisionned_devices",
+        .help = "List unprovisionned devices",
+        .hint = NULL,
+        .func = &list_unprovisionned_devices,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&list_unprovisionned_cmd));
+
+    const esp_console_cmd_t provision_device_index_cmd = {
+        .command = "provision_device_index",
+        .help = "Provision a device by index",
+        .hint = NULL,
+        .func = &provision_device_index,
+        .argtable = &node_index_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&provision_device_index_cmd));
 
 }
 

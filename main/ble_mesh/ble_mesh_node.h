@@ -44,11 +44,12 @@ typedef struct
     uint16_t min_temp{0};
     uint16_t max_temp{0};
     uint16_t curr_temp{0};
-    uint8_t elem_num{0};
-    uint8_t onoff{0};
     int16_t level{0};
     uint16_t features{0};
     uint16_t features_to_bind{0};
+    uint8_t elem_num{0};
+    uint8_t onoff{0};
+    uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
     color_mode_t color_mode = color_mode_t::hs;
 
 } bm2mqtt_node_info;
@@ -77,7 +78,7 @@ public:
                                               bm2mqtt_node_info *node,
                                               esp_ble_mesh_model_t *model, uint32_t opcode);
 
-    void print_nodes();
+    void print_registered_nodes();
 
     void Initialize();
     void mark_node_info_dirty();

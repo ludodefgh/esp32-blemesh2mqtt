@@ -7,6 +7,7 @@
 #include <argtable3/argtable3.h>
 #include "debug_console_common.h"
 #include "debug/debug_commands_registry.h"
+#include "message_queue.h"
 
 #define TAG "MESH_COMMANDS"
 
@@ -27,25 +28,28 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
 void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
 {
-    ESP_LOGI(TAG, "[%s] Setting CTL for node 0x%04X", __func__, node_info->unicast);
     node_info->color_mode = color_mode_t::color_temp;
+    message_queue().enqueue(node_info->unicast,
+                            message_payload{
+                                .send = [node_info]()
+                                {
+                                    ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node_info->unicast);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-    esp_ble_mesh_client_common_param_t common = {0};
-    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
-
-    set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
-    set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
-    set_state_light.ctl_set.ctl_delta_uv = 0;
-    set_state_light.ctl_set.op_en = false;
-    set_state_light.ctl_set.delay = 0;
-    set_state_light.ctl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
-    if (err)
-    {
-        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET Set failed", __func__);
-    }
+                                    set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
+                                    set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
+                                    set_state_light.ctl_set.ctl_delta_uv = 0;
+                                    set_state_light.ctl_set.op_en = false;
+                                    set_state_light.ctl_set.delay = 0;
+                                    set_state_light.ctl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+                                    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET,
+                                .retries_left = 3,
+                            });
 }
 
 void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
@@ -57,7 +61,7 @@ void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
     node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
-    common.ctx.addr = node_info->unicast + 1;
+    common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
 
     set_state_light.ctl_temperature_set.ctl_temperature = node_info->curr_temp;
     set_state_light.ctl_temperature_set.ctl_delta_uv = 0;
@@ -73,49 +77,57 @@ void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
 
 void light_hsl_set(bm2mqtt_node_info *node_info)
 {
-    ESP_LOGI(TAG, "[%s] Setting HSL for node 0x%04X", __func__, node_info->unicast);
-    // if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_set_state_t set_state = {0};
+    message_queue().enqueue(node_info->unicast,
+                            message_payload{
+                                .send = [node_info]()
+                                {
+                                    ESP_LOGW(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", __func__, node_info->unicast);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_light_client_set_state_t set_state = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
-        node_info->color_mode = color_mode_t::hs;
-        set_state.hsl_set.hsl_hue = node_info->hsl_h;
-        set_state.hsl_set.hsl_saturation = node_info->hsl_s;
-        set_state.hsl_set.hsl_lightness = node_info->hsl_l;
-        set_state.hsl_set.op_en = false;
-        set_state.hsl_set.delay = 0;
-        set_state.hsl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "[HSL] Failed to send hsl set message (err: 0x%X)", err);
-            return;
-        }
-    }
+                                    node_info->color_mode = color_mode_t::hs;
+                                    set_state.hsl_set.hsl_hue = node_info->hsl_h;
+                                    set_state.hsl_set.hsl_saturation = node_info->hsl_s;
+                                    set_state.hsl_set.hsl_lightness = node_info->hsl_l;
+                                    set_state.hsl_set.op_en = false;
+                                    set_state.hsl_set.delay = 0;
+                                    set_state.hsl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
+                                    esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+                                    if (err)
+                                    {
+                                        ESP_LOGE(TAG, "%s: call to esp_ble_mesh_light_client_set_state failed", __func__);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET,
+                                .retries_left = 3,
+                            });
 }
 
 void gen_onoff_set(bm2mqtt_node_info *node_info)
 {
-    ESP_LOGI(TAG, "[%s] Setting OnOff for node 0x%04X", __func__, node_info->unicast);
-    // if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
-    {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_generic_client_set_state_t set_state = {0};
+    message_queue().enqueue(node_info->unicast,
+                            message_payload{
+                                .send = [node_info]()
+                                {
+                                    ESP_LOGW(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
-        set_state.onoff_set.op_en = false;
-        set_state.onoff_set.onoff = node_info->onoff;
-        set_state.onoff_set.tid = store.tid++;
-        int err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: debounce_timer_callback : Generic OnOff Set failed", __func__);
-            return;
-        }
-    }
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
+                                    set_state.onoff_set.op_en = false;
+                                    set_state.onoff_set.onoff = node_info->onoff;
+                                    set_state.onoff_set.tid = store.tid++;
+                                    esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+                                    if (err)
+                                    {
+                                        ESP_LOGE(TAG, "%s: call to esp_ble_mesh_config_client_set_state failed", __func__);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET,
+                                .retries_left = 3,
+                            });
 }
 
 typedef struct
@@ -211,7 +223,7 @@ void ble_mesh_ctl_temperature_get(bm2mqtt_node_info *node_info)
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
     node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
-    common.ctx.addr = node_info->unicast + 1;
+    common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
@@ -242,7 +254,7 @@ void ble_mesh_ctl_temperature_range_get(bm2mqtt_node_info *node_info)
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
     node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
-    common.ctx.addr = node_info->unicast; // + 1;
+    common.ctx.addr = node_info->unicast;
 
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
@@ -288,21 +300,32 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
 
     if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+            message_queue().enqueue(node_info->unicast,
+                            message_payload{
+                                .send = [node_info]()
+                                {
+                                    ESP_LOGW(TAG, "[ble_mesh_ctl_lightness_set] Setting Lightness for node 0x%04X", __func__, node_info->unicast);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
-        common.ctx.addr = node_info->unicast;
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+                                    common.ctx.addr = node_info->unicast;
 
-        set_state_light.lightness_set.lightness = ctl_lightness_set_args.lightness->ival[0];
-        set_state_light.lightness_set.op_en = false;
-        set_state_light.lightness_set.delay = 0;
-        set_state_light.lightness_set.tid = store.tid++;
-        int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
-        }
+                                    set_state_light.lightness_set.lightness = ctl_lightness_set_args.lightness->ival[0];
+                                    set_state_light.lightness_set.op_en = false;
+                                    set_state_light.lightness_set.delay = 0;
+                                    set_state_light.lightness_set.tid = store.tid++;
+                                    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+                                    if (err)
+                                    {
+                                        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET,
+                                .retries_left = 3,
+                            });
+
+        
     }
     return 0;
 }
@@ -311,21 +334,32 @@ int ble_mesh_ctl_lightness_set(int lightness_value, uint8_t uuid[16])
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_set_state_t set_state_light = {0};
+         message_queue().enqueue(node_info->unicast,
+                            message_payload{
+                                .send = [node_info, lightness_value]()
+                                {
+                                    ESP_LOGW(TAG, "[ble_mesh_ctl_lightness_set] Setting Lightness for node 0x%04X", __func__, node_info->unicast);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
-        common.ctx.addr = node_info->unicast;
+                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+                                    common.ctx.addr = node_info->unicast;
 
-        set_state_light.lightness_set.lightness = lightness_value;
-        set_state_light.lightness_set.op_en = false;
-        set_state_light.lightness_set.delay = 0;
-        set_state_light.lightness_set.tid = store.tid++;
-        int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
-        }
+                                    set_state_light.lightness_set.lightness = lightness_value;
+                                    set_state_light.lightness_set.op_en = false;
+                                    set_state_light.lightness_set.delay = 0;
+                                    set_state_light.lightness_set.tid = store.tid++;
+                                    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+                                    if (err)
+                                    {
+                                        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET,
+                                .retries_left = 3,
+                            });
+
+        
     }
     return 0;
 }
@@ -346,7 +380,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
         node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
-        common.ctx.addr = node_info->unicast + 1;
+        common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
 
         set_state_light.ctl_temperature_set.ctl_temperature = ctl_temperature_set_args.temperature->ival[0];
         set_state_light.ctl_temperature_set.ctl_delta_uv = 0;

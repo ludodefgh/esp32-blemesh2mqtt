@@ -80,8 +80,7 @@ esp_err_t nodes_handler(httpd_req_t *req)
                           -1);
 
     // Loop through all nodes
-    uint16_t count = esp_ble_mesh_provisioner_get_prov_node_count();
-    for (int i = 0; i < count; i++)
+    for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
         if (!node)
@@ -179,9 +178,8 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
     }
 
     // Find the node by UUID
-    uint16_t count = esp_ble_mesh_provisioner_get_prov_node_count();
     const esp_ble_mesh_node_t *node = NULL;
-    for (int i = 0; i < count; i++)
+    for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *n = esp_ble_mesh_provisioner_get_node_table_entry()[i];
         if (n && memcmp(n->dev_uuid, uuid, 16) == 0)
@@ -232,18 +230,20 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, "{ \"provisioned\": [");
 
     // List provisioned nodes
-    uint16_t count = esp_ble_mesh_provisioner_get_prov_node_count();
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++) {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
         if (!node) continue;
 
         char uuid_str[33];
         for (int j = 0; j < 16; j++) sprintf(&uuid_str[j * 2], "%02X", node->dev_uuid[j]);
 
+        char unicast_str[6];
+        sprintf(unicast_str, "%04X", node->unicast_addr);
+
         char buf[256];
         snprintf(buf, sizeof(buf),
-            "%s{ \"uuid\": \"%s\", \"name\": \"%s\" }",
-            i > 0 ? "," : "", uuid_str, node->name);
+            "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\" }",
+            i > 0 ? "," : "", uuid_str, node->name,unicast_str);
         httpd_resp_sendstr_chunk(req, buf);
     }
 

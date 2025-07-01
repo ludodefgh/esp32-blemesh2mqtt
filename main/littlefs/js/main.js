@@ -56,6 +56,8 @@ document.addEventListener("DOMContentLoaded", function () {
           <input type="range" min="0" max="65535" step="500" value="0"
             oninput="onSliderInput('${node.uuid}', this)">
           <output>0</output><br>
+          <strong>UUID:</strong> ${node.uuid}<br>
+          <strong>Address:</strong> ${node.unicast}<br>
           <button onclick="unprovision('${node.uuid}')">Unprovision</button>
         `;
         nodesContainer.appendChild(el);

@@ -130,9 +130,10 @@ typedef enum
 
 typedef struct
 {
-    uint16_t unicast_addr;
-    uint8_t element_count;
-    uint16_t features;
+    uint16_t unicast_addr{0};
+    uint8_t element_count{0};
+    uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
+    uint16_t features{0};
 } parsed_node_info_t;
 
 bool get_composition_data_debug = false;
@@ -183,15 +184,13 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
         uint8_t num_vendor = data[offset + 3];
         offset += 4;
 
-        info.element_count++;
-
         // SIG models: each 2 bytes
         for (int i = 0; i < num_sig && offset + 2 <= length; i++)
         {
             uint16_t model_id = data[offset] | (data[offset + 1] << 8);
             offset += 2;
 
-            ESP_LOGW(TAG, "Found model ID 0x%04X: %s", model_id, lookup_model_name(model_id));
+            ESP_LOGW(TAG, "Found model ID 0x%04X: %s at element index %i", model_id, lookup_model_name(model_id), info.element_count);
             if (model_id == ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV)
             {
                 info.features |= FEATURE_GENERIC_ONOFF;
@@ -208,7 +207,16 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
             {
                 info.features |= FEATURE_LIGHT_CTL;
             }
+
+            if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV)
+            {
+                info.light_ctl_temp_offset = info.element_count; // Store the element index for Light CTL Temperature
+                ESP_LOGW(TAG, "Light CTL Temperature model found at element index %i", info.light_ctl_temp_offset);
+            }
+            
         }
+
+        info.element_count++;
 
         // Vendor models: each 4 bytes
         for (int i = 0; i < num_vendor && offset + 4 <= length; i++)
@@ -276,15 +284,6 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
                                    .retries_left = 3,
                                });
 
-        message_queue().enqueue(node->unicast, message_payload{
-                                   .send = [node]()
-                                   {
-                                       ESP_LOGW(TAG, "[%s] Light CTL temperature range model for node 0x%04X", __func__, node->unicast);
-                                       ble_mesh_hsl_range_get(node);
-                                   },
-                                   .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET,
-                                   .retries_left = 3,
-                               });
     }
 
     if ((node->features_to_bind & FEATURE_LIGHT_LIGHTNESS) != 0)
@@ -372,8 +371,6 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
 static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                                       esp_ble_mesh_cfg_client_cb_param_t *param)
 {
-    esp_ble_mesh_client_common_param_t common = {0};
-
     uint32_t opcode = param->params->opcode;
     uint16_t addr = param->params->ctx.addr;
 
@@ -404,7 +401,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         {
             ESP_LOGI(TAG, "Get : composition data %s", bt_hex(param->status_cb.comp_data_status.composition_data->data, param->status_cb.comp_data_status.composition_data->len));
 
-            on_composition_received(param, node, common);
+            on_composition_received(param, node);
             break;
         }
 
@@ -442,6 +439,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             else
             {
                 ESP_LOGE(TAG, "Node not found for reset");
+                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid);
             }
         };
         break;
@@ -457,7 +455,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             ESP_LOG_BUFFER_HEX("Publish evt : composition data %s", param->status_cb.comp_data_status.composition_data->data,
                                param->status_cb.comp_data_status.composition_data->len);
 
-            on_composition_received(param, node, common);
+            on_composition_received(param, node);
         }
         break;
         case ESP_BLE_MESH_MODEL_OP_APP_KEY_STATUS:
@@ -492,36 +490,48 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     }
 }
 
-void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_node_info *node, esp_ble_mesh_client_common_param_t &common)
+void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_node_info *node)
 {
     uint16_t addr = param->params->ctx.addr;
 
     const struct net_buf_simple *buf = param->status_cb.comp_data_status.composition_data;
     const uint8_t *data = buf->data;
     size_t len = buf->len;
-    int err = ESP_OK;
     parsed_node_info_t node_info = parse_composition_data(data, len, addr);
 
     ESP_LOGI(TAG, "Parsed node 0x%04X: elements=%d features=0x%02X",
              node_info.unicast_addr, node_info.element_count, node_info.features);
 
     node->features = node_info.features;
+    node->light_ctl_temp_offset = node_info.light_ctl_temp_offset;
 
     if (!get_composition_data_debug)
-    {
-        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
-        set_state.app_key_add.net_idx = store.net_idx;
-        set_state.app_key_add.app_idx = store.app_idx;
-        memcpy(set_state.app_key_add.app_key, prov_key.app_key, 16);
-        err = esp_ble_mesh_config_client_set_state(&common, &set_state);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: Config AppKey Add failed", __func__);
-            return;
-        }
+    {  
+        message_queue().enqueue(node->unicast, message_payload{
+                                   .send = [node]()
+                                   {
+                                        ESP_LOGW(TAG, "[on_composition_received] Requesting composition for node 0x%04X", node->unicast);
+                                        esp_ble_mesh_client_common_param_t common = {0};
+                                        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+                                        node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
+                                        set_state.app_key_add.net_idx = store.net_idx;
+                                        set_state.app_key_add.app_idx = store.app_idx;
+                                        memcpy(set_state.app_key_add.app_key, prov_key.app_key, 16);
+                                        esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+                                        if (err)
+                                        {
+                                           ESP_LOGE(TAG, "[on_composition_received] Requesting composition failed");
+                                        }
+                                   },
+                                   .opcode = ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD,
+                                   .retries_left = 3,
+                               });
+
+       
     }
     get_composition_data_debug = false;
+
+    node_manager().mark_node_info_dirty();
 }
 
 static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
@@ -815,8 +825,9 @@ esp_err_t ble_mesh_init(void)
 
 void refresh_all_nodes()
 {
+    ESP_LOGI(TAG, "[%s] Refreshing all nodes", __func__);
     for_each_provisioned_node([](const esp_ble_mesh_node_t *node)
-                              {
+        {
         if (bm2mqtt_node_info *node_info = node_manager().get_or_create(node->dev_uuid))
         {
             refresh_node(node_info, node);
@@ -965,9 +976,9 @@ int ble_mesh_set_provisioning_enabled(int argc, char **argv)
     return 0;
 }
 
-int print_nodes(int argc, char **argv)
+int print_registered_nodes(int argc, char **argv)
 {
-    node_manager().print_nodes();
+    node_manager().print_registered_nodes();
     return 0;
 }
 
@@ -988,10 +999,10 @@ void RegisterBleMeshDebugCommands()
     ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_toggle_provisioning_cmd));
 
     const esp_console_cmd_t print_nodes_cmd = {
-        .command = "print_nodes",
-        .help = "print all tracked nodes",
+        .command = "list_registered_devices",
+        .help = "List all registered devices in the node manager",
         .hint = NULL,
-        .func = &print_nodes,
+        .func = &print_registered_nodes,
         .argtable = &ctl_bool_set_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&print_nodes_cmd));
