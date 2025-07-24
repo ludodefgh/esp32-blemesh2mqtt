@@ -75,6 +75,17 @@ document.addEventListener("DOMContentLoaded", function () {
         unprovContainer.appendChild(el);
       });
     });
+
+    fetch("/api/console_commands")
+  .then(res => res.json())
+  .then(data => {
+    const container = document.getElementById("console-commands");
+    data.forEach(cmd => {
+      const div = document.createElement("div");
+      div.innerHTML = `<strong>${cmd.name}</strong>: ${cmd.help}`;
+      container.appendChild(div);
+    });
+  });
 });
 
 // You can also dynamically load node info from /nodes.json here (future upgrade)

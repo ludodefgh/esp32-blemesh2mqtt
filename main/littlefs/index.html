@@ -5,12 +5,47 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+  <div id="log-output" style="white-space:pre; font-family:monospace;
+    max-height:400px; overflow:auto; background:#111; color:#0f0;
+    padding:0.5rem; margin-bottom:1rem; border:1px solid #444;"></div>
+
   <h1>Provisioned Nodes</h1>
   <div id="nodes"></div>
 
   <h2>Unprovisioned Devices</h2>
   <div id="unprovisioned"></div>
 
+  <h2>Console commands</h2>
+  <div id="console-commands"></div>
+  //<div id="log-output"></div>
+
   <script src="/js/main.js"></script>
+
+  <script>
+    function startLogSocket() {
+  const ws = new WebSocket("ws://" + location.host + "/ws/logs");
+
+  ws.onmessage = event => {
+    const log = document.getElementById("log-output");
+    const line = event.data;
+
+    let cls = "log-default";
+    if (line.startsWith('E')) cls = "log-error";
+    else if (line.startsWith('W')) cls = "log-warning";
+    else if (line.startsWith('I')) cls = "log-info";
+
+    const div = document.createElement("div");
+    div.className = cls;
+    div.textContent = line;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  ws.onclose = () => setTimeout(startLogSocket, 2000);
+  ws.onerror = () => ws.close();
+}
+startLogSocket();
+</script>
+
 </body>
 </html>

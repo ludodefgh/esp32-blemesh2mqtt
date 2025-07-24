@@ -19,6 +19,7 @@
 #include "_config.h"
 #include "ble_mesh/ble_mesh_commands.h"
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 
 #define TAG "EXAMPLE"
 
@@ -58,7 +59,7 @@ void RegisterDebugCommands()
         .hint = NULL,
         .func = &heap_size,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&heap_cmd));
+    ESP_ERROR_CHECK(register_console_command(&heap_cmd));
 
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
@@ -88,7 +89,7 @@ void mount_littlefs(void)
 extern "C" void app_main()
 {
     esp_err_t err;
-
+    
     ESP_LOGI(TAG, "Initializing...");
 
     err = nvs_flash_init();

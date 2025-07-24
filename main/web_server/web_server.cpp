@@ -5,6 +5,8 @@
 #include <esp_ble_mesh_networking_api.h>
 #include <ble_mesh/ble_mesh_provisioning.h>
 #include <ble_mesh/ble_mesh_commands.h>
+#include "debug/console_cmd.h"
+#include <debug/websocket_logger.h>
 
 #define TAG "WEB_SERVER"
 
@@ -272,6 +274,22 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t list_console_commands_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+    
+    httpd_resp_sendstr_chunk(req, "[");
+    for (size_t i = 0; i < get_registered_commands().size(); ++i)
+    {
+        const auto &cmd = get_registered_commands()[i];
+        std::string json = "{ \"name\": \"" + cmd.name + "\", \"help\": \"" + cmd.help + "\" }";
+        if (i < get_registered_commands().size() - 1) {json += ",";}
+        httpd_resp_sendstr_chunk(req, json.c_str());
+    }
+    httpd_resp_sendstr_chunk(req, "]");
+
+    return httpd_resp_sendstr_chunk(req, NULL);
+}
+
 httpd_uri_t nodes_uri = {
     .uri = "/nodes",
     .method = HTTP_GET,
@@ -300,6 +318,13 @@ httpd_uri_t json_nodes_uri = {
     .uri = "/nodes.json",
     .method = HTTP_GET,
     .handler = nodes_json_handler,
+};
+
+httpd_uri_t console_cmds_uri = {
+    .uri = "/api/console_commands",
+    .method = HTTP_GET,
+    .handler = list_console_commands_handler,
+    .user_ctx = NULL
 };
 
 const char *get_content_type(const char *filename)
@@ -373,6 +398,14 @@ void start_webserver(void)
         httpd_register_uri_handler(server, &set_unprovision_uri);
         httpd_register_uri_handler(server, &json_nodes_uri);
         //register_static_routes(server);
+        httpd_register_uri_handler(server, &console_cmds_uri);
+       
+        websocket_logger_register_uri(server);
+        websocket_logger_install();
+
+        // This will serve static files from the littlefs partition
+        // Note: Make sure to have the littlefs partition mounted before starting the server
         httpd_register_uri_handler(server, &static_uri);
+
     }
 }

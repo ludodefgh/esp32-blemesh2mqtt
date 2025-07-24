@@ -200,7 +200,7 @@ void send_bridge_discovery()
     }
 }
 
-#define PUBLISH_INTERVAL_MS 30000
+#define PUBLISH_INTERVAL_MS 10000
 
 esp_timer_handle_t publish_timer;
 

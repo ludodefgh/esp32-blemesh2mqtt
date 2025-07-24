@@ -27,6 +27,7 @@
 #include "ble_mesh_node.h"
 #include "debug_console_common.h"
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 #include "message_queue.h"
 
 #define TAG "APP_PROV"
@@ -556,7 +557,7 @@ void RegisterProvisioningDebugCommands()
         .hint = NULL,
         .func = &list_provisioned_nodes_esp,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&list_prov_nodes_cmd));
+    ESP_ERROR_CHECK(register_console_command(&list_prov_nodes_cmd));
 
 
     const esp_console_cmd_t unprovision_cmd = {
@@ -565,7 +566,7 @@ void RegisterProvisioningDebugCommands()
         .hint = NULL,
         .func = &unprovision_all_nodes,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&unprovision_cmd));
+    ESP_ERROR_CHECK(register_console_command(&unprovision_cmd));
 
 
     node_index_args.node_index = arg_int1("n", "node", "<node_index>", "Node index as reported by prov_list_nodes command");
@@ -578,7 +579,7 @@ void RegisterProvisioningDebugCommands()
         .func = &get_composition_data,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&get_composition_data_cmd));
+    ESP_ERROR_CHECK(register_console_command(&get_composition_data_cmd));
 
     const esp_console_cmd_t list_unprovisionned_cmd = {
         .command = "list_unprovisionned_devices",
@@ -586,7 +587,7 @@ void RegisterProvisioningDebugCommands()
         .hint = NULL,
         .func = &list_unprovisionned_devices,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&list_unprovisionned_cmd));
+    ESP_ERROR_CHECK(register_console_command(&list_unprovisionned_cmd));
 
     const esp_console_cmd_t provision_device_index_cmd = {
         .command = "provision_device_index",
@@ -595,7 +596,7 @@ void RegisterProvisioningDebugCommands()
         .func = &provision_device_index,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&provision_device_index_cmd));
+    ESP_ERROR_CHECK(register_console_command(&provision_device_index_cmd));
 
 }
 

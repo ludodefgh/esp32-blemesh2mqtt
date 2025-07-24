@@ -18,6 +18,7 @@
 #include "_config.h"
 #include <ble_mesh/ble_mesh_commands.h>
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 
 #define TAG "APP_MQTT"
 
@@ -549,7 +550,7 @@ void RegisterMQTTDebugCommands()
         .func = &send_discovery,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&discovery_cmd));
+    ESP_ERROR_CHECK(register_console_command(&discovery_cmd));
 
     const esp_console_cmd_t delete_entity_cmd = {
         .command = "mqtt_delete",
@@ -558,7 +559,7 @@ void RegisterMQTTDebugCommands()
         .func = &delete_entity,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&delete_entity_cmd));
+    ESP_ERROR_CHECK(register_console_command(&delete_entity_cmd));
 
     const esp_console_cmd_t mqtt_status_cmd = {
         .command = "mqtt_status",
@@ -567,7 +568,7 @@ void RegisterMQTTDebugCommands()
         .func = &send_status,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&mqtt_status_cmd));
+    ESP_ERROR_CHECK(register_console_command(&mqtt_status_cmd));
 }
 
 REGISTER_DEBUG_COMMAND(RegisterMQTTDebugCommands);

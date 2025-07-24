@@ -13,3 +13,9 @@ output {
 button {
   margin-top: 10px;
 }
+
+
+  .log-error   { color: red; }
+  .log-warning { color: orange; }
+  .log-info    { color: limegreen; }
+  .log-default { color: white; }

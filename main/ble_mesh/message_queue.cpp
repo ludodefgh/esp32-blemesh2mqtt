@@ -3,6 +3,7 @@
 #include <map>
 #include <esp_console.h>
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 #include <esp_timer.h>
 #include <esp_ble_mesh_defs.h>
 
@@ -197,7 +198,7 @@ void RegisterMessageQueueDebugCommands()
         .hint = NULL,
         .func = &print_debug_cmd,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&message_queue_print_debug_cmd));
+    ESP_ERROR_CHECK(register_console_command(&message_queue_print_debug_cmd));
 
 }
 

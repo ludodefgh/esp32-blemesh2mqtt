@@ -27,6 +27,7 @@
 #include "message_queue.h"
 #include "ble_mesh_commands.h"
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 
 #define TAG "APP_CONTROL"
 
@@ -996,7 +997,7 @@ void RegisterBleMeshDebugCommands()
         .func = &ble_mesh_set_provisioning_enabled,
         .argtable = &ctl_bool_set_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_toggle_provisioning_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_toggle_provisioning_cmd));
 
     const esp_console_cmd_t print_nodes_cmd = {
         .command = "list_registered_devices",
@@ -1005,7 +1006,7 @@ void RegisterBleMeshDebugCommands()
         .func = &print_registered_nodes,
         .argtable = &ctl_bool_set_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&print_nodes_cmd));
+    ESP_ERROR_CHECK(register_console_command(&print_nodes_cmd));
 }
 
 REGISTER_DEBUG_COMMAND(RegisterBleMeshDebugCommands);

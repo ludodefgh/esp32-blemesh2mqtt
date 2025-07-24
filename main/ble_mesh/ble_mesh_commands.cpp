@@ -7,6 +7,7 @@
 #include <argtable3/argtable3.h>
 #include "debug_console_common.h"
 #include "debug/debug_commands_registry.h"
+#include "debug/console_cmd.h"
 #include "message_queue.h"
 #include "Uui128.h"
 
@@ -412,7 +413,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_hsl_range_get,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_hsl_range_get_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_hsl_range_get_cmd));
 
     const esp_console_cmd_t ble_mesh_lightness_range_get_cmd = {
         .command = "ble_mesh_lightness_range_get",
@@ -421,7 +422,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_lightness_range_get,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_lightness_range_get_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_lightness_range_get_cmd));
 
     ctl_lightness_set_args.lightness = arg_int1("l", "lightness", "<lightness>", "lightness");
     ctl_lightness_set_args.end = arg_end(2);
@@ -433,7 +434,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_ctl_lightness_set,
         .argtable = &ctl_lightness_set_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_lightness_set_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_lightness_set_cmd));
 
     const esp_console_cmd_t ble_mesh_ctl_temperature_get_cmd = {
         .command = "ble_mesh_ctl_temperature_get",
@@ -442,7 +443,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_ctl_temperature_get,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_get_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_temperature_get_cmd));
 
     const esp_console_cmd_t ble_mesh_ctl_temperature_range_get_cmd = {
         .command = "ble_mesh_ctl_temperature_range_get",
@@ -451,7 +452,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_ctl_temperature_range_get,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_range_get_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_temperature_range_get_cmd));
 
     const esp_console_cmd_t ble_mesh_ctl_get_cmd = {
         .command = "ble_mesh_ctl_get",
@@ -460,7 +461,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_ctl_get,
         .argtable = &node_index_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_get_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_get_cmd));
 
     ctl_temperature_set_args.temperature = arg_int1("t", "temp", "<color_temp>", "Temperature of the color in K");
     ctl_temperature_set_args.end = arg_end(2);
@@ -472,7 +473,7 @@ void RegisterBleMeshCommandsDebugCommands()
         .func = &ble_mesh_ctl_temperature_set,
         .argtable = &ctl_temperature_set_args,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&ble_mesh_ctl_temperature_set_cmd));
+    ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_temperature_set_cmd));
 
 }
 REGISTER_DEBUG_COMMAND(RegisterBleMeshCommandsDebugCommands);
