@@ -31,7 +31,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
 {
     node_info->color_mode = color_mode_t::color_temp;
-    message_queue().enqueue(node_info->unicast,
+    message_queue().enqueue(node_info,
                             message_payload{
                                 .send = [node_info]()
                                 {
@@ -79,7 +79,7 @@ void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
 
 void light_hsl_set(bm2mqtt_node_info *node_info)
 {
-    message_queue().enqueue(node_info->unicast,
+    message_queue().enqueue(node_info,
                             message_payload{
                                 .send = [node_info]()
                                 {
@@ -109,7 +109,7 @@ void light_hsl_set(bm2mqtt_node_info *node_info)
 
 void gen_onoff_set(bm2mqtt_node_info *node_info)
 {
-    message_queue().enqueue(node_info->unicast,
+    message_queue().enqueue(node_info,
                             message_payload{
                                 .send = [node_info]()
                                 {
@@ -302,7 +302,7 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
 
     if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-            message_queue().enqueue(node_info->unicast,
+            message_queue().enqueue(node_info,
                             message_payload{
                                 .send = [node_info]()
                                 {
@@ -336,7 +336,7 @@ int ble_mesh_ctl_lightness_set(int lightness_value, const Uuid128& uuid)
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-         message_queue().enqueue(node_info->unicast,
+         message_queue().enqueue(node_info,
                             message_payload{
                                 .send = [node_info, lightness_value]()
                                 {

@@ -7,7 +7,6 @@
 #include <esp_timer.h>
 #include <esp_ble_mesh_defs.h>
 
-
 static const char *TAG = "MessageQueue";
 
 message_queue_manager &message_queue()
@@ -32,10 +31,20 @@ void message_queue::try_send_next()
 
     auto &msg = queue.front();
     msg.send();
-    waiting = true;
+    if (msg.type == message_type_t::ble_mesh_message)
+    {
+        waiting = true;
 
-    ensure_failsafe_timer();
-    esp_timer_start_once(failsafe_timer, 10 * 1000000); // 10 sec
+        ensure_failsafe_timer();
+        esp_timer_start_once(failsafe_timer, 10 * 1000000); // 10 sec
+    }
+    else if (msg.type == message_type_t::mqtt_message)
+    {
+        // For MQTT messages, we don't need a failsafe timer
+        waiting = false;
+        queue.pop();
+        try_send_next();
+    }
 
     ESP_LOGI(TAG, "[%s] Sent message with opcode 0x%08X, retries left: %u", __func__, msg.opcode, msg.retries_left);
 }
@@ -54,8 +63,8 @@ void message_queue::handle_ack(uint32_t opcode)
     {
         ESP_LOGW(TAG, " [%s]  Opcode 0x%08X not found in the front [0x%08X] of the queue, waiting for next message", __func__, opcode, queue.front().opcode);
     }
-    
-    ESP_LOGW(TAG, "[%s] Current queue size: %zu", __func__,queue.size());
+
+    ESP_LOGW(TAG, "[%s] Current queue size: %zu", __func__, queue.size());
 }
 
 void message_queue::handle_timeout(uint32_t opcode)
@@ -86,98 +95,108 @@ void message_queue::handle_timeout(uint32_t opcode)
     ESP_LOGW(TAG, "[%s] Current queue size: %zu", __func__, queue.size());
 }
 
-void message_queue::ensure_failsafe_timer() {
-    if (!failsafe_timer) {
+void message_queue::ensure_failsafe_timer()
+{
+    if (!failsafe_timer)
+    {
         esp_timer_create_args_t args = {
             .callback = &message_queue::failsafe_callback,
             .arg = this,
-            .name = "msgqueue_failsafe"
-        };
+            .name = "msgqueue_failsafe"};
         esp_timer_create(&args, &failsafe_timer);
-    } else {
+    }
+    else
+    {
         esp_timer_stop(failsafe_timer);
     }
 }
 
-void message_queue::failsafe_callback(void *arg) {
+void message_queue::failsafe_callback(void *arg)
+{
     auto *self = static_cast<message_queue *>(arg);
     self->on_failsafe_trigger();
 }
 
-void message_queue::on_failsafe_trigger() {
-    if (!queue.empty()) {
+void message_queue::on_failsafe_trigger()
+{
+    if (!queue.empty())
+    {
         ESP_LOGE(TAG, "Failsafe timeout for opcode 0x%08X", queue.front().opcode);
         handle_timeout(queue.front().opcode); // acts like timeout handler
     }
 }
 
-void message_queue_manager::enqueue(uint16_t addr, const message_payload &msg)
+void message_queue_manager::enqueue(bm2mqtt_node_info *node, const message_payload &msg)
 {
-    ESP_LOGI(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, addr, msg.opcode);
-    node_queues[addr].enqueue(msg);
+    ESP_LOGI(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, node->unicast, msg.opcode);
+    node_queues[node].enqueue(msg);
 }
 
-void message_queue_manager::handle_ack(uint16_t addr, uint32_t opcode)
+void message_queue_manager::handle_ack(bm2mqtt_node_info *node, uint32_t opcode)
 {
-    ESP_LOGI(TAG, "[%s] Ack for opcode 0x%08X on node 0x%04X", __func__, opcode, addr);
-    auto it = node_queues.find(addr);
+    ESP_LOGI(TAG, "[%s] Ack for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
+    auto it = node_queues.find(node);
     if (it != node_queues.end())
     {
         it->second.handle_ack(opcode);
     }
     else
     {
-        ESP_LOGE(TAG, "No message queue found for node 0x%04X", addr);
+        ESP_LOGE(TAG, "No message queue found for node 0x%04X", node->unicast);
     }
 
     if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
     {
         // Special handling for node reset
         ESP_LOGW(TAG, "[%s] Node reset opcode 0x%08X received, removing node queue", __func__, opcode);
-        node_queues.erase(addr);
+        node_queues.erase(node);
     }
 }
 
-void message_queue_manager::handle_timeout(uint16_t addr, uint32_t opcode)
+void message_queue_manager::handle_timeout(bm2mqtt_node_info *node, uint32_t opcode)
 {
-    ESP_LOGW(TAG, "[%s] Timeout for opcode 0x%08X on node 0x%04X", __func__,opcode, addr);
-    auto it = node_queues.find(addr);
+    ESP_LOGW(TAG, "[%s] Timeout for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
+    auto it = node_queues.find(node);
     if (it != node_queues.end())
     {
         it->second.handle_timeout(opcode);
     }
     else
     {
-        ESP_LOGE(TAG, "No message queue found for node 0x%04X", addr);
+        ESP_LOGE(TAG, "No message queue found for node 0x%04X", node->unicast);
     }
 
     if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
     {
         // Special handling for node reset
         ESP_LOGW(TAG, "[%s] Node reset opcode 0x%08X received, removing node queue", __func__, opcode);
-        node_queues.erase(addr);
+        node_queues.erase(node);
     }
 }
 
+void message_queue_manager::clear_queue(bm2mqtt_node_info *node)
+{
+    node_queues.erase(node);
+}
 
-void message_queue_manager::print_debug() const {
+void message_queue_manager::print_debug() const
+{
     ESP_LOGI(TAG, "=== Message Queue Status ===");
     for (const auto &entry : node_queues)
     {
-        uint16_t addr = entry.first;
         const auto &queue = entry.second;
         size_t queue_size = queue.size();
         bool waiting = queue.is_waiting();
 
         ESP_LOGI(TAG, "Node 0x%04X: %zu message(s), waiting: %s",
-                 addr, queue_size, waiting ? "yes" : "no");
+                 entry.first->unicast, queue_size, waiting ? "yes" : "no");
 
         // List opcodes in the queue
         if (queue_size > 0)
         {
             const auto &internal_queue = queue.get_queue();
             ESP_LOGI(TAG, "    opcode: 0x%08X (retries left: %u)",
-                    internal_queue.front().opcode, internal_queue.front().retries_left);
+                     internal_queue.front().opcode, internal_queue.front().retries_left);
         }
     }
 }
@@ -199,7 +218,6 @@ void RegisterMessageQueueDebugCommands()
         .func = &print_debug_cmd,
     };
     ESP_ERROR_CHECK(register_console_command(&message_queue_print_debug_cmd));
-
 }
 
 REGISTER_DEBUG_COMMAND(RegisterMessageQueueDebugCommands);

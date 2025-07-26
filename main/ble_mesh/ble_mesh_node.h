@@ -51,7 +51,7 @@ typedef struct
     uint8_t elem_num{0};
     uint8_t onoff{0};
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
-    color_mode_t color_mode = color_mode_t::hs;
+    color_mode_t color_mode = color_mode_t::color_temp;
 
 } bm2mqtt_node_info;
 
@@ -66,6 +66,7 @@ public:
     bm2mqtt_node_info *get_node(const std::string &mac);
     bm2mqtt_node_info *get_node(uint16_t unicast);
     bm2mqtt_node_info* get_or_create(const uint8_t uuid[16]);
+    bm2mqtt_node_info* get_or_create(const Uuid128& uuid);
 
     
     void for_each_node(std::function<void(const bm2mqtt_node_info *)> func);

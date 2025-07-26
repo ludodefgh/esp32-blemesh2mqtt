@@ -76,7 +76,7 @@ std::string get_command_topic(const bm2mqtt_node_info *node_info)
     return {};
 }
 
-std::string get_discovery_id(bm2mqtt_node_info *node_info)
+std::string get_discovery_id(const bm2mqtt_node_info *node_info)
 {
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
@@ -271,7 +271,7 @@ namespace std
 
 To remove the component, publish an empty string to the discovery topic. This will remove the component and clear the published discovery payload. It will also remove the device entry if there are no further references to it.
 */
-std::unique_ptr<cJSON> make_discovery_message(bm2mqtt_node_info *node)
+std::unique_ptr<cJSON> make_discovery_message(const bm2mqtt_node_info *node)
 {
     cJSON *root = cJSON_CreateObject();
 
@@ -451,7 +451,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                 }
                 cJSON_Delete(response);
 
-                send_status(node_info);
+                mqtt_send_status(node_info);
             }
         }
     }
@@ -500,7 +500,7 @@ int delete_entity(int argc, char **argv)
     return 0;
 }
 
-void send_status(const bm2mqtt_node_info *node_info)
+void mqtt_send_status(const bm2mqtt_node_info *node_info)
 {
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
@@ -515,11 +515,25 @@ void send_status(const bm2mqtt_node_info *node_info)
         msg_id = esp_mqtt_client_publish(mqtt_client, root_publish.c_str(), json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
 
+        ESP_LOGI(TAG, "TOPIC=%s", root_publish.c_str());
+        ESP_LOGI(TAG, "DATA=%s", json_data);
+
         cJSON_free(json_data);
     }
 }
 
-int send_status(int argc, char **argv)
+void mqtt_send_discovery(const bm2mqtt_node_info *node_info)
+{
+    std::unique_ptr<cJSON> discovery_message = make_discovery_message(node_info);
+        char *json_data = cJSON_PrintUnformatted(discovery_message.get());
+        int msg_id = 0;
+        msg_id = esp_mqtt_client_publish(mqtt_client, get_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+
+        cJSON_free(json_data);
+}
+
+int mqtt_send_status(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
 
@@ -530,7 +544,7 @@ int send_status(int argc, char **argv)
 
     if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-       send_status(node_info);
+       mqtt_send_status(node_info);
     }
 
     return 0;
@@ -565,7 +579,7 @@ void RegisterMQTTDebugCommands()
         .command = "mqtt_status",
         .help = "[MQTT] send status message",
         .hint = NULL,
-        .func = &send_status,
+        .func = &mqtt_send_status,
         .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(register_console_command(&mqtt_status_cmd));

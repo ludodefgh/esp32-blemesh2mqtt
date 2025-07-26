@@ -122,7 +122,7 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
         return ESP_FAIL;
     }
 
-    message_queue().enqueue(node->unicast,
+    message_queue().enqueue(node,
                             message_payload{
                                 .send = [node]()
                                 {
@@ -411,7 +411,7 @@ void unprovision_device(const Uuid128& uuid)
 {
     if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid))
     {
-        message_queue().enqueue(node_info->unicast,
+        message_queue().enqueue(node_info,
                                 message_payload{
                                     .send = [node_info]()
                                     {
@@ -458,7 +458,7 @@ int unprovision_all_nodes(int argc, char **argv)
     {
         if (bm2mqtt_node_info *node_info = node_manager().get_node(bla) )
         {
-            message_queue().enqueue(node_info->unicast, message_payload{
+            message_queue().enqueue(node_info, message_payload{
                                    .send = [node_info]()
                                    {
                                         esp_ble_mesh_client_common_param_t common = {0};

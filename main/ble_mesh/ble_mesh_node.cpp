@@ -14,10 +14,13 @@
 #include "ble_mesh_example_init.h"
 
 #include "ble_mesh_provisioning.h"
+#include <mutex>
 
 #define TAG "NODE_MANAGER"
 
 constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 1;
+
+static std::mutex tn_mutex;
 
 ble2mqtt_node_manager &node_manager()
 {
@@ -29,6 +32,7 @@ extern struct example_info_store store;
 
 void ble2mqtt_node_manager::for_each_node(std::function<void(const bm2mqtt_node_info *)> func)
 {
+    std::lock_guard<std::mutex> lock(tn_mutex);
     for (auto i = 0; i < tracked_nodes.size(); i++)
     {
         if (tracked_nodes[i].unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
@@ -38,8 +42,9 @@ void ble2mqtt_node_manager::for_each_node(std::function<void(const bm2mqtt_node_
     }
 }
 
-bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const Uuid128& uuid)
+bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const Uuid128 &uuid)
 {
+    std::lock_guard<std::mutex> lock(tn_mutex);
     for (auto i = 0; i < tracked_nodes.size(); i++)
     {
         if (tracked_nodes[i].uuid == uuid)
@@ -49,22 +54,26 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const Uuid128& uuid)
     }
     return nullptr;
 }
-
-bm2mqtt_node_info *ble2mqtt_node_manager::get_or_create(const uint8_t uuid[16])
+bm2mqtt_node_info* ble2mqtt_node_manager::get_or_create(const Uuid128& uuid)
 {
-    const Uuid128 inuuid{uuid};
+    std::lock_guard<std::mutex> lock(tn_mutex);
     for (auto i = 0; i < tracked_nodes.size(); i++)
     {
-        if (tracked_nodes[i].uuid == inuuid)
+        if (tracked_nodes[i].uuid == uuid)
         {
             return &tracked_nodes[i];
         }
     }
 
-    tracked_nodes.emplace_back();
-    tracked_nodes.back().uuid = inuuid;
+    tracked_nodes.emplace_back().uuid = uuid;
 
     return &tracked_nodes.back();
+}
+
+bm2mqtt_node_info *ble2mqtt_node_manager::get_or_create(const uint8_t uuid[16])
+{
+    const Uuid128 inuuid{uuid};
+    return get_or_create(inuuid);
 }
 
 bm2mqtt_node_info *ble2mqtt_node_manager::get_node(int nodeIndex)
@@ -80,6 +89,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const std::string &mac)
             const std::string inAddr {bt_hex(node->addr, BD_ADDR_LEN)};
             if (inAddr == mac)
             {
+                std::lock_guard<std::mutex> lock(tn_mutex);
                 for (auto i = 0; i < tracked_nodes.size(); i++)
                 {
                     if (memcmp(tracked_nodes[i].uuid.raw(), node->dev_uuid, 16) == 0)
@@ -92,11 +102,13 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const std::string &mac)
     return result;
 }
 
-void ble2mqtt_node_manager::remove_node(const Uuid128& uuid)
+void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
 {
-    for (std::vector<bm2mqtt_node_info>::iterator it = tracked_nodes.begin(); it != tracked_nodes.end();)
+    ESP_LOGW(TAG, "%s: Removing node with UUID %s", __func__, uuid.to_string().c_str());
+    std::lock_guard<std::mutex> lock(tn_mutex);
+    for (std::vector<bm2mqtt_node_info>::iterator it = tracked_nodes.begin(); it != tracked_nodes.end();++it)
     {
-        if((it->uuid) == uuid)
+        if ((it->uuid) == uuid)
         {
             ESP_LOGW(TAG, "%s: Remove unprovisioned device 0x%04x", __func__, it->unicast);
             it = tracked_nodes.erase(it);
@@ -127,37 +139,20 @@ esp_err_t ble2mqtt_node_manager::example_ble_mesh_set_msg_common(esp_ble_mesh_cl
     return ESP_OK;
 }
 
-esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128& uuid, uint16_t unicast,
+esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128 &uuid, uint16_t unicast,
                                                  uint8_t elem_num, uint8_t onoff_state)
 {
     int i;
 
-    if ( !ESP_BLE_MESH_ADDR_IS_UNICAST(unicast))
+    if (!ESP_BLE_MESH_ADDR_IS_UNICAST(unicast))
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Judge if the device has been provisioned before */
-    for (i = 0; i < tracked_nodes.size(); i++)
-    {
-        if(tracked_nodes[i].uuid != uuid)
-        {
-            ESP_LOGW(TAG, "%s: reprovisioned device 0x%04x", __func__, unicast);
-            tracked_nodes[i].unicast = unicast;
-            tracked_nodes[i].elem_num = elem_num;
-            tracked_nodes[i].onoff = onoff_state;
-            tracked_nodes[i].hsl_h = 16000;
-            tracked_nodes[i].hsl_s = 16000;
-            tracked_nodes[i].hsl_l = 16000;
-            return ESP_OK;
-        }
-    }
-
-    tracked_nodes.emplace_back();
-    tracked_nodes.back().uuid = uuid;
-    tracked_nodes.back().unicast = unicast;
-    tracked_nodes.back().elem_num = elem_num;
-    tracked_nodes.back().onoff = onoff_state;
+    bm2mqtt_node_info * node = get_or_create(uuid);
+    node->unicast = unicast;
+    node->elem_num = elem_num;
+    node->onoff = onoff_state;
 
     save_node_info_vector();
 
@@ -173,6 +168,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(uint16_t unicast)
         return nullptr;
     }
 
+    std::lock_guard<std::mutex> lock(tn_mutex);
     for (i = 0; i < tracked_nodes.size(); i++)
     {
         if (tracked_nodes[i].unicast <= unicast &&
@@ -187,6 +183,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(uint16_t unicast)
 
 void ble2mqtt_node_manager::print_registered_nodes()
 {
+    std::lock_guard<std::mutex> lock(tn_mutex);
     ESP_LOGI(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
@@ -213,15 +210,18 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
     }
     nvs_set_u32(handle, "version", NODE_INFO_SCHEMA_VERSION);
 
-    size_t total_size = tracked_nodes.size() * sizeof(bm2mqtt_node_info);
-    err = nvs_set_blob(handle, "nodes", tracked_nodes.data(), total_size);
-    if (err == ESP_OK)
     {
-        err = nvs_commit(handle);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to save node info vector to NVS: %s", esp_err_to_name(err));
+        std::lock_guard<std::mutex> lock(tn_mutex);
+        size_t total_size = tracked_nodes.size() * sizeof(bm2mqtt_node_info);
+        err = nvs_set_blob(handle, "nodes", tracked_nodes.data(), total_size);
+        if (err == ESP_OK)
+        {
+            err = nvs_commit(handle);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to save node info vector to NVS: %s", esp_err_to_name(err));
+        }
     }
 
     nvs_close(handle);
@@ -258,9 +258,21 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
     }
 
     size_t count = size / sizeof(bm2mqtt_node_info);
-    tracked_nodes.resize(count);
-
-    err = nvs_get_blob(handle, "nodes", tracked_nodes.data(), &size);
+    {
+        std::lock_guard<std::mutex> lock(tn_mutex);
+        tracked_nodes.resize(count);
+        err = nvs_get_blob(handle, "nodes", tracked_nodes.data(), &size);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
+            tracked_nodes.clear();
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Loaded %zu nodes from NVS", tracked_nodes.size());
+        }
+    }
+    
     nvs_close(handle);
     return err;
 }
@@ -301,5 +313,5 @@ void ble2mqtt_node_manager::init_node_save_timer()
 void ble2mqtt_node_manager::Initialize()
 {
     load_node_info_vector();
-    init_node_save_timer();
+    init_node_save_timer();    
 }

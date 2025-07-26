@@ -28,6 +28,7 @@
 #include "ble_mesh_commands.h"
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
+#include <mqtt/mqtt_control.h>
 
 #define TAG "APP_CONTROL"
 
@@ -238,7 +239,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     {
         node->features_to_bind &= ~FEATURE_GENERIC_ONOFF; // Clear the feature to avoid rebinding
 
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                        ESP_LOGW(TAG, "[%s] Generic on/off model for node 0x%04X", __func__, node->unicast);
@@ -263,7 +264,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     if ((node->features_to_bind & FEATURE_LIGHT_HSL) != 0)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_HSL; // Clear the feature to avoid rebinding
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                        ESP_LOGW(TAG, "[%s] Light hsl model for node 0x%04X", __func__, node->unicast);
@@ -290,7 +291,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     if ((node->features_to_bind & FEATURE_LIGHT_LIGHTNESS) != 0)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_LIGHTNESS; // Clear the feature to avoid rebinding
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                        ESP_LOGW(TAG, "[%s] Light lightness model for node 0x%04X", __func__, node->unicast);
@@ -316,7 +317,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     if ((node->features_to_bind & FEATURE_LIGHT_CTL) != 0)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_CTL; // Clear the feature to avoid rebinding
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                         ESP_LOGW(TAG, "[%s] Light CTL temperature model for node 0x%04X", __func__, node->unicast);
@@ -338,7 +339,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
                                    .retries_left = 3,
                                });
 
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                         ESP_LOGW(TAG, "[%s] Light CTL model for node 0x%04X", __func__, node->unicast);
@@ -365,6 +366,17 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     {
         ESP_LOGW(TAG, "[%s] All features bound, no more binding needed", __func__);
         refresh_node(node, nullptr);
+
+        message_queue().enqueue(node, message_payload{
+                                   .send = [node]()
+                                   {
+                                      mqtt_send_discovery(node);
+                                      mqtt_send_status(node);
+                                   },
+                                   .opcode = 0x0000, // No specific opcode, just a marker
+                                   .retries_left = 0,
+                                   .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
+                               });
     }
 }
 
@@ -394,7 +406,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     switch (event)
     {
     case ESP_BLE_MESH_CFG_CLIENT_GET_STATE_EVT:
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -411,7 +423,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         }
         break;
     case ESP_BLE_MESH_CFG_CLIENT_SET_STATE_EVT:
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -433,9 +445,11 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             if (node != nullptr)
             {
                 ESP_LOGI(TAG, "Node reset successfully");
-                node_manager().remove_node(node->uuid);
+                ESP_LOGI(TAG, "Resetting node 0x%04X", node->unicast);
                 esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
-                node_manager().mark_node_info_dirty();
+                node_manager().remove_node(node->uuid);
+                message_queue().clear_queue(node);
+                node_manager().mark_node_info_dirty();                
             }
             else
             {
@@ -467,7 +481,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         break;
     case ESP_BLE_MESH_CFG_CLIENT_TIMEOUT_EVT:
 
-        message_queue().handle_timeout(node->unicast, opcode);
+        message_queue().handle_timeout(node, opcode);
         // switch (opcode)
         // {
         // case ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET:
@@ -508,7 +522,7 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_
 
     if (!get_composition_data_debug)
     {  
-        message_queue().enqueue(node->unicast, message_payload{
+        message_queue().enqueue(node, message_payload{
                                    .send = [node]()
                                    {
                                         ESP_LOGW(TAG, "[on_composition_received] Requesting composition for node 0x%04X", node->unicast);
@@ -565,7 +579,7 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     {
     case ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT:
 
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -588,7 +602,7 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         }
         break;
     case ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT:
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -614,7 +628,7 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     case ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT:
         /* If failed to receive the responses, these messages will be resend */
 
-        message_queue().handle_timeout(node->unicast, opcode);
+        message_queue().handle_timeout(node, opcode);
         switch (opcode)
         {
         case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET:
@@ -679,7 +693,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     switch (event)
     {
     case ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT:
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -745,7 +759,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 
     case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
         ESP_LOGI("LIGHT_CLI", "Set state response: Error Code : %i", param->error_code);
-        message_queue().handle_ack(node->unicast, opcode);
+        message_queue().handle_ack(node, opcode);
 
         switch (opcode)
         {
@@ -767,7 +781,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     case ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT:
         ESP_LOGE("LIGHT_CLI", "Timeout event received for opcode 0x%04" PRIx32, opcode);
 
-        message_queue().handle_timeout(node->unicast, opcode);
+        message_queue().handle_timeout(node, opcode);
         break;
 
     default:
@@ -837,6 +851,7 @@ void refresh_all_nodes()
 
 void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
 {
+    ESP_LOGI(TAG, "[%s] Refreshing node 0x%04X", __func__, node_info->unicast);
     if (node != nullptr)
     {
         node_info->uuid = Uuid128{node->dev_uuid};
@@ -848,7 +863,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
     {
         ESP_LOGI(TAG, "[%s] Refreshing ON/OFF for node 0x%04X", __func__, node_info->unicast);
 
-        message_queue().enqueue(node_info->unicast, message_payload{
+        message_queue().enqueue(node_info, message_payload{
                                         .send = [node_info]()
                                         {
                                             ESP_LOGW(TAG, "[%s] Generic on/off model for node 0x%04X", __func__, node_info->unicast);
@@ -870,7 +885,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
     if (node_info->features & FEATURE_LIGHT_HSL)
     {
         {
-            message_queue().enqueue(node_info->unicast, message_payload{
+            message_queue().enqueue(node_info, message_payload{
                                             .send = [node_info]()
                                             {
                                                 ESP_LOGW(TAG, "[%s] Light HSL model for node 0x%04X", __func__, node_info->unicast);
@@ -889,7 +904,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
                                         });
         }
         {
-            message_queue().enqueue(node_info->unicast, message_payload{
+            message_queue().enqueue(node_info, message_payload{
                                             .send = [node_info]()
                                             {
                                                 ESP_LOGW(TAG, "[%s] HSL range for node 0x%04X", __func__, node_info->unicast);
@@ -903,7 +918,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
 
     if (node_info->features & FEATURE_LIGHT_CTL)
     {
-        message_queue().enqueue(node_info->unicast, message_payload{
+        message_queue().enqueue(node_info, message_payload{
                                                         .send = [node_info]()
                                                         {
                                                             ESP_LOGW(TAG, "[%s] Refreshing Temperature Range for node 0x%04X", __func__, node_info->unicast);
@@ -913,7 +928,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
                                                         .retries_left = 3,
                                                     });
 
-        message_queue().enqueue(node_info->unicast, message_payload{
+        message_queue().enqueue(node_info, message_payload{
                                                         .send = [node_info]()
                                                         {
                                                             ESP_LOGI(TAG, "[%s] Refreshing CTL Temperature for node 0x%04X", __func__, node_info->unicast);

@@ -4,11 +4,19 @@
 #include <cstdint>
 #include <map>
 #include <esp_timer.h>
+#include "ble_mesh_node.h"
+
+enum class message_type_t : uint8_t
+{
+    ble_mesh_message,
+    mqtt_message,
+};
 
 struct message_payload {
     std::function<void()> send;
     uint32_t opcode;
     uint8_t retries_left = 3;
+    message_type_t type = message_type_t::ble_mesh_message;
 };
 
 class message_queue {
@@ -34,14 +42,15 @@ private:
 
 class message_queue_manager {
 public:
-    void enqueue(uint16_t addr, const message_payload &msg);
-    void handle_ack(uint16_t addr, uint32_t opcode);
-    void handle_timeout(uint16_t addr, uint32_t opcode);
+    void enqueue(bm2mqtt_node_info* node, const message_payload &msg);
+    void handle_ack(bm2mqtt_node_info* node, uint32_t opcode);
+    void handle_timeout(bm2mqtt_node_info* node, uint32_t opcode);
 
     void print_debug() const;
+    void clear_queue(bm2mqtt_node_info* node);
 
 private:
-    std::map<uint16_t, message_queue> node_queues;
+    std::map<bm2mqtt_node_info*, message_queue> node_queues;
 };
 
 
