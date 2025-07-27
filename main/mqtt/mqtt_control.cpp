@@ -315,23 +315,24 @@ std::unique_ptr<cJSON> make_discovery_message(const bm2mqtt_node_info *node)
         cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
         if (sup_clrm != nullptr)
         {
-            if (node->features <= FEATURE_LIGHT_LIGHTNESS)
+            bool has_color = false;
+            if (node->features & FEATURE_LIGHT_CTL)
+            {
+                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
+                cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
+                cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
+                cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
+                has_color = true;
+            }
+            if (node->features & FEATURE_LIGHT_HSL)
+            {
+                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
+                has_color = true;
+            }
+
+            if (!has_color && (node->features & FEATURE_LIGHT_LIGHTNESS))
             {
                 cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
-            }
-            else
-            {
-                if (node->features & FEATURE_LIGHT_CTL)
-                {
-                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
-                    cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
-                    cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
-                    cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
-                }
-                if (node->features & FEATURE_LIGHT_HSL)
-                {
-                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
-                }
             }
         }
     }
