@@ -150,9 +150,12 @@ extern "C" void app_main()
     initDebugGPIO();
 #endif
 
+    mqtt5_app_start();
+
+    start_webserver();
+
     refresh_all_nodes();
 
-    /// MQTT START
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
     esp_log_level_set("mqtt_example", ESP_LOG_VERBOSE);
@@ -161,9 +164,6 @@ extern "C" void app_main()
     esp_log_level_set("transport", ESP_LOG_VERBOSE);
     esp_log_level_set("outbox", ESP_LOG_VERBOSE);
 
-    mqtt5_app_start();
-    /// MQTT END
-
-    start_webserver();
+    
 }
 #pragma endregion Main

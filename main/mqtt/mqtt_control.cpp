@@ -315,14 +315,25 @@ std::unique_ptr<cJSON> make_discovery_message(const bm2mqtt_node_info *node)
         cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
         if (sup_clrm != nullptr)
         {
-            cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
-            cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
+            if (node->features <= FEATURE_LIGHT_LIGHTNESS)
+            {
+                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
+            }
+            else
+            {
+                if (node->features & FEATURE_LIGHT_CTL)
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
+                    cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
+                    cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
+                    cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
+                }
+                if (node->features & FEATURE_LIGHT_HSL)
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
+                }
+            }
         }
-
-        cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
-        cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
-
-        cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
     }
 
     return std::unique_ptr<cJSON>{root};
@@ -335,14 +346,25 @@ std::unique_ptr<cJSON> make_status_message(const bm2mqtt_node_info *node_info)
 
     if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        cJSON_AddNumberToObject(root, "brightness", (uint16_t)map(node_info->hsl_l, 0, 32767, 0, 255));
-        cJSON_AddStringToObject(root, "color_mode", node_info->color_mode == color_mode_t::hs ? "hs" : "color_temp");
         cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
-        cJSON_AddNumberToObject(root, "color_temp", node_info->curr_temp);
-
-        cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
-        cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, 0, 65535, 0, 360));
-        cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, 0, 65535, 0, 100));
+        
+        if (node_info->color_mode == color_mode_t::brightness)
+        {
+            cJSON_AddStringToObject(root, "color_mode", "brightness");
+            cJSON_AddNumberToObject(root, "brightness", (uint16_t)map(node_info->hsl_l, node_info->min_lightness, node_info->max_lightness, 0, 255));
+        }
+        else if (node_info->color_mode == color_mode_t::color_temp)
+        {
+            cJSON_AddStringToObject(root, "color_mode", "color_temp");
+            cJSON_AddNumberToObject(root, "color_temp", node_info->curr_temp);
+        }
+        else if (node_info->color_mode == color_mode_t::hs)
+        {
+            cJSON_AddStringToObject(root, "color_mode", "hs");
+            cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
+            cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, node_info->min_hue, node_info->max_hue, 0, 360));
+            cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));    
+        }
     }
 
     return std::unique_ptr<cJSON>{root};
@@ -389,50 +411,62 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 
                     bool light_value_changed = false;
                     color_mode_t current_mode = node_info->color_mode;
-                    if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
+                  
+                    if ((node_info->features & FEATURE_LIGHT_LIGHTNESS) || (node_info->features & FEATURE_LIGHT_HSL))
                     {
-                        if (cJSON_IsNumber(brightness))
+                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light Lightness feature supported");
+                        if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
                         {
-                            // FIX-ME : might be related to my buld, or check server config for value range
-                            uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
-                            node_info->hsl_l = filteredValue;
-                            light_value_changed = true;
-                        }
-                    }
-
-                    if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
-                    {
-                        if (cJSON_IsObject(color))
-                        {
-                            cJSON *hue = cJSON_GetObjectItemCaseSensitive(color, "h");
-                            cJSON *saturation = cJSON_GetObjectItemCaseSensitive(color, "s");
-
-                            if (cJSON_IsNumber(hue))
+                            if (cJSON_IsNumber(brightness))
                             {
-                                uint16_t filteredValue = (uint16_t)map(hue->valuedouble, 0, 360, 0, 65535);
-                                node_info->hsl_h = filteredValue;
-                                current_mode = color_mode_t::hs;
-                                light_value_changed = true;
-                            }
-                            if (cJSON_IsNumber(saturation))
-                            {
-                                uint16_t filteredValue = (uint16_t)map(saturation->valuedouble, 0, 100, 0, 65535);
-                                node_info->hsl_s = filteredValue;
-                                current_mode = color_mode_t::hs;
+                                current_mode = color_mode_t::brightness;
+                                uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, node_info->min_lightness, node_info->max_lightness);
+                                node_info->hsl_l = filteredValue;
                                 light_value_changed = true;
                             }
                         }
                     }
 
-                    if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
+                    if (node_info->features & FEATURE_LIGHT_HSL)
                     {
-                        if (cJSON_IsNumber(color_temp))
+                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light HSL feature supported");
+                        if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
                         {
-                            // FIX-ME : might be related to my buld, or check server config for value range
-                            // uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, 0, 32767);
-                            node_info->curr_temp = color_temp->valuedouble;
-                            current_mode = color_mode_t::color_temp;
-                            light_value_changed = true;
+                            if (cJSON_IsObject(color))
+                            {
+                                cJSON *hue = cJSON_GetObjectItemCaseSensitive(color, "h");
+                                cJSON *saturation = cJSON_GetObjectItemCaseSensitive(color, "s");
+
+                                if (cJSON_IsNumber(hue))
+                                {
+                                    uint16_t filteredValue = (uint16_t)map(hue->valuedouble, 0, 360, node_info->min_hue, node_info->max_hue);
+                                    node_info->hsl_h = filteredValue;
+                                    current_mode = color_mode_t::hs;
+                                    light_value_changed = true;
+                                }
+                                if (cJSON_IsNumber(saturation))
+                                {
+                                    uint16_t filteredValue = (uint16_t)map(saturation->valuedouble, 0, 100, node_info->min_saturation, node_info->max_saturation);
+                                    node_info->hsl_s = filteredValue;
+                                    current_mode = color_mode_t::hs;
+                                    light_value_changed = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (node_info->features & FEATURE_LIGHT_CTL)
+                    {
+                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light CTL feature supported");
+                        if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
+                        {
+                            if (cJSON_IsNumber(color_temp))
+                            {
+                                uint16_t filteredValue = (uint16_t)map(color_temp->valuedouble, 0, 255, node_info->min_temp, node_info->max_temp);
+                                node_info->curr_temp = filteredValue;
+                                current_mode = color_mode_t::color_temp;
+                                light_value_changed = true;
+                            }
                         }
                     }
 
@@ -446,6 +480,10 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                         else if (current_mode == color_mode_t::hs)
                         {
                             light_hsl_set(node_info);
+                        }
+                        else if (current_mode == color_mode_t::brightness)
+                        {
+                            ble_mesh_lightness_set(node_info);
                         }
                     }
                 }
@@ -473,7 +511,7 @@ int send_discovery(int argc, char **argv)
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, get_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
-
+    
         cJSON_free(json_data);
     }
 

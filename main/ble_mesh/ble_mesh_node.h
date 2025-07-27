@@ -31,27 +31,36 @@
 
 enum class color_mode_t : uint8_t
 {
+    brightness,
     hs,
     color_temp,
 };
+
+const char* get_color_mode_string(color_mode_t mode);
 
 typedef struct
 {
     Uuid128 uuid;
     uint16_t unicast{0};
     uint16_t hsl_h{0};
+    uint16_t min_hue{0};
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
     uint16_t hsl_s{0};
+    uint16_t min_saturation{0};
+    uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
     uint16_t hsl_l{0};
-    uint16_t min_temp{0};
-    uint16_t max_temp{0};
+    uint16_t min_lightness{0};
+    uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
     uint16_t curr_temp{0};
+    uint16_t min_temp{0};
+    uint16_t max_temp{std::numeric_limits<uint16_t>::max()};
     int16_t level{0};
     uint16_t features{0};
     uint16_t features_to_bind{0};
     uint8_t elem_num{0};
     uint8_t onoff{0};
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
-    color_mode_t color_mode = color_mode_t::color_temp;
+    color_mode_t color_mode = color_mode_t::brightness;
 
 } bm2mqtt_node_info;
 

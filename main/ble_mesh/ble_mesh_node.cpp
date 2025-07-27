@@ -22,6 +22,17 @@ constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 1;
 
 static std::mutex tn_mutex;
 
+const char* get_color_mode_string(color_mode_t mode)
+{
+    switch (mode)
+    {
+        case color_mode_t::brightness: return "brightness";
+        case color_mode_t::hs: return "hs";
+        case color_mode_t::color_temp: return "color_temp";
+        default: return "unknown";
+    }
+}
+
 ble2mqtt_node_manager &node_manager()
 {
     static ble2mqtt_node_manager instance;
@@ -106,7 +117,7 @@ void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
 {
     ESP_LOGW(TAG, "%s: Removing node with UUID %s", __func__, uuid.to_string().c_str());
     std::lock_guard<std::mutex> lock(tn_mutex);
-    for (std::vector<bm2mqtt_node_info>::iterator it = tracked_nodes.begin(); it != tracked_nodes.end();++it)
+    for (std::vector<bm2mqtt_node_info>::iterator it = tracked_nodes.begin(); it != tracked_nodes.end(); ++it)
     {
         if ((it->uuid) == uuid)
         {
@@ -193,7 +204,7 @@ void ble2mqtt_node_manager::print_registered_nodes()
         ESP_LOGI(TAG, "  On/Off State: %d", node.onoff);
         ESP_LOGI(TAG, "  HSL: H=%d S=%d L=%d", node.hsl_h, node.hsl_s, node.hsl_l);
         ESP_LOGI(TAG, "  Min Temp: %d, Max Temp: %d, Current Temp: %d", node.min_temp, node.max_temp, node.curr_temp);
-        ESP_LOGI(TAG, "  Color Mode: %s", node.color_mode == color_mode_t::hs ? "HS" : "Color Temp");
+        ESP_LOGI(TAG, "  Color Mode: %s", get_color_mode_string(node.color_mode));
         ESP_LOGI(TAG, "  Features: 0x%04X", node.features);
         ESP_LOGI(TAG, "  Features to Bind: 0x%04X", node.features_to_bind);
     }
@@ -313,5 +324,5 @@ void ble2mqtt_node_manager::init_node_save_timer()
 void ble2mqtt_node_manager::Initialize()
 {
     load_node_info_vector();
-    init_node_save_timer();    
+    init_node_save_timer();
 }

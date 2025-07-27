@@ -2,6 +2,14 @@
 #include "esp_err.h"
 #include "ble_mesh_node.h"
 
+typedef enum
+{
+    FEATURE_GENERIC_ONOFF = 1 << 0,
+    FEATURE_LIGHT_LIGHTNESS = 1 << 1,
+    FEATURE_LIGHT_HSL = 1 << 2,
+    FEATURE_LIGHT_CTL = 1 << 3,
+} node_supported_features_t;
+
 long map(long x, long in_min, long in_max, long out_min, long out_max);
 
 
