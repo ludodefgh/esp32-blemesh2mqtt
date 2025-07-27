@@ -18,18 +18,20 @@
 
 #define TAG "NODE_MANAGER"
 
-constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 1;
-
 static std::mutex tn_mutex;
 
-const char* get_color_mode_string(color_mode_t mode)
+const char *get_color_mode_string(color_mode_t mode)
 {
     switch (mode)
     {
-        case color_mode_t::brightness: return "brightness";
-        case color_mode_t::hs: return "hs";
-        case color_mode_t::color_temp: return "color_temp";
-        default: return "unknown";
+    case color_mode_t::brightness:
+        return "brightness";
+    case color_mode_t::hs:
+        return "hs";
+    case color_mode_t::color_temp:
+        return "color_temp";
+    default:
+        return "unknown";
     }
 }
 
@@ -65,7 +67,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const Uuid128 &uuid)
     }
     return nullptr;
 }
-bm2mqtt_node_info* ble2mqtt_node_manager::get_or_create(const Uuid128& uuid)
+bm2mqtt_node_info *ble2mqtt_node_manager::get_or_create(const Uuid128 &uuid)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
     for (auto i = 0; i < tracked_nodes.size(); i++)
@@ -160,7 +162,7 @@ esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128 &uuid, uint16_t u
         return ESP_ERR_INVALID_ARG;
     }
 
-    bm2mqtt_node_info * node = get_or_create(uuid);
+    bm2mqtt_node_info *node = get_or_create(uuid);
     node->unicast = unicast;
     node->elem_num = elem_num;
     node->onoff = onoff_state;
@@ -250,7 +252,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
     }
 
     uint32_t version;
-    if (nvs_get_u32(handle, "version", &version) != ESP_OK || version != NODE_INFO_SCHEMA_VERSION)
+    if (nvs_get_u32(handle, "version", &version) != ESP_OK || version > NODE_INFO_SCHEMA_VERSION)
     {
         nvs_close(handle);
         ESP_LOGE(TAG, "NVS version mismatch: expected %u, got %u", NODE_INFO_SCHEMA_VERSION, version);
@@ -261,15 +263,17 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
 
     size_t size = 0;
     err = nvs_get_blob(handle, "nodes", nullptr, &size);
-    if (err != ESP_OK || size % sizeof(bm2mqtt_node_info) != 0)
+    if (err != ESP_OK || size == 0)
     {
         nvs_close(handle);
         ESP_LOGE(TAG, "Failed to load node info vector to NVS: %s", esp_err_to_name(err));
         return err;
     }
 
-    size_t count = size / sizeof(bm2mqtt_node_info);
+    size_t count = 0;
+    if (version == NODE_INFO_SCHEMA_VERSION)
     {
+        size_t count = size / sizeof(bm2mqtt_node_info);
         std::lock_guard<std::mutex> lock(tn_mutex);
         tracked_nodes.resize(count);
         err = nvs_get_blob(handle, "nodes", tracked_nodes.data(), &size);
@@ -283,7 +287,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
             ESP_LOGI(TAG, "Loaded %zu nodes from NVS", tracked_nodes.size());
         }
     }
-    
+
     nvs_close(handle);
     return err;
 }

@@ -62,7 +62,11 @@ typedef struct
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
     color_mode_t color_mode = color_mode_t::brightness;
 
-} bm2mqtt_node_info;
+} bm2mqtt_node_info_v1;
+
+constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 1;
+
+using bm2mqtt_node_info = bm2mqtt_node_info_v1;
 
 class ble2mqtt_node_manager final
 {

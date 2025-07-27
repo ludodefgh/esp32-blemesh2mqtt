@@ -750,9 +750,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
             {
                 // FIX-ME : this is the case for my sengled bulb.
                 node->max_lightness /= 2; // HSL and CTL use half of the lightness range
-                ESP_LOGE(TAG, "[%s] Adjusted max lightness for HSL/CTL: %u", __func__, node->max_lightness);
             }
-            
         }
         break;
 
