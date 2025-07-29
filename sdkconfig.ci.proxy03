@@ -1,4 +1,0 @@
-#| Proxy   | PB-GATT | Proxy Client |
-#| Disable | Disable | Disable      |
-CONFIG_BLE_MESH_PB_GATT=n
-CONFIG_BLE_MESH_PROXY=n
