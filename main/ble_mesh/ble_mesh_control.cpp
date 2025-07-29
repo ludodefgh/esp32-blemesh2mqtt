@@ -43,15 +43,7 @@
 
 static uint8_t dev_uuid[16];
 
-static nvs_handle_t NVS_HANDLE;
-static const char *NVS_KEY = "onoff_client";
-
 extern struct example_info_store store;
-
-static void mesh_example_info_store(void)
-{
-    ble_mesh_nvs_store(NVS_HANDLE, NVS_KEY, &store, sizeof(store));
-}
 
 static struct esp_ble_mesh_key
 {
@@ -791,7 +783,11 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
-        ESP_LOGI("LIGHT_CLI", "Set state response: Error Code : %i", param->error_code);
+        if (param->error_code != 0)
+        {
+            ESP_LOGI("[ble_mesh_light_client_cb] [ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT]", "Set state response: Error Code : %i", param->error_code);
+        }
+    
         message_queue().handle_ack(node, opcode);
 
         switch (opcode)

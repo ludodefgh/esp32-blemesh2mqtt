@@ -128,7 +128,7 @@ void message_queue::on_failsafe_trigger()
 
 void message_queue_manager::enqueue(bm2mqtt_node_info *node, const message_payload &msg)
 {
-    ESP_LOGI(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, node->unicast, msg.opcode);
+    ESP_LOGD(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, node->unicast, msg.opcode);
     node_queues[node].enqueue(msg);
 }
 

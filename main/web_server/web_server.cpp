@@ -7,21 +7,9 @@
 #include <ble_mesh/ble_mesh_commands.h>
 #include "debug/console_cmd.h"
 #include <debug/websocket_logger.h>
+#include <cJSON.h>
 
 #define TAG "WEB_SERVER"
-
-esp_err_t hello_get_handler(httpd_req_t *req)
-{
-    const char *resp = "Hello from ESP32!";
-    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-httpd_uri_t hello = {
-    .uri = "/hello",
-    .method = HTTP_GET,
-    .handler = hello_get_handler,
-};
 
 esp_err_t nodes_handler(httpd_req_t *req)
 {
@@ -290,6 +278,37 @@ esp_err_t list_console_commands_handler(httpd_req_t *req) {
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
+esp_err_t rename_node_handler(httpd_req_t *req) {
+    ESP_LOGW(TAG, "rename_node_handler called");
+    char buf[128];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return ESP_FAIL;
+    buf[len] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) return httpd_resp_send_500(req);
+
+   const cJSON *name_json = cJSON_GetObjectItemCaseSensitive(json, "name");
+   const cJSON *uuid_json = cJSON_GetObjectItemCaseSensitive(json, "uuid");
+
+    if (!name_json || !cJSON_IsString(name_json) || !uuid_json || !cJSON_IsString(uuid_json)) {
+        cJSON_Delete(json);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad request");;
+    }
+
+    uint8_t uuid_tmp[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        sscanf(uuid_json->valuestring + i * 2, "%2hhx", &uuid_tmp[i]);
+    }
+
+    Uuid128 uuid{uuid_tmp};
+
+    node_manager().set_node_name(uuid, name_json->valuestring);
+
+    cJSON_Delete(json);
+    return httpd_resp_sendstr(req, "OK");
+}
+
 httpd_uri_t nodes_uri = {
     .uri = "/nodes",
     .method = HTTP_GET,
@@ -325,6 +344,13 @@ httpd_uri_t console_cmds_uri = {
     .method = HTTP_GET,
     .handler = list_console_commands_handler,
     .user_ctx = NULL
+};
+
+httpd_uri_t rename_uri = {
+    .uri = "/api/rename_node",
+    .method = HTTP_POST,
+    .handler = rename_node_handler,
+    .user_ctx = nullptr
 };
 
 const char *get_content_type(const char *filename)
@@ -365,17 +391,6 @@ esp_err_t static_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-
-// void register_static_routes(httpd_handle_t server)
-// {
-//     httpd_uri_t static_uri = {
-//         .uri = "/*",
-//         .method = HTTP_GET,
-//         .handler = static_handler,
-//     };
-//     httpd_register_uri_handler(server, &static_uri);
-// }
-
 httpd_uri_t static_uri = {
         .uri = "/*",
         .method = HTTP_GET,
@@ -388,10 +403,11 @@ void start_webserver(void)
     httpd_handle_t server = NULL;
 
      config.uri_match_fn = httpd_uri_match_wildcard;
+     config.max_uri_handlers = 16;
 
     if (httpd_start(&server, &config) == ESP_OK)
     {
-        // httpd_register_uri_handler(server, &hello);
+        httpd_register_uri_handler(server, &rename_uri);
         httpd_register_uri_handler(server, &nodes_uri);
         httpd_register_uri_handler(server, &set_lightness_uri);
         httpd_register_uri_handler(server, &set_provision_uri);

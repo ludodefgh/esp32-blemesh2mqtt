@@ -49,19 +49,22 @@ document.addEventListener("DOMContentLoaded", function () {
     .then(data => {
       const nodesContainer = document.getElementById("nodes");
       data.provisioned.forEach(node => {
-        const el = document.createElement("div");
-        el.className = "node";
-        el.innerHTML = `
-          <strong>${node.name}</strong><br>
-          <input type="range" min="0" max="65535" step="500" value="0"
-            oninput="onSliderInput('${node.uuid}', this)">
-          <output>0</output><br>
-          <strong>UUID:</strong> ${node.uuid}<br>
-          <strong>Address:</strong> ${node.unicast}<br>
-          <button onclick="unprovision('${node.uuid}')">Unprovision</button>
-        `;
-        nodesContainer.appendChild(el);
-      });
+      const el = document.createElement("div");
+      el.className = "node";
+      el.dataset.uuid = node.uuid;
+      el.innerHTML = `
+        <strong class="node-name">${node.name}</strong><br>
+        <input type="text" class="name-input" placeholder="New name">
+        <button class="rename-btn">Rename</button><br>
+        <input type="range" min="0" max="65535" step="500" value="0"
+          oninput="onSliderInput('${node.uuid}', this)">
+        <output>0</output><br>
+        <strong>UUID:</strong> ${node.uuid}<br>
+        <strong>Address:</strong> ${node.unicast}<br>
+        <button onclick="unprovision('${node.uuid}')">Unprovision</button>
+      `;
+      nodesContainer.appendChild(el);
+    });
 
       const unprovContainer = document.getElementById("unprovisioned");
       data.unprovisioned.forEach(dev => {
@@ -88,4 +91,23 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 });
 
+document.addEventListener("click", function (e) {
+  if (e.target.classList.contains("rename-btn")) {
+    const nodeEl = e.target.closest(".node");
+    const uuid = nodeEl.dataset.uuid;
+    const newName = nodeEl.querySelector(".name-input").value;
+
+    fetch("/api/rename_node", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uuid, name: newName })
+    }).then(res => {
+      if (res.ok) {
+        nodeEl.querySelector(".node-name").textContent = newName;
+      } else {
+        alert("Failed to rename node.");
+      }
+    });
+  }
+});
 // You can also dynamically load node info from /nodes.json here (future upgrade)

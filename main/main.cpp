@@ -100,7 +100,6 @@ extern "C" void app_main()
     }
     ESP_ERROR_CHECK(err);
 
-    node_manager().Initialize();
 
     err = bluetooth_init();
     if (err)
@@ -153,6 +152,8 @@ extern "C" void app_main()
     mqtt5_app_start();
 
     start_webserver();
+
+    node_manager().initialize();
 
     refresh_all_nodes();
 

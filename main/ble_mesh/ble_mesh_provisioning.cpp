@@ -86,18 +86,22 @@ void print_model_name(uint16_t model_id)
         break;
     }
 }
-
-esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
-                               uint16_t unicast, uint8_t elem_num, uint16_t net_idx)
+esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_comp_param& node_aparam)
 {
-   
+    int node_idx = node_aparam.node_idx;
+    const Uuid128 uuid128 {node_aparam.device_uuid};
+    uint16_t unicast = node_aparam.unicast_addr;
+    uint8_t elem_num = node_aparam.element_num;
+    uint16_t net_idx = node_aparam.netkey_idx;
+    uint16_t node_index = node_aparam.node_idx;
+
     bm2mqtt_node_info *node = NULL;
     char name[11] = {0};
     int err;
 
     ESP_LOGI(TAG, "node index: 0x%x, unicast address: 0x%02x, element num: %d, netkey index: 0x%02x",
              node_idx, unicast, elem_num, net_idx);
-    ESP_LOGI(TAG, "device uuid: %s", bt_hex(uuid, 16));
+    ESP_LOGI(TAG, "device uuid: %s", bt_hex(uuid128.raw(), 16));
 
     sprintf(name, "%s%d", "NODE-", node_idx);
     err = esp_ble_mesh_provisioner_set_node_name(node_idx, name);
@@ -106,9 +110,8 @@ esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
         ESP_LOGE(TAG, "%s: Set node name failed", __func__);
         return ESP_FAIL;
     }
-
-    const Uuid128 uuid128 {uuid};
-    err = node_manager().store_node_info(uuid128, unicast, elem_num, LED_OFF);
+    
+    err = node_manager().store_node_info(uuid128, unicast, elem_num, node_index);
     if (err)
     {
         ESP_LOGE(TAG, "%s: Store node info failed", __func__);
@@ -283,9 +286,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         prov_link_close(param->provisioner_prov_link_close.bearer, param->provisioner_prov_link_close.reason);
         break;
     case ESP_BLE_MESH_PROVISIONER_PROV_COMPLETE_EVT:
-        prov_complete(param->provisioner_prov_complete.node_idx, param->provisioner_prov_complete.device_uuid,
-                      param->provisioner_prov_complete.unicast_addr, param->provisioner_prov_complete.element_num,
-                      param->provisioner_prov_complete.netkey_idx);
+        prov_complete(param->provisioner_prov_complete);
         break;
     case ESP_BLE_MESH_PROVISIONER_ADD_UNPROV_DEV_COMP_EVT:
         ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_ADD_UNPROV_DEV_COMP_EVT, err_code %d", param->provisioner_add_unprov_dev_comp.err_code);

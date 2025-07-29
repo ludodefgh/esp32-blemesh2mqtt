@@ -38,6 +38,8 @@ enum class color_mode_t : uint8_t
 
 const char* get_color_mode_string(color_mode_t mode);
 
+uint16_t get_node_index(Uuid128 uuid);
+
 typedef struct
 {
     Uuid128 uuid;
@@ -64,9 +66,74 @@ typedef struct
 
 } bm2mqtt_node_info_v1;
 
-constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 1;
+typedef struct
+{
+    Uuid128 uuid;
+    uint16_t unicast{0};
+    uint16_t hsl_h{0};
+    uint16_t min_hue{0};
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
+    uint16_t hsl_s{0};
+    uint16_t min_saturation{0};
+    uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
+    uint16_t hsl_l{0};
+    uint16_t min_lightness{0};
+    uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
+    uint16_t curr_temp{0};
+    uint16_t min_temp{0};
+    uint16_t max_temp{std::numeric_limits<uint16_t>::max()};
+    int16_t level{0};
+    uint16_t features{0};
+    uint16_t features_to_bind{0};
+    uint16_t node_index{0}; // Node index in the provisioning table
+    uint8_t elem_num{0};
+    uint8_t onoff{0};
+    uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
+    color_mode_t color_mode = color_mode_t::brightness;
 
-using bm2mqtt_node_info = bm2mqtt_node_info_v1;
+    void operator=(const bm2mqtt_node_info_v1& other)
+    {
+        uuid = other.uuid;
+        unicast = other.unicast;
+        hsl_h = other.hsl_h;
+        min_hue = other.min_hue;
+        max_hue = other.max_hue;
+        hsl_s = other.hsl_s;
+        min_saturation = other.min_saturation;
+        max_saturation = other.max_saturation;
+        hsl_l = other.hsl_l;
+        min_lightness = other.min_lightness;
+        max_lightness = other.max_lightness;
+        curr_temp = other.curr_temp;
+        min_temp = other.min_temp;
+        max_temp = other.max_temp;
+        level = other.level;
+        features = other.features;
+        features_to_bind = other.features_to_bind;
+        elem_num = other.elem_num;
+        onoff = other.onoff;
+        light_ctl_temp_offset = other.light_ctl_temp_offset;
+        color_mode = other.color_mode;
+    }
+
+    void convert_from_v1(const bm2mqtt_node_info_v1& v1)
+    {
+        *this = v1; // Use the assignment operator to copy data
+
+        node_index = get_node_index(uuid);
+        if (node_index == std::numeric_limits<uint16_t>::max())
+        {
+            ESP_LOGW("bm2mqtt_node_info_v2", "Node with UUID %s not found in provisioning table",
+                     uuid.to_string().c_str());
+        }
+    }
+
+} bm2mqtt_node_info_v2;
+
+
+constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 2;
+
+using bm2mqtt_node_info = bm2mqtt_node_info_v2;
 
 class ble2mqtt_node_manager final
 {
@@ -85,7 +152,7 @@ public:
     void for_each_node(std::function<void(const bm2mqtt_node_info *)> func);
 
     esp_err_t store_node_info(const Uuid128& uuid, uint16_t unicast,
-                                               uint8_t elem_num, uint8_t onoff_state);
+                                               uint8_t elem_num, uint16_t node_index);
 
     void remove_node(const Uuid128& uuid);
 
@@ -95,8 +162,10 @@ public:
 
     void print_registered_nodes();
 
-    void Initialize();
+    void initialize();
     void mark_node_info_dirty();
+
+    void set_node_name(const Uuid128& uuid, const char* name);
 private:
     // Disable copy and move constructors and assignment operators
     ble2mqtt_node_manager(const ble2mqtt_node_manager &) = delete;
