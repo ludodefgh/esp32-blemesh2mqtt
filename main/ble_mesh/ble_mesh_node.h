@@ -120,12 +120,12 @@ typedef struct
     {
         *this = v1; // Use the assignment operator to copy data
 
-        node_index = get_node_index(uuid);
-        if (node_index == std::numeric_limits<uint16_t>::max())
-        {
-            ESP_LOGW("bm2mqtt_node_info_v2", "Node with UUID %s not found in provisioning table",
-                     uuid.to_string().c_str());
-        }
+        // node_index = get_node_index(uuid);
+        // if (node_index == std::numeric_limits<uint16_t>::max())
+        // {
+        //     ESP_LOGW("bm2mqtt_node_info_v2", "Node with UUID %s not found in provisioning table",
+        //              uuid.to_string().c_str());
+        // }
     }
 
 } bm2mqtt_node_info_v2;

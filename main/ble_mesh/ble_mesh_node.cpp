@@ -111,7 +111,7 @@ bm2mqtt_node_info *ble2mqtt_node_manager::get_node(int nodeIndex)
 bm2mqtt_node_info *ble2mqtt_node_manager::get_node(const std::string &mac)
 {
     bm2mqtt_node_info *result = nullptr;
-    for_each_provisioned_node([&mac, &result, this](const esp_ble_mesh_node_t *node)
+    for_each_provisioned_node([&mac, &result, this](const esp_ble_mesh_node_t *node, int node_index)
                               {
             const std::string inAddr {bt_hex(node->addr, BD_ADDR_LEN)};
             if (inAddr == mac)
@@ -177,7 +177,6 @@ esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128 &uuid, uint16_t u
     bm2mqtt_node_info *node = get_or_create(uuid);
     node->unicast = unicast;
     node->elem_num = elem_num;
-    node->node_index = node_index;
     save_node_info_vector();
 
     return ESP_OK;
@@ -211,13 +210,26 @@ void ble2mqtt_node_manager::print_registered_nodes()
     ESP_LOGI(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
+        // Get the node name from the provisioner
+        uint16_t node_index = get_node_index(node.uuid); // Ensure node_index is set
+        const char* node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
+        if (!node_name) {
+            node_name = "Unknown";
+        }
+        
         ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node.uuid.raw(), 16));
+        ESP_LOGI(TAG, "  Node Name: %s", node_name);
         ESP_LOGI(TAG, "  Primary Address: 0x%04X", node.unicast);
         ESP_LOGI(TAG, "  Element Count: %d", node.elem_num);
         ESP_LOGI(TAG, "  On/Off State: %d", node.onoff);
+        ESP_LOGI(TAG, "  Level: %d", node.level);
         ESP_LOGI(TAG, "  HSL: H=%d S=%d L=%d", node.hsl_h, node.hsl_s, node.hsl_l);
-        ESP_LOGI(TAG, "  Min Temp: %d, Max Temp: %d, Current Temp: %d", node.min_temp, node.max_temp, node.curr_temp);
+        ESP_LOGI(TAG, "  HSL Ranges - Hue: %d-%d, Saturation: %d-%d, Lightness: %d-%d", 
+                 node.min_hue, node.max_hue, node.min_saturation, node.max_saturation, 
+                 node.min_lightness, node.max_lightness);
+        ESP_LOGI(TAG, "  Temperature: Current=%d, Range=%d-%d", node.curr_temp, node.min_temp, node.max_temp);
         ESP_LOGI(TAG, "  Color Mode: %s", get_color_mode_string(node.color_mode));
+        ESP_LOGI(TAG, "  Light CTL Temp Offset: %d", node.light_ctl_temp_offset);
         ESP_LOGI(TAG, "  Features: 0x%04X", node.features);
         ESP_LOGI(TAG, "  Features to Bind: 0x%04X", node.features_to_bind);
     }
@@ -373,7 +385,8 @@ void ble2mqtt_node_manager::set_node_name(const Uuid128& uuid, const char* name)
 {
     if (bm2mqtt_node_info *node = get_node(uuid))
     {
-        esp_ble_mesh_provisioner_set_node_name(node->node_index, name);
+        uint16_t node_index = get_node_index(uuid); // Ensure node_index is set
+        esp_ble_mesh_provisioner_set_node_name(node_index, name);
         mark_node_info_dirty();
     }
     else{

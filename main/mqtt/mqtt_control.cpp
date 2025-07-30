@@ -19,6 +19,7 @@
 #include <ble_mesh/ble_mesh_commands.h>
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
+#include <ble_mesh/message_queue.h>
 
 #define TAG "APP_MQTT"
 
@@ -463,7 +464,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                         {
                             if (cJSON_IsNumber(color_temp))
                             {
-                                uint16_t filteredValue = (uint16_t)map(color_temp->valuedouble, 0, 255, node_info->min_temp, node_info->max_temp);
+                                uint16_t filteredValue = (uint16_t)map(color_temp->valuedouble, 2000, 6535, node_info->min_temp, node_info->max_temp);
                                 node_info->curr_temp = filteredValue;
                                 current_mode = color_mode_t::color_temp;
                                 light_value_changed = true;
@@ -487,10 +488,18 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                             ble_mesh_lightness_set(node_info);
                         }
                     }
+
+                    message_queue().enqueue(node_info, message_payload{
+                                           .send = [node_info]()
+                                           {
+                                               mqtt_send_status(node_info);
+                                           },
+                                           .opcode = 0x0000, // No specific opcode, just a marker
+                                           .retries_left = 0,
+                                           .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
+                                       });
                 }
                 cJSON_Delete(response);
-
-                mqtt_send_status(node_info);
             }
         }
     }

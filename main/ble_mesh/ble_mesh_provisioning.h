@@ -43,7 +43,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
 int list_provisioned_nodes_esp(int argc = 0, char **argv = nullptr);
 
-void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func);
+void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *, int node_index)> func);
 
 void RegisterProvisioningDebugCommands();
 

@@ -149,11 +149,13 @@ extern "C" void app_main()
     initDebugGPIO();
 #endif
 
-    mqtt5_app_start();
 
     start_webserver();
 
     node_manager().initialize();
+
+    // Needs to be called after node_manager() is initialized but before nodes are refreshed.
+    mqtt5_app_start();
 
     refresh_all_nodes();
 

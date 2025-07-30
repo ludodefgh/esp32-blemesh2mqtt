@@ -377,14 +377,14 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     return;
 }
 
-void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *)> func)
+void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *, int node_index)> func)
 {
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
         if (node != nullptr)
         {
-          func(node);
+          func(node, i);
         }
     }
 }
@@ -394,10 +394,11 @@ int list_provisioned_nodes_esp(int argc, char **argv)
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
     ESP_LOGI(TAG, "Provisioned nodes: %d", node_count);
 
-    for_each_provisioned_node([](const esp_ble_mesh_node_t * node)
+    for_each_provisioned_node([](const esp_ble_mesh_node_t * node, int node_index)
     {
             ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node->dev_uuid, 16));
             ESP_LOGI(TAG, "  device name: %s", node->name);
+            ESP_LOGI(TAG, "  node index(ESP): %d", node_index);
             ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
             ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
             ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
@@ -443,7 +444,7 @@ int unprovision_all_nodes(int argc, char **argv)
     std::vector<Uuid128> uuids_to_remove;
 
 
-    for_each_provisioned_node([&](const esp_ble_mesh_node_t * node)
+    for_each_provisioned_node([&](const esp_ble_mesh_node_t * node, int node_index)
     {
             ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
             ESP_LOGI(TAG, "  device name: %s", node->name);

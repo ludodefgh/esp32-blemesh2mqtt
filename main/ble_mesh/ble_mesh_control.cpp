@@ -870,7 +870,7 @@ esp_err_t ble_mesh_init(void)
 void refresh_all_nodes()
 {
     ESP_LOGI(TAG, "[%s] Refreshing all nodes", __func__);
-    for_each_provisioned_node([](const esp_ble_mesh_node_t *node)
+    for_each_provisioned_node([](const esp_ble_mesh_node_t *node, int node_index)
     {
         if (bm2mqtt_node_info *node_info = node_manager().get_or_create(node->dev_uuid))
         {
