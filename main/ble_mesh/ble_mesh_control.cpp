@@ -817,7 +817,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         break;
     }
 }
-bool enable_provisioning = false;
+bool enable_provisioning = true;
 
 esp_err_t ble_mesh_init(void)
 {

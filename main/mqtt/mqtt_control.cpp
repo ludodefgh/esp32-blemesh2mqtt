@@ -237,12 +237,11 @@ void mqtt5_app_start(void)
     esp_mqtt_client_start(mqtt_client);
 
     {
+        // First publish the discovery message
+        send_bridge_discovery();
+        // Then publish the state message
         int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "blemesh2mqtt/bridge/state", "on", 0, 0, 0);
         ESP_LOGI(TAG, "Sent state message, msg_id=%d", msg_id);
-    }
-
-    {
-        send_bridge_discovery();
     }
     // {
     //     mqtt_init_periodic_info();
@@ -291,6 +290,8 @@ std::unique_ptr<cJSON> make_discovery_message(const bm2mqtt_node_info *node)
                 const char* node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
                 cJSON_AddItemToObject(dev, "name", cJSON_CreateString(node_name ? node_name : "light"));
                 cJSON_AddItemToObject(dev, "ids", cJSON_CreateString(buf));
+                std::string identifier = get_bridge_mac_identifier();
+                cJSON_AddItemToObject(dev, "via_device", cJSON_CreateString(identifier.c_str()));
             }
         }
 
@@ -376,10 +377,10 @@ std::unique_ptr<cJSON> make_status_message(const bm2mqtt_node_info *node_info)
 
 void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 {
-    if (strncmp(event->topic, "blemesh2mqtt/bridge/auto_provision/set", event->topic_len) == 0)
+    if (strncmp(event->topic, "blemesh2mqtt/bridge/provisioning/set", event->topic_len) == 0)
     {
         //buffer_length = strlen(event->data) + sizeof("");
-        ESP_LOGI(TAG, "Received auto_provision command from MQTT: [%.*s]", event->data_len, event->data  );
+        ESP_LOGI(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data  );
 
         ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON",event->data_len) == 0);
    

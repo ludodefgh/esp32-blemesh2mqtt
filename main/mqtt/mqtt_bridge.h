@@ -1,12 +1,14 @@
 #pragma once
 #include <memory>
+#include <string>
 #include "cJSON.h"
 #include "mqtt_client.h"
 
 using CJsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
+std::string get_bridge_mac_identifier();
 
-CJsonPtr create_auto_provision_json();
+CJsonPtr create_provisioning_json();
 CJsonPtr create_uptime_json();
 CJsonPtr create_bridge_info_json();
 
