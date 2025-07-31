@@ -8,6 +8,8 @@
 #include "debug/console_cmd.h"
 #include <debug/websocket_logger.h>
 #include <cJSON.h>
+#include <mqtt/mqtt_control.h>
+#include <mqtt/mqtt_bridge.h>
 
 #define TAG "WEB_SERVER"
 
@@ -217,6 +219,56 @@ esp_err_t unprovision_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t send_mqtt_status_handler(httpd_req_t *req)
+{
+    char buf[64] = {0};
+    httpd_req_recv(req, buf, sizeof(buf) - 1);
+
+    char uuid_str[33] = {0};
+    sscanf(buf, "uuid=%32s", uuid_str);
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++)
+    {
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+    }
+
+    // Find the node by UUID and send MQTT status
+    const Uuid128 dev_uuid{uuid};
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(dev_uuid))
+    {
+        mqtt_send_status(node_info);
+    }
+
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t send_mqtt_discovery_handler(httpd_req_t *req)
+{
+    char buf[64] = {0};
+    httpd_req_recv(req, buf, sizeof(buf) - 1);
+
+    char uuid_str[33] = {0};
+    sscanf(buf, "uuid=%32s", uuid_str);
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++)
+    {
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+    }
+
+    // Find the node by UUID and send MQTT discovery
+    const Uuid128 dev_uuid{uuid};
+    if (bm2mqtt_node_info *node_info = node_manager().get_node(dev_uuid))
+    {
+        mqtt_send_discovery(node_info);
+    }
+
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 esp_err_t nodes_json_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
@@ -278,6 +330,27 @@ esp_err_t list_console_commands_handler(httpd_req_t *req) {
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
+esp_err_t send_bridge_mqtt_discovery_handler(httpd_req_t *req)
+{
+    send_bridge_discovery();
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t send_bridge_mqtt_status_handler(httpd_req_t *req)
+{
+    publish_bridge_info(69, "0.1.0");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t restart_bridge_handler(httpd_req_t *req)
+{
+    httpd_resp_send(req, NULL, 0);
+    esp_restart();
+    return ESP_OK;
+}
+
 esp_err_t rename_node_handler(httpd_req_t *req) {
     ESP_LOGW(TAG, "rename_node_handler called");
     char buf[128];
@@ -304,6 +377,10 @@ esp_err_t rename_node_handler(httpd_req_t *req) {
     Uuid128 uuid{uuid_tmp};
 
     node_manager().set_node_name(uuid, name_json->valuestring);
+    if (bm2mqtt_node_info *node = node_manager().get_node(uuid))
+    {
+        mqtt_send_discovery(node);
+    }
 
     cJSON_Delete(json);
     return httpd_resp_sendstr(req, "OK");
@@ -333,6 +410,18 @@ httpd_uri_t set_unprovision_uri = {
     .handler = unprovision_handler,
 };
 
+httpd_uri_t send_mqtt_status_uri = {
+    .uri = "/send_mqtt_status",
+    .method = HTTP_POST,
+    .handler = send_mqtt_status_handler,
+};
+
+httpd_uri_t send_mqtt_discovery_uri = {
+    .uri = "/send_mqtt_discovery",
+    .method = HTTP_POST,
+    .handler = send_mqtt_discovery_handler,
+};
+
 httpd_uri_t json_nodes_uri = {
     .uri = "/nodes.json",
     .method = HTTP_GET,
@@ -351,6 +440,24 @@ httpd_uri_t rename_uri = {
     .method = HTTP_POST,
     .handler = rename_node_handler,
     .user_ctx = nullptr
+};
+
+httpd_uri_t send_bridge_mqtt_discovery_uri = {
+    .uri = "/send_bridge_mqtt_discovery",
+    .method = HTTP_POST,
+    .handler = send_bridge_mqtt_discovery_handler,
+};
+
+httpd_uri_t send_bridge_mqtt_status_uri = {
+    .uri = "/send_bridge_mqtt_status",
+    .method = HTTP_POST,
+    .handler = send_bridge_mqtt_status_handler,
+};
+
+httpd_uri_t restart_bridge_uri = {
+    .uri = "/restart_bridge",
+    .method = HTTP_POST,
+    .handler = restart_bridge_handler,
 };
 
 const char *get_content_type(const char *filename)
@@ -412,6 +519,11 @@ void start_webserver(void)
         httpd_register_uri_handler(server, &set_lightness_uri);
         httpd_register_uri_handler(server, &set_provision_uri);
         httpd_register_uri_handler(server, &set_unprovision_uri);
+        httpd_register_uri_handler(server, &send_mqtt_status_uri);
+        httpd_register_uri_handler(server, &send_mqtt_discovery_uri);
+        httpd_register_uri_handler(server, &send_bridge_mqtt_discovery_uri);
+        httpd_register_uri_handler(server, &send_bridge_mqtt_status_uri);
+        httpd_register_uri_handler(server, &restart_bridge_uri);
         httpd_register_uri_handler(server, &json_nodes_uri);
         //register_static_routes(server);
         httpd_register_uri_handler(server, &console_cmds_uri);

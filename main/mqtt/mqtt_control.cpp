@@ -287,7 +287,9 @@ std::unique_ptr<cJSON> make_discovery_message(const bm2mqtt_node_info *node)
             cJSON_AddItemToObject(root, "dev", dev = cJSON_CreateObject());
             if (dev != nullptr)
             {
-                cJSON_AddItemToObject(dev, "name", cJSON_CreateString("light"));
+                uint16_t node_index = get_node_index(node->uuid);
+                const char* node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
+                cJSON_AddItemToObject(dev, "name", cJSON_CreateString(node_name ? node_name : "light"));
                 cJSON_AddItemToObject(dev, "ids", cJSON_CreateString(buf));
             }
         }

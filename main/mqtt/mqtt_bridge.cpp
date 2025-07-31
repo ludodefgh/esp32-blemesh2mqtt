@@ -26,7 +26,7 @@ CJsonPtr create_auto_provision_json()
     cJSON_AddStringToObject(root.get(), "state_off", "OFF");
     cJSON_AddStringToObject(root.get(), "availability_topic", "blemesh2mqtt/bridge/state");
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
-    cJSON_AddStringToObject(root.get(), "payload_not_available", "off");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
 
     // Device object
     cJSON *device = cJSON_CreateObject();
@@ -66,7 +66,7 @@ CJsonPtr create_uptime_json()
     cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
     cJSON_AddStringToObject(root.get(), "availability_topic", "blemesh2mqtt/bridge/state");
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
-    cJSON_AddStringToObject(root.get(), "payload_not_available", "off");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
     
 
     // Device object
@@ -106,8 +106,40 @@ CJsonPtr create_mem_json()
     cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
     cJSON_AddStringToObject(root.get(), "availability_topic", "blemesh2mqtt/bridge/state");
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
-    cJSON_AddStringToObject(root.get(), "payload_not_available", "off");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
     
+
+    // Device object
+    cJSON *device = cJSON_CreateObject();
+    cJSON *identifiers = cJSON_CreateArray();
+    cJSON_AddItemToArray(identifiers, cJSON_CreateString("blemesh2mqtt-bridge"));
+
+    cJSON_AddItemToObject(device, "identifiers", identifiers);
+    cJSON_AddStringToObject(device, "manufacturer", "YourName");
+    cJSON_AddStringToObject(device, "model", "BLEMesh2MQTT Bridge");
+    cJSON_AddStringToObject(device, "name", "BLE Mesh Bridge");
+    cJSON_AddStringToObject(device, "sw_version", "0.1.0");
+
+    // Add device to root
+    cJSON_AddItemToObject(root.get(), "device", device);
+
+    return root;
+}
+
+CJsonPtr create_ip_json()
+{
+    CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
+
+    // Top-level fields
+    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Bridge IP Address");
+    cJSON_AddStringToObject(root.get(), "unique_id", "blemesh2mqtt_ip_address");
+    cJSON_AddStringToObject(root.get(), "state_topic", "blemesh2mqtt/bridge/info");
+    cJSON_AddStringToObject(root.get(), "value_template", "{{ value_json.ip_address }}");
+    cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
+    cJSON_AddStringToObject(root.get(), "availability_topic", "blemesh2mqtt/bridge/state");
+    cJSON_AddStringToObject(root.get(), "payload_available", "on");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
+    cJSON_AddStringToObject(root.get(), "icon", "mdi:ip-network");
 
     // Device object
     cJSON *device = cJSON_CreateObject();
@@ -136,6 +168,8 @@ CJsonPtr create_bridge_info_json(int devices_provisioned, const char *version)
     cJSON_AddNumberToObject(root.get(), "uptime", uptime_sec);
     // Free heap size
     cJSON_AddNumberToObject(root.get(), "heap_free", esp_get_free_heap_size());
+    // IP address
+    cJSON_AddStringToObject(root.get(), "ip_address", get_ip_address());
 
     cJSON_AddNumberToObject(root.get(), "devices_provisioned", devices_provisioned);
     cJSON_AddStringToObject(root.get(), "version", version);
@@ -189,6 +223,14 @@ void send_bridge_discovery()
         char *json_data = cJSON_PrintUnformatted(mem_json.get());
         int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "homeassistant/sensor/blemesh2mqtt/memory/config", json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent memory discovery publish successful, msg_id=%d", msg_id);
+        cJSON_free(json_data);
+    }
+
+    {
+        CJsonPtr ip_json = create_ip_json();
+        char *json_data = cJSON_PrintUnformatted(ip_json.get());
+        int msg_id = esp_mqtt_client_publish(get_mqtt_client(), "homeassistant/sensor/blemesh2mqtt/ip_address/config", json_data, 0, 0, 0);
+        ESP_LOGI(TAG, "sent IP address discovery publish successful, msg_id=%d", msg_id);
         cJSON_free(json_data);
     }
 

@@ -35,12 +35,54 @@ function unprovision(uuid) {
   }).then(() => location.reload());
 }
 
+function sendMqttStatus(uuid) {
+  fetch("/send_mqtt_status", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `uuid=${encodeURIComponent(uuid)}`
+  });
+}
+
+function sendMqttDiscovery(uuid) {
+  fetch("/send_mqtt_discovery", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `uuid=${encodeURIComponent(uuid)}`
+  });
+}
+
 function provision(uuid) {
   fetch("/provision", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}`
   }).then(() => location.reload());
+}
+
+function sendBridgeMqttDiscovery() {
+  fetch("/send_bridge_mqtt_discovery", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: ""
+  });
+}
+
+function sendBridgeMqttStatus() {
+  fetch("/send_bridge_mqtt_status", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: ""
+  });
+}
+
+function restartBridge() {
+  if (confirm("Are you sure you want to restart the ESP32? This will disconnect all clients.")) {
+    fetch("/restart_bridge", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: ""
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -62,6 +104,8 @@ document.addEventListener("DOMContentLoaded", function () {
         <strong>UUID:</strong> ${node.uuid}<br>
         <strong>Address:</strong> ${node.unicast}<br>
         <button onclick="unprovision('${node.uuid}')">Unprovision</button>
+        <button onclick="sendMqttStatus('${node.uuid}')">Send MQTT Status</button>
+        <button onclick="sendMqttDiscovery('${node.uuid}')">Send MQTT Discovery</button>
       `;
       nodesContainer.appendChild(el);
     });
