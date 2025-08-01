@@ -6,6 +6,7 @@
 #include "protocol_examples_common.h"
 #include "esp_log.h"
 #include "esp_console.h"
+#include "esp_system.h"
 //// MQTT includes end
 
 #include "ble_mesh/ble_mesh_node.h"
@@ -401,6 +402,22 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 
         ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON",event->data_len) == 0);
    
+        return;
+    }
+
+    if (strncmp(event->topic, get_bridge_restart_set_topic(), event->topic_len) == 0)
+    {
+        ESP_LOGI(TAG, "Received restart command from MQTT: [%.*s]", event->data_len, event->data);
+
+        if (strncmp(event->data, "RESTART", event->data_len) == 0)
+        {
+            ESP_LOGW(TAG, "Bridge restart requested via MQTT - restarting in 2 seconds...");
+            
+            // Give time for MQTT response to be sent before restarting
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            esp_restart();
+        }
+        
         return;
     }
 

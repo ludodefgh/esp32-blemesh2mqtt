@@ -87,6 +87,12 @@ const char* get_bridge_provisioning_set_topic()
     return topic.c_str();
 }
 
+const char* get_bridge_restart_set_topic()
+{
+    static const std::string topic {get_bridge_base_topic() + "/bridge/restart/set"};
+    return topic.c_str();
+}
+
 CJsonPtr create_provisioning_json()
 {
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
@@ -115,6 +121,37 @@ CJsonPtr create_provisioning_json()
     cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
     cJSON_AddStringToObject(origin, "sw", "0.1.0");
     //cJSON_AddStringToObject(origin, "url", get_ip_address());
+
+    cJSON_AddItemToObject(root.get(), "origin", origin);
+
+    return root;
+}
+
+CJsonPtr create_restart_json()
+{
+    CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
+
+    // Top-level fields for Home Assistant button entity
+    cJSON_AddStringToObject(root.get(), "name", "Restart");
+    std::string unique_id = get_bridge_mac_identifier();
+    unique_id += "_restart";
+    cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
+    cJSON_AddStringToObject(root.get(), "command_topic", get_bridge_restart_set_topic());
+    cJSON_AddStringToObject(root.get(), "payload_press", "RESTART");
+    cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
+    cJSON_AddStringToObject(root.get(), "payload_available", "on");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
+    cJSON_AddStringToObject(root.get(), "device_class", "restart");
+    cJSON_AddStringToObject(root.get(), "entity_category", "config");
+    cJSON_AddStringToObject(root.get(), "icon", "mdi:restart");
+
+    // Device object
+    cJSON *device = create_bridge_device_object();
+    cJSON_AddItemToObject(root.get(), "device", device);
+
+    cJSON *origin = cJSON_CreateObject();
+    cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
+    cJSON_AddStringToObject(origin, "sw", "0.1.0");
 
     cJSON_AddItemToObject(root.get(), "origin", origin);
 
@@ -239,13 +276,14 @@ void publish_bridge_info(const char *version)
 extern bool enable_provisioning;
 void send_bridge_discovery()
 {
+    // Publish provisioning switch
     {
         CJsonPtr discovery_json = create_provisioning_json();
         if (cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(discovery_json.get(), "unique_id"))
         {
             if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
             {
-                ESP_LOGI(TAG, "[send_bridge_discovery]Publishing discovery for %s", unique_id->valuestring);
+                ESP_LOGI(TAG, "[send_bridge_discovery] Publishing switch discovery for %s", unique_id->valuestring);
 
                 char *json_data = cJSON_PrintUnformatted(discovery_json.get());
                 const std::string topic = "homeassistant/switch/" + std::string{unique_id->valuestring} + "/config";
@@ -253,11 +291,34 @@ void send_bridge_discovery()
                 cJSON_free(json_data);
             }
             else{
-                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in discovery JSON");
+                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in switch discovery JSON");
             }
         }
         else{
-            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in discovery JSON");
+            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in switch discovery JSON");
+        }
+    }
+
+    // Publish restart button
+    {
+        CJsonPtr discovery_json = create_restart_json();
+        if (cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(discovery_json.get(), "unique_id"))
+        {
+            if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
+            {
+                ESP_LOGI(TAG, "[send_bridge_discovery] Publishing button discovery for %s", unique_id->valuestring);
+
+                char *json_data = cJSON_PrintUnformatted(discovery_json.get());
+                const std::string topic = "homeassistant/button/" + std::string{unique_id->valuestring} + "/config";
+                int msg_id = esp_mqtt_client_publish(get_mqtt_client(), topic.c_str(), json_data, 0, 0, 0);
+                cJSON_free(json_data);
+            }
+            else{
+                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in button discovery JSON");
+            }
+        }
+        else{
+            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in button discovery JSON");
         }
     }
 
@@ -324,6 +385,8 @@ void mqtt_publish_provisioning_enabled(bool enable_provisioning)
 void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)
 {
     int msg_id = esp_mqtt_client_subscribe(client, get_bridge_provisioning_set_topic(), 0);
-    //send_status(node_info);
-    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+    ESP_LOGI(TAG, "sent provisioning subscribe successful, msg_id=%d", msg_id);
+    
+    msg_id = esp_mqtt_client_subscribe(client, get_bridge_restart_set_topic(), 0);
+    ESP_LOGI(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);
 }

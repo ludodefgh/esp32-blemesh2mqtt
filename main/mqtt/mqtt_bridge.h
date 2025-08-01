@@ -13,8 +13,10 @@ const char* get_bridge_availability_topic();
 const char* get_bridge_state_topic();
 const char* get_bridge_provisioning_set_topic();
 const char* get_bridge_provisioning_state_topic();
+const char* get_bridge_restart_set_topic();
 
 CJsonPtr create_provisioning_json();
+CJsonPtr create_restart_json();
 CJsonPtr create_uptime_json();
 CJsonPtr create_bridge_info_json(const char *version);
 
