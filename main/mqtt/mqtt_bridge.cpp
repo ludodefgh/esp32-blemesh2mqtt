@@ -112,7 +112,6 @@ CJsonPtr create_provisioning_json()
 
     // Device object
     cJSON *device = create_bridge_device_object();
-    //cJSON_AddStringToObject(device, "configuration_url", get_ip_address());
 
     // Add device to root
     cJSON_AddItemToObject(root.get(), "device", device);
@@ -120,7 +119,6 @@ CJsonPtr create_provisioning_json()
     cJSON *origin = cJSON_CreateObject();
     cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
     cJSON_AddStringToObject(origin, "sw", "0.1.0");
-    //cJSON_AddStringToObject(origin, "url", get_ip_address());
 
     cJSON_AddItemToObject(root.get(), "origin", origin);
 

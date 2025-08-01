@@ -97,17 +97,3 @@ void websocket_logger_install()
     esp_log_set_vprintf(log_ws_vprintf);
 }
 
-void websocket_logger_send_ping()
-{
-    ESP_LOGE(TAG, "websocket_logger_send_ping called");
-    std::lock_guard<std::mutex> lock(ws_mutex);
-    for (int fd : ws_clients)
-    {
-        httpd_ws_frame_t frame;
-        frame.type = HTTPD_WS_TYPE_PING;
-        frame.final = true;
-        frame.payload = nullptr;
-        frame.len = 0;
-        httpd_ws_send_frame_async(ws_server, fd, &frame);
-    }
-}

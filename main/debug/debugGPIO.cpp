@@ -65,13 +65,5 @@ void gpio_isr_handler(void *arg)
 
 void debounce_timer_callback(TimerHandle_t xTimer)
 {
-    // if (gpio_get_level(BUTTON_GPIO) == 0)
-    // {
-    //     SendGenericOnOffToggle();
-    // }
     
-    // if (gpio_get_level(BUTTON_GPIO2) == 0)
-    // {
-    //     NextMode();
-    // }
 }

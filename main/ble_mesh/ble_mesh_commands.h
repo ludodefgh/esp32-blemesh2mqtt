@@ -17,5 +17,3 @@ void ble_mesh_ctl_temperature_range_get(bm2mqtt_node_info *node_info);
 
 void light_hsl_set(bm2mqtt_node_info * node_info);
 
-void SendGenericOnOffToggle();
-
