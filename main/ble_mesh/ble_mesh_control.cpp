@@ -354,7 +354,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
                                           .send = [node]()
                                           {
                                               mqtt_send_discovery(node);
-                                              mqtt_send_status(node);
+                                              mqtt_node_send_status(node);
                                           },
                                           .opcode = 0x0000, // No specific opcode, just a marker
                                           .retries_left = 0,
@@ -1003,7 +1003,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
     message_queue().enqueue(node_info, message_payload{
                                            .send = [node_info]()
                                            {
-                                               mqtt_send_status(node_info);
+                                               mqtt_node_send_status(node_info);
                                            },
                                            .opcode = 0x0000, // No specific opcode, just a marker
                                            .retries_left = 0,

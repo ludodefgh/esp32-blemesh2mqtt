@@ -237,7 +237,7 @@ esp_err_t send_mqtt_status_handler(httpd_req_t *req)
     const Uuid128 dev_uuid{uuid};
     if (bm2mqtt_node_info *node_info = node_manager().get_node(dev_uuid))
     {
-        mqtt_send_status(node_info);
+        mqtt_node_send_status(node_info);
     }
 
     httpd_resp_send(req, NULL, 0);
@@ -339,7 +339,7 @@ esp_err_t send_bridge_mqtt_discovery_handler(httpd_req_t *req)
 
 esp_err_t send_bridge_mqtt_status_handler(httpd_req_t *req)
 {
-    publish_bridge_info(69, "0.1.0");
+    publish_bridge_info("0.1.0");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
