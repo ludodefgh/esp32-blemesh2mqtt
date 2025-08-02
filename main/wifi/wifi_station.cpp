@@ -18,7 +18,6 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#include "_config.h"
 #include "wifi_provisioning.h"
 
 /* The examples use WiFi configuration that you can set via project configuration menu
@@ -68,11 +67,20 @@ static EventGroupHandle_t s_wifi_event_group;
 static const char *TAG = "wifi station";
 
 static int s_retry_num = 0;
-char ip_address[16] = {0};
+static char ip_address[16] = {0};
+static SemaphoreHandle_t s_wifi_mutex = NULL;
 
-char*  get_ip_address()
+char* get_ip_address()
 {
-    return ip_address;
+    // Return a copy to prevent race conditions with IP address updates
+    static char ip_copy[16];
+    if (s_wifi_mutex && xSemaphoreTake(s_wifi_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        strncpy(ip_copy, ip_address, sizeof(ip_copy) - 1);
+        ip_copy[sizeof(ip_copy) - 1] = '\0';
+        xSemaphoreGive(s_wifi_mutex);
+        return ip_copy;
+    }
+    return "0.0.0.0";  // Fallback if mutex unavailable
 }
 
 
@@ -93,7 +101,13 @@ void event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-        sprintf(ip_address, "%d.%d.%d.%d", IP2STR(&event->ip_info.ip));   // Convert IP address to string);
+        
+        // Safely update IP address with mutex protection
+        if (s_wifi_mutex && xSemaphoreTake(s_wifi_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            snprintf(ip_address, sizeof(ip_address), "%d.%d.%d.%d", IP2STR(&event->ip_info.ip));
+            xSemaphoreGive(s_wifi_mutex);
+        }
+        
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -115,13 +129,38 @@ esp_err_t wifi_init_sta_with_stored_credentials(void)
         return err;
     }
 
+    // Initialize synchronization primitives
+    if (s_wifi_mutex == NULL) {
+        s_wifi_mutex = xSemaphoreCreateMutex();
+        if (s_wifi_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create WiFi mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    
+    // Take mutex to prevent concurrent initialization
+    if (xSemaphoreTake(s_wifi_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take WiFi mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+    
     if (s_wifi_event_group == NULL) {
         s_wifi_event_group = xEventGroupCreate();
+        if (s_wifi_event_group == NULL) {
+            xSemaphoreGive(s_wifi_mutex);
+            ESP_LOGE(TAG, "Failed to create event group");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     static bool wifi_initialized = false;
     if (!wifi_initialized) {
-        esp_netif_create_default_wifi_sta();
+        esp_netif_t* sta_netif = esp_netif_create_default_wifi_sta();
+        if (sta_netif == NULL) {
+            xSemaphoreGive(s_wifi_mutex);
+            ESP_LOGE(TAG, "Failed to create default WiFi STA");
+            return ESP_ERR_NO_MEM;
+        }
         wifi_initialized = true;
     }
 
@@ -132,16 +171,29 @@ esp_err_t wifi_init_sta_with_stored_credentials(void)
     if (!event_handlers_registered) {
         esp_event_handler_instance_t instance_any_id;
         esp_event_handler_instance_t instance_got_ip;
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+        
+        esp_err_t ret = esp_event_handler_instance_register(WIFI_EVENT,
                                                             ESP_EVENT_ANY_ID,
                                                             &event_handler,
                                                             NULL,
-                                                            &instance_any_id));
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                            IP_EVENT_STA_GOT_IP,
-                                                            &event_handler,
-                                                            NULL,
-                                                            &instance_got_ip));
+                                                            &instance_any_id);
+        if (ret != ESP_OK) {
+            xSemaphoreGive(s_wifi_mutex);
+            ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        
+        ret = esp_event_handler_instance_register(IP_EVENT,
+                                                  IP_EVENT_STA_GOT_IP,
+                                                  &event_handler,
+                                                  NULL,
+                                                  &instance_got_ip);
+        if (ret != ESP_OK) {
+            xSemaphoreGive(s_wifi_mutex);
+            ESP_LOGE(TAG, "Failed to register IP event handler: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        
         event_handlers_registered = true;
     }
 
@@ -151,9 +203,29 @@ esp_err_t wifi_init_sta_with_stored_credentials(void)
     wifi_config.sta.threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD;
     wifi_config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_start() );
+    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_wifi_mutex);
+        ESP_LOGE(TAG, "Failed to set WiFi mode: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_wifi_mutex);
+        ESP_LOGE(TAG, "Failed to set WiFi config: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_wifi_mutex);
+        ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // Release mutex after successful initialization
+    xSemaphoreGive(s_wifi_mutex);
 
     ESP_LOGI(TAG, "wifi_init_sta finished, attempting to connect to: %s", ssid);
 
@@ -177,65 +249,10 @@ esp_err_t wifi_init_sta_with_stored_credentials(void)
 
 void wifi_init_sta(void)
 {
-    if (wifi_init_sta_with_stored_credentials() == ESP_OK) {
+    esp_err_t ret = wifi_init_sta_with_stored_credentials();
+    if (ret == ESP_OK) {
         return;
     }
     
-    ESP_LOGI(TAG, "Falling back to hardcoded credentials");
-    
-    if (s_wifi_event_group == NULL) {
-        s_wifi_event_group = xEventGroupCreate();
-    }
-
-    static bool wifi_initialized = false;
-    if (!wifi_initialized) {
-        esp_netif_create_default_wifi_sta();
-        wifi_initialized = true;
-    }
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    static bool fallback_event_handlers_registered = false;
-    if (!fallback_event_handlers_registered) {
-        esp_event_handler_instance_t instance_any_id;
-        esp_event_handler_instance_t instance_got_ip;
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                            ESP_EVENT_ANY_ID,
-                                                            &event_handler,
-                                                            NULL,
-                                                            &instance_any_id));
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                            IP_EVENT_STA_GOT_IP,
-                                                            &event_handler,
-                                                            NULL,
-                                                            &instance_got_ip));
-        fallback_event_handlers_registered = true;
-    }
-
-    wifi_config_t wifi_config {};
-    strlcpy((char *) wifi_config.sta.ssid, config_wifi_ssid, sizeof(wifi_config.sta.ssid));
-    strncpy((char *) wifi_config.sta.password, config_wifi_pwd, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD;
-    wifi_config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE;
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_start() );
-
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
-
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s", config_wifi_ssid);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s", config_wifi_ssid);
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
-    }
+    ESP_LOGI(TAG, "No stored WiFi credentials found, captive portal required");
 }

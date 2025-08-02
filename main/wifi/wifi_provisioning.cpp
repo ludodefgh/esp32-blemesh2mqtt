@@ -236,9 +236,75 @@ esp_err_t wifi_provisioning_stop_captive_portal(void)
     return ESP_OK;
 }
 
+static bool is_valid_ssid(const char* ssid) {
+    if (!ssid) return false;
+    
+    size_t len = strlen(ssid);
+    if (len == 0 || len > 32) {
+        ESP_LOGW(TAG, "SSID length invalid: %zu (must be 1-32)", len);
+        return false;
+    }
+    
+    // Check for valid UTF-8 characters
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = ssid[i];
+        // Allow printable ASCII and common UTF-8 characters
+        if (c < 32 || c == 127) {
+            ESP_LOGW(TAG, "SSID contains invalid character at position %zu: 0x%02x", i, c);
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+static bool is_valid_password(const char* password) {
+    if (!password) return false;
+    
+    size_t len = strlen(password);
+    if (len > 64) {
+        ESP_LOGW(TAG, "Password too long: %zu (max 64)", len);
+        return false;
+    }
+    
+    // Password can be empty for open networks
+    if (len == 0) {
+        ESP_LOGD(TAG, "Empty password - assuming open network");
+        return true;
+    }
+    
+    // For WPA/WPA2, minimum length is 8
+    if (len < 8) {
+        ESP_LOGW(TAG, "Password too short for WPA: %zu (min 8)", len);
+        return false;
+    }
+    
+    // Check for printable ASCII characters
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = password[i];
+        if (c < 32 || c == 127) {
+            ESP_LOGW(TAG, "Password contains invalid character at position %zu: 0x%02x", i, c);
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* password)
 {
     if (!ssid || !password) {
+        ESP_LOGE(TAG, "SSID or password is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (!is_valid_ssid(ssid)) {
+        ESP_LOGE(TAG, "Invalid SSID format");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (!is_valid_password(password)) {
+        ESP_LOGE(TAG, "Invalid password format");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -567,17 +633,23 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
 
 static esp_err_t wifi_connect_handler(httpd_req_t *req)
 {
-    char buf[128];
+    char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
+    if (ret <= 0 || ret >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
         return ESP_FAIL;
     }
     buf[ret] = '\0';
 
+    // Basic JSON structure validation
+    if (buf[0] != '{' || buf[ret-1] != '}') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON structure");
+        return ESP_FAIL;
+    }
+
     cJSON *json = cJSON_Parse(buf);
     if (!json) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON format");
         return ESP_FAIL;
     }
 
@@ -587,17 +659,28 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     if (!ssid_json || !cJSON_IsString(ssid_json) || 
         !password_json || !cJSON_IsString(password_json)) {
         cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID or password");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid SSID/password fields");
         return ESP_FAIL;
     }
 
     const char* ssid = cJSON_GetStringValue(ssid_json);
     const char* password = cJSON_GetStringValue(password_json);
+    
+    // Validate credentials before processing
+    if (!ssid || !password) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "NULL SSID or password");
+        return ESP_FAIL;
+    }
 
     esp_err_t err = wifi_provisioning_set_credentials(ssid, password);
     cJSON_Delete(json);
 
-    if (err != ESP_OK) {
+    if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid SSID or password format");
+        return ESP_FAIL;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
         return ESP_FAIL;
     }

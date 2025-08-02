@@ -108,14 +108,32 @@ static void dns_server_task(void *pvParameters)
             continue;
         }
 
+        // Validate minimum packet size
         if (len < sizeof(dns_header_t)) {
-            ESP_LOGW(TAG, "Received DNS packet too short");
+            ESP_LOGW(TAG, "Received DNS packet too short: %d bytes", len);
+            continue;
+        }
+        
+        // Validate maximum packet size
+        if (len > sizeof(rx_buffer)) {
+            ESP_LOGW(TAG, "Received DNS packet too large: %d bytes", len);
             continue;
         }
 
         dns_header_t* header = (dns_header_t*)rx_buffer;
         
+        // Validate DNS header fields
         uint16_t question_count = ntohs(header->qdcount);
+        uint16_t answer_count = ntohs(header->ancount);
+        uint16_t authority_count = ntohs(header->nscount);
+        uint16_t additional_count = ntohs(header->arcount);
+        
+        // Sanity check on counts
+        if (question_count > 10 || answer_count > 10 || authority_count > 10 || additional_count > 10) {
+            ESP_LOGW(TAG, "DNS packet has suspicious record counts (Q:%d A:%d NS:%d AR:%d)", 
+                     question_count, answer_count, authority_count, additional_count);
+            continue;
+        }
         if (question_count == 0) {
             // Send a proper DNS response even for queries with no questions
             ESP_LOGD(TAG, "DNS query with no questions, sending minimal response");
@@ -138,27 +156,66 @@ static void dns_server_task(void *pvParameters)
             ESP_LOGD(TAG, "DNS query with %d questions, handling first one", question_count);
         }
         
-        // Log the first domain name being queried for debugging
+        // Safely parse the first domain name with bounds checking
         uint8_t* domain_ptr = rx_buffer + sizeof(dns_header_t);
-        char domain_name[128] = {0};
+        char domain_name[DNS_MAX_HOSTNAME_LEN] = {0};
         int domain_pos = 0;
+        int compression_follows = 0;
         
-        while (*domain_ptr != 0 && domain_pos < sizeof(domain_name) - 1 && 
-               (domain_ptr - rx_buffer) < len) {
+        // Bounds check: ensure we have at least one byte for domain parsing
+        if ((domain_ptr - rx_buffer) >= len) {
+            ESP_LOGW(TAG, "DNS packet truncated, no domain data");
+            continue;
+        }
+        
+        while (*domain_ptr != 0 && domain_pos < sizeof(domain_name) - 2 && 
+               (domain_ptr - rx_buffer) < len - 1 && compression_follows < 2) {
+            
             if ((*domain_ptr & 0xC0) == 0xC0) {
-                // Compressed name - just log what we have
-                break;
+                // Compressed name - validate pointer
+                if ((domain_ptr - rx_buffer) >= len - 1) {
+                    ESP_LOGW(TAG, "DNS compression pointer out of bounds");
+                    break;
+                }
+                uint16_t offset = ((*domain_ptr & 0x3F) << 8) | *(domain_ptr + 1);
+                if (offset >= len) {
+                    ESP_LOGW(TAG, "DNS compression points beyond packet");
+                    break;
+                }
+                compression_follows++;
+                domain_ptr = rx_buffer + offset;
+                continue;
             } else {
                 uint8_t label_len = *domain_ptr++;
-                if (label_len > 63) break;  // Invalid label length
+                if (label_len > 63) {
+                    ESP_LOGW(TAG, "DNS label too long: %d", label_len);
+                    break;
+                }
                 
-                if (domain_pos > 0) domain_name[domain_pos++] = '.';
+                // Check if we have enough bytes for the label
+                if ((domain_ptr - rx_buffer) + label_len > len) {
+                    ESP_LOGW(TAG, "DNS label extends beyond packet");
+                    break;
+                }
+                
+                if (domain_pos > 0 && domain_pos < sizeof(domain_name) - 1) {
+                    domain_name[domain_pos++] = '.';
+                }
                 
                 for (int i = 0; i < label_len && domain_pos < sizeof(domain_name) - 1; i++) {
-                    domain_name[domain_pos++] = *domain_ptr++;
+                    char c = *domain_ptr++;
+                    // Basic validation for printable characters
+                    if (c >= 32 && c <= 126) {
+                        domain_name[domain_pos++] = c;
+                    } else {
+                        ESP_LOGW(TAG, "DNS domain contains non-printable character: 0x%02x", c);
+                        domain_name[domain_pos++] = '?';
+                    }
                 }
             }
         }
+        
+        domain_name[domain_pos] = '\0';  // Ensure null termination
         
         ESP_LOGD(TAG, "DNS query for: %s", domain_name);
 
@@ -178,29 +235,70 @@ static void dns_server_task(void *pvParameters)
         uint8_t* question_start = rx_buffer + sizeof(dns_header_t);
         uint8_t* ptr = question_start;
         
-        // Parse through all questions to find total length
-        for (int q = 0; q < question_count && (ptr - rx_buffer) < len; q++) {
-            // Skip domain name
-            while (*ptr != 0 && (ptr - rx_buffer) < len) {
+        // Parse through all questions to find total length with bounds checking
+        for (int q = 0; q < question_count && (ptr - rx_buffer) < len - sizeof(dns_question_t); q++) {
+            // Skip domain name with proper bounds checking
+            int name_bytes_parsed = 0;
+            while (*ptr != 0 && (ptr - rx_buffer) < len - 1 && name_bytes_parsed < 255) {
                 if ((*ptr & 0xC0) == 0xC0) {
-                    // Compressed name - skip 2 bytes
+                    // Compressed name - skip 2 bytes if we have them
+                    if ((ptr - rx_buffer) >= len - 1) {
+                        ESP_LOGW(TAG, "DNS question compression pointer truncated");
+                        goto parse_error;
+                    }
                     ptr += 2;
                     break;
                 } else {
-                    // Regular label - skip length + label
-                    ptr += *ptr + 1;
+                    // Regular label - validate length
+                    uint8_t label_len = *ptr;
+                    if (label_len > 63) {
+                        ESP_LOGW(TAG, "DNS question label too long: %d", label_len);
+                        goto parse_error;
+                    }
+                    if ((ptr - rx_buffer) + label_len >= len) {
+                        ESP_LOGW(TAG, "DNS question label extends beyond packet");
+                        goto parse_error;
+                    }
+                    ptr += label_len + 1;
+                    name_bytes_parsed += label_len + 1;
                 }
             }
-            if (*ptr == 0) ptr++;  // Skip null terminator
+            if (*ptr == 0 && (ptr - rx_buffer) < len) {
+                ptr++;  // Skip null terminator
+            }
+            
+            // Ensure we have space for qtype and qclass
+            if ((ptr - rx_buffer) + sizeof(dns_question_t) > len) {
+                ESP_LOGW(TAG, "DNS question type/class truncated");
+                goto parse_error;
+            }
             ptr += sizeof(dns_question_t);  // Skip qtype and qclass
         }
         
-        int all_questions_len = ptr - question_start;
+        // Declare variables before any goto
+        int all_questions_len;
         
-        if (response_len + all_questions_len > sizeof(tx_buffer)) {
-            ESP_LOGW(TAG, "DNS response would be too large");
+        all_questions_len = ptr - question_start;
+        
+        // Validate calculated length
+        if (all_questions_len < 0 || all_questions_len > len - sizeof(dns_header_t)) {
+            ESP_LOGW(TAG, "Invalid questions length calculation: %d", all_questions_len);
             continue;
         }
+        
+        if (response_len + all_questions_len + sizeof(dns_answer_t) > sizeof(tx_buffer)) {
+            ESP_LOGW(TAG, "DNS response would be too large: %d bytes", 
+                     response_len + all_questions_len + sizeof(dns_answer_t));
+            continue;
+        }
+        
+        goto parse_success;
+        
+        parse_error:
+        ESP_LOGW(TAG, "DNS packet parsing failed, dropping packet");
+        continue;
+        
+        parse_success:
         
         // Copy all questions to response
         memcpy(tx_buffer + response_len, question_start, all_questions_len);

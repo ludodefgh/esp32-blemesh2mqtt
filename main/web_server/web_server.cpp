@@ -132,11 +132,19 @@ esp_err_t nodes_handler(httpd_req_t *req)
 
 esp_err_t provision_handler(httpd_req_t *req)
 {
-    char buf[64] = {0};
-    httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
 
     char uuid_str[33] = {0};
-    sscanf(buf, "uuid=%32s", uuid_str);
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
 
     uint8_t uuid[16] = {0};
     for (int i = 0; i < 16; i++) {
@@ -152,13 +160,21 @@ esp_err_t provision_handler(httpd_req_t *req)
 
 esp_err_t set_lightness_handler(httpd_req_t *req)
 {
-    char buf[128] = {0};
-    httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char buf[256] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
 
     char uuid_str[33] = {0};
     int lightness = -1;
 
-    sscanf(buf, "uuid=%32s&lightness=%d", uuid_str, &lightness);
+    if (sscanf(buf, "uuid=%32s&lightness=%d", uuid_str, &lightness) != 2) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid parameters");
+        return ESP_FAIL;
+    }
 
     if (strlen(uuid_str) != 32 || lightness < 0 || lightness > 65535)
     {
@@ -202,11 +218,19 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
 
 esp_err_t unprovision_handler(httpd_req_t *req)
 {
-    char buf[64] = {0};
-    httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
 
     char uuid_str[33] = {0};
-    sscanf(buf, "uuid=%32s", uuid_str);
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
 
     uint8_t uuid[16] = {0};
     for (int i = 0; i < 16; i++)
@@ -224,11 +248,19 @@ esp_err_t unprovision_handler(httpd_req_t *req)
 
 esp_err_t send_mqtt_status_handler(httpd_req_t *req)
 {
-    char buf[64] = {0};
-    httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
 
     char uuid_str[33] = {0};
-    sscanf(buf, "uuid=%32s", uuid_str);
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
 
     uint8_t uuid[16] = {0};
     for (int i = 0; i < 16; i++)
@@ -249,11 +281,19 @@ esp_err_t send_mqtt_status_handler(httpd_req_t *req)
 
 esp_err_t send_mqtt_discovery_handler(httpd_req_t *req)
 {
-    char buf[64] = {0};
-    httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
 
     char uuid_str[33] = {0};
-    sscanf(buf, "uuid=%32s", uuid_str);
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
 
     uint8_t uuid[16] = {0};
     for (int i = 0; i < 16; i++)
@@ -386,9 +426,12 @@ esp_err_t reset_wifi_handler(httpd_req_t *req)
 
 esp_err_t rename_node_handler(httpd_req_t *req) {
     ESP_LOGW(TAG, "rename_node_handler called");
-    char buf[128];
+    char buf[256];
     int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (len <= 0) return ESP_FAIL;
+    if (len <= 0 || len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
     buf[len] = '\0';
 
     cJSON *json = cJSON_Parse(buf);
@@ -401,10 +444,27 @@ esp_err_t rename_node_handler(httpd_req_t *req) {
         cJSON_Delete(json);
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad request");;
     }
+    
+    // Validate name length and content
+    const char* name_str = name_json->valuestring;
+    if (!name_str || strlen(name_str) == 0 || strlen(name_str) > 31) {
+        cJSON_Delete(json);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid name length");
+    }
+    
+    // Validate UUID format
+    const char* uuid_str = uuid_json->valuestring;
+    if (!uuid_str || strlen(uuid_str) != 32) {
+        cJSON_Delete(json);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+    }
 
     uint8_t uuid_tmp[16] = {0};
     for (int i = 0; i < 16; i++) {
-        sscanf(uuid_json->valuestring + i * 2, "%2hhx", &uuid_tmp[i]);
+        if (sscanf(uuid_str + i * 2, "%2hhx", &uuid_tmp[i]) != 1) {
+            cJSON_Delete(json);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID hex format");
+        }
     }
 
     Uuid128 uuid{uuid_tmp};
