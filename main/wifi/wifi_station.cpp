@@ -19,6 +19,7 @@
 #include "lwip/sys.h"
 
 #include "_config.h"
+#include "wifi_provisioning.h"
 
 /* The examples use WiFi configuration that you can set via project configuration menu
 
@@ -98,42 +99,125 @@ void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_sta(void)
+esp_err_t wifi_init_sta_with_stored_credentials(void)
 {
-    s_wifi_event_group = xEventGroupCreate();
+    char ssid[32] = {0};
+    char password[64] = {0};
+    
+    if (!wifi_provisioning_is_configured()) {
+        ESP_LOGI(TAG, "No stored WiFi credentials found");
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    esp_err_t err = wifi_provisioning_get_credentials(ssid, password, sizeof(ssid), sizeof(password));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get stored WiFi credentials: %s", esp_err_to_name(err));
+        return err;
+    }
 
-    ESP_ERROR_CHECK(esp_netif_init());
+    if (s_wifi_event_group == NULL) {
+        s_wifi_event_group = xEventGroupCreate();
+    }
 
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    static bool wifi_initialized = false;
+    if (!wifi_initialized) {
+        esp_netif_create_default_wifi_sta();
+        wifi_initialized = true;
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
+    static bool event_handlers_registered = false;
+    if (!event_handlers_registered) {
+        esp_event_handler_instance_t instance_any_id;
+        esp_event_handler_instance_t instance_got_ip;
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                            ESP_EVENT_ANY_ID,
+                                                            &event_handler,
+                                                            NULL,
+                                                            &instance_any_id));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                            IP_EVENT_STA_GOT_IP,
+                                                            &event_handler,
+                                                            NULL,
+                                                            &instance_got_ip));
+        event_handlers_registered = true;
+    }
+
+    wifi_config_t wifi_config {};
+    strlcpy((char *) wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
+    strncpy((char *) wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
+    wifi_config.sta.threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD;
+    wifi_config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    ESP_ERROR_CHECK(esp_wifi_start() );
+
+    ESP_LOGI(TAG, "wifi_init_sta finished, attempting to connect to: %s", ssid);
+
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+            pdFALSE,
+            pdFALSE,
+            pdMS_TO_TICKS(10000));
+
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "Successfully connected to SSID: %s", ssid);
+        return ESP_OK;
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID: %s", ssid);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGE(TAG, "Connection timeout");
+        return ESP_ERR_TIMEOUT;
+    }
+}
+
+void wifi_init_sta(void)
+{
+    if (wifi_init_sta_with_stored_credentials() == ESP_OK) {
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Falling back to hardcoded credentials");
+    
+    if (s_wifi_event_group == NULL) {
+        s_wifi_event_group = xEventGroupCreate();
+    }
+
+    static bool wifi_initialized = false;
+    if (!wifi_initialized) {
+        esp_netif_create_default_wifi_sta();
+        wifi_initialized = true;
+    }
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    static bool fallback_event_handlers_registered = false;
+    if (!fallback_event_handlers_registered) {
+        esp_event_handler_instance_t instance_any_id;
+        esp_event_handler_instance_t instance_got_ip;
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                            ESP_EVENT_ANY_ID,
+                                                            &event_handler,
+                                                            NULL,
+                                                            &instance_any_id));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                            IP_EVENT_STA_GOT_IP,
+                                                            &event_handler,
+                                                            NULL,
+                                                            &instance_got_ip));
+        fallback_event_handlers_registered = true;
+    }
 
     wifi_config_t wifi_config {};
     strlcpy((char *) wifi_config.sta.ssid, config_wifi_ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char *) wifi_config.sta.password, config_wifi_pwd, sizeof(wifi_config.sta.password));
-    /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (password len => 8).
-        * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
-        * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
-        * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
-        */
     wifi_config.sta.threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD;
     wifi_config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE;
-    //wifi_config.sta.sae_h2e_identifier = EXAMPLE_H2E_IDENTIFIER;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
@@ -141,22 +225,16 @@ void wifi_init_sta(void)
 
     ESP_LOGI(TAG, "wifi_init_sta finished.");
 
-    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
-     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
             WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
             pdFALSE,
             pdFALSE,
             portMAX_DELAY);
 
-    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
-     * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s",
-                 config_wifi_ssid);
+        ESP_LOGI(TAG, "connected to ap SSID:%s", config_wifi_ssid);
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s",
-                 config_wifi_ssid);
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s", config_wifi_ssid);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }

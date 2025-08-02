@@ -20,6 +20,9 @@
 #include "ble_mesh/ble_mesh_commands.h"
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
+#include "wifi/wifi_provisioning.h"
+#include "wifi/wifi_station.h"
+#include "wifi/wifi_commands.h"
 
 #define TAG "EXAMPLE"
 
@@ -100,7 +103,6 @@ extern "C" void app_main()
     }
     ESP_ERROR_CHECK(err);
 
-
     err = bluetooth_init();
     if (err)
     {
@@ -117,7 +119,7 @@ extern "C" void app_main()
 
     mount_littlefs();
 
-     size_t total = 0, used = 0;
+    size_t total = 0, used = 0;
     err = esp_littlefs_info(conf.partition_label, &total, &used);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get LittleFS partition information (%s)", esp_err_to_name(err));
@@ -125,7 +127,7 @@ extern "C" void app_main()
     } else {
         ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
     }
-
+    register_wifi_commands();
     debug_command_registry::run_all();
 
     /* Initialize the Bluetooth Mesh Subsystem */
@@ -137,36 +139,45 @@ extern "C" void app_main()
 
     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL)
     {
-        /* If you only want to open more logs in the wifi module, you need to make the max level greater than the default level,
-         * and call esp_log_level_set() before esp_wifi_init() to improve the log level of the wifi module. */
         esp_log_level_set("wifi", static_cast<esp_log_level_t>(CONFIG_LOG_MAXIMUM_LEVEL));
     }
 
-    // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    wifi_init_sta();
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    ESP_ERROR_CHECK(wifi_provisioning_init());
+
+    if (wifi_provisioning_should_start_captive_portal()) {
+        ESP_LOGI(TAG, "Starting captive portal for WiFi setup");
+        ESP_ERROR_CHECK(wifi_provisioning_start_captive_portal());
+    } else {
+        ESP_LOGI(TAG, "WiFi already connected via provisioning");
+        // WiFi is already connected by wifi_provisioning_should_start_captive_portal()
+        // No need to call wifi_init_sta() again
+    }
 
 #if defined(DEBUG_USE_GPIO)
     initDebugGPIO();
 #endif
 
-
     start_webserver();
 
-    node_manager().initialize();
+    if (wifi_provisioning_get_state() == WIFI_PROV_STATE_STA_CONNECTED ||
+        wifi_provisioning_get_state() == WIFI_PROV_STATE_IDLE) {
+        
+        node_manager().initialize();
+        mqtt5_app_start();
+        refresh_all_nodes();
 
-    // Needs to be called after node_manager() is initialized but before nodes are refreshed.
-    mqtt5_app_start();
-
-    refresh_all_nodes();
-
-    esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
-    esp_log_level_set("mqtt_example", ESP_LOG_VERBOSE);
-    esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
-    esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
-    esp_log_level_set("transport", ESP_LOG_VERBOSE);
-    esp_log_level_set("outbox", ESP_LOG_VERBOSE);
-
-    
+        esp_log_level_set("*", ESP_LOG_INFO);
+        esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
+        esp_log_level_set("mqtt_example", ESP_LOG_VERBOSE);
+        esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
+        esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
+        esp_log_level_set("transport", ESP_LOG_VERBOSE);
+        esp_log_level_set("outbox", ESP_LOG_VERBOSE);
+    } else {
+        ESP_LOGI(TAG, "WiFi not connected, skipping MQTT and BLE mesh initialization");
+    }
 }
 #pragma endregion Main

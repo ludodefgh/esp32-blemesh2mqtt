@@ -10,8 +10,11 @@
 #include <cJSON.h>
 #include <mqtt/mqtt_control.h>
 #include <mqtt/mqtt_bridge.h>
+#include "wifi/wifi_provisioning.h"
 
 #define TAG "WEB_SERVER"
+
+esp_err_t setup_handler(httpd_req_t *req);
 
 esp_err_t nodes_handler(httpd_req_t *req)
 {
@@ -460,6 +463,45 @@ httpd_uri_t restart_bridge_uri = {
     .handler = restart_bridge_handler,
 };
 
+httpd_uri_t setup_uri = {
+    .uri = "/setup",
+    .method = HTTP_GET,
+    .handler = setup_handler,
+};
+
+esp_err_t root_handler(httpd_req_t *req)
+{
+    if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
+        return setup_handler(req);
+    }
+    // Normal operation - serve index.html from littlefs
+    char filepath[640];
+    snprintf(filepath, sizeof(filepath), "/littlefs/index.html");
+    
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        ESP_LOGE(TAG, "Failed to open file: %s", filepath);
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/html");
+    char chunk[512];
+    size_t read_bytes;
+    while ((read_bytes = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+        httpd_resp_send_chunk(req, chunk, read_bytes);
+    }
+    fclose(file);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+httpd_uri_t root_uri = {
+    .uri = "/",
+    .method = HTTP_GET,
+    .handler = root_handler,
+};
+
 const char *get_content_type(const char *filename)
 {
     if (strstr(filename, ".html")) return "text/html";
@@ -471,17 +513,59 @@ const char *get_content_type(const char *filename)
     return "text/plain";
 }
 
+esp_err_t setup_handler(httpd_req_t *req)
+{
+    // Add headers to help with captive portal detection
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+    
+    // Serve setup.html from filesystem
+    const char* filepath = "/littlefs/setup.html";
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        ESP_LOGE(TAG, "Failed to open setup file: %s", filepath);
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Setup file not found");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/html");
+    char chunk[512];
+    size_t read_bytes;
+    while ((read_bytes = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+        httpd_resp_send_chunk(req, chunk, read_bytes);
+    }
+    fclose(file);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
 esp_err_t static_handler(httpd_req_t *req)
 {
+    if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
+        // In AP mode, redirect everything to setup page except API calls
+        if (strncmp(req->uri, "/api/", 5) == 0) {
+            // Let API calls through
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
+            return ESP_FAIL;
+        }
+        return setup_handler(req);
+    }
+
     char filepath[640];
-    //snprintf(filepath, sizeof(filepath), "/littlefs%s", req->uri[0] == '/' ? req->uri : "/index.html");
-    snprintf(filepath, sizeof(filepath), "/littlefs%s", req->uri[0] == '/' ? req->uri : "/index.html");
+    if (strcmp(req->uri, "/") == 0) {
+        snprintf(filepath, sizeof(filepath), "/littlefs/index.html");
+    } else {
+        snprintf(filepath, sizeof(filepath), "/littlefs%s", req->uri);
+    }
 
     FILE *file = fopen(filepath, "r");
     if (!file) {
+        if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
+            return setup_handler(req);
+        }
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
         ESP_LOGI(TAG, "Failed to open file: %s", filepath);
-        ESP_LOGE(TAG, "FUCK ME: [%s]", req->uri);
         return ESP_FAIL;
     }
 
@@ -510,30 +594,38 @@ void start_webserver(void)
     httpd_handle_t server = NULL;
 
      config.uri_match_fn = httpd_uri_match_wildcard;
-     config.max_uri_handlers = 16;
+     config.max_uri_handlers = 28;
 
     if (httpd_start(&server, &config) == ESP_OK)
     {
-        httpd_register_uri_handler(server, &rename_uri);
-        httpd_register_uri_handler(server, &nodes_uri);
-        httpd_register_uri_handler(server, &set_lightness_uri);
-        httpd_register_uri_handler(server, &set_provision_uri);
-        httpd_register_uri_handler(server, &set_unprovision_uri);
-        httpd_register_uri_handler(server, &send_mqtt_status_uri);
-        httpd_register_uri_handler(server, &send_mqtt_discovery_uri);
-        httpd_register_uri_handler(server, &send_bridge_mqtt_discovery_uri);
-        httpd_register_uri_handler(server, &send_bridge_mqtt_status_uri);
-        httpd_register_uri_handler(server, &restart_bridge_uri);
-        httpd_register_uri_handler(server, &json_nodes_uri);
-        //register_static_routes(server);
-        httpd_register_uri_handler(server, &console_cmds_uri);
-       
-        websocket_logger_register_uri(server);
-        websocket_logger_install();
+        // Only register captive portal handlers when in AP mode
+        if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
+            wifi_provisioning_register_captive_portal_handlers(server);
+            httpd_register_uri_handler(server, &setup_uri);
+        } else {
+            // Normal operation handlers - only register when not in setup mode
+            httpd_register_uri_handler(server, &rename_uri);
+            httpd_register_uri_handler(server, &nodes_uri);
+            httpd_register_uri_handler(server, &set_lightness_uri);
+            httpd_register_uri_handler(server, &set_provision_uri);
+            httpd_register_uri_handler(server, &set_unprovision_uri);
+            httpd_register_uri_handler(server, &send_mqtt_status_uri);
+            httpd_register_uri_handler(server, &send_mqtt_discovery_uri);
+            httpd_register_uri_handler(server, &send_bridge_mqtt_discovery_uri);
+            httpd_register_uri_handler(server, &send_bridge_mqtt_status_uri);
+            httpd_register_uri_handler(server, &restart_bridge_uri);
+            httpd_register_uri_handler(server, &json_nodes_uri);
+            httpd_register_uri_handler(server, &console_cmds_uri);
+           
+            websocket_logger_register_uri(server);
+            websocket_logger_install();
+        }
 
-        // This will serve static files from the littlefs partition
-        // Note: Make sure to have the littlefs partition mounted before starting the server
+        // Static file handler is always registered (handles both modes)
         httpd_register_uri_handler(server, &static_uri);
 
+        ESP_LOGI(TAG, "Web server started successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to start web server");
     }
 }
