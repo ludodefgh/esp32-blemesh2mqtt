@@ -11,6 +11,8 @@ static const char* TAG = "dns_server";
 static TaskHandle_t dns_task_handle = NULL;
 static int dns_socket = -1;
 static bool dns_server_running = false;
+static dns_server_config_t s_dns_config;
+static bool s_config_set = false;
 
 typedef struct {
     uint16_t id;
@@ -34,6 +36,36 @@ typedef struct {
     uint16_t rdlength;
     uint32_t rdata;
 } __attribute__((packed)) dns_answer_t;
+
+static bool match_domain(const char* domain, const char* pattern) {
+    // Wildcard match
+    if (strcmp(pattern, "*") == 0) {
+        return true;
+    }
+    
+    // Exact match (case insensitive)
+    return strcasecmp(domain, pattern) == 0;
+}
+
+static esp_ip4_addr_t get_response_ip(const char* domain) {
+    esp_ip4_addr_t default_ip;
+    esp_netif_str_to_ip4("192.168.4.1", &default_ip);
+    
+    if (!s_config_set) {
+        return default_ip;  // Fallback to default captive portal IP
+    }
+    
+    for (int i = 0; i < s_dns_config.num_of_entries; i++) {
+        if (match_domain(domain, s_dns_config.item[i].name)) {
+            ESP_LOGD(TAG, "Matched domain '%s' to pattern '%s', responding with IP", 
+                     domain, s_dns_config.item[i].name);
+            return s_dns_config.item[i].ip;
+        }
+    }
+    
+    ESP_LOGD(TAG, "No match for domain '%s', using default IP", domain);
+    return default_ip;
+}
 
 static void dns_server_task(void *pvParameters)
 {
@@ -181,8 +213,9 @@ static void dns_server_task(void *pvParameters)
         answer->ttl = htonl(0);  // Zero TTL for immediate response
         answer->rdlength = htons(4);
         
-        uint32_t captive_ip = inet_addr("192.168.4.1");
-        answer->rdata = captive_ip;
+        // Get IP address based on domain configuration
+        esp_ip4_addr_t response_ip = get_response_ip(domain_name);
+        answer->rdata = response_ip.addr;
         
         response_len += sizeof(dns_answer_t);
 
@@ -240,4 +273,30 @@ esp_err_t dns_server_stop(void)
 
     ESP_LOGI(TAG, "DNS server stop requested");
     return ESP_OK;
+}
+
+esp_err_t dns_server_start_with_config(const dns_server_config_t *config)
+{
+    if (!config) {
+        ESP_LOGE(TAG, "DNS server config cannot be NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (config->num_of_entries > DNS_SERVER_MAX_ITEMS) {
+        ESP_LOGE(TAG, "Too many DNS entries: %d (max: %d)", config->num_of_entries, DNS_SERVER_MAX_ITEMS);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Copy configuration
+    memcpy(&s_dns_config, config, sizeof(dns_server_config_t));
+    s_config_set = true;
+    
+    ESP_LOGI(TAG, "DNS server configured with %d entries:", config->num_of_entries);
+    for (int i = 0; i < config->num_of_entries; i++) {
+        ESP_LOGI(TAG, "  [%d] %s -> " IPSTR, i, config->item[i].name, 
+                 IP2STR(&config->item[i].ip));
+    }
+    
+    // Start the DNS server
+    return dns_server_start();
 }

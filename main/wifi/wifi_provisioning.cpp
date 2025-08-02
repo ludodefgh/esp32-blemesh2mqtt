@@ -166,13 +166,38 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     
     ESP_ERROR_CHECK(esp_netif_dhcps_stop(s_ap_netif));
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
+    
+    // Set DHCP Option 114 for modern captive portal detection (RFC 8910)
+    char captive_portal_uri[] = "http://192.168.4.1/setup";
+    esp_err_t dhcp_opt_err = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, 
+                                                   ESP_NETIF_CAPTIVEPORTAL_URI, 
+                                                   captive_portal_uri, 
+                                                   strlen(captive_portal_uri));
+    if (dhcp_opt_err == ESP_OK) {
+        ESP_LOGI(TAG, "DHCP Option 114 (Captive Portal URI) set successfully");
+    } else {
+        ESP_LOGW(TAG, "Failed to set DHCP Option 114: %s", esp_err_to_name(dhcp_opt_err));
+        ESP_LOGW(TAG, "Fallback to DNS-based captive portal detection");
+    }
+    
     ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_ERROR_CHECK(dns_server_start());
+    // Configure DNS server for captive portal
+    esp_ip4_addr_t captive_ip;
+    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &captive_ip);
+    
+    dns_server_config_t dns_config = {
+        .num_of_entries = 2,
+        .item = {
+            {.name = "*", .ip = captive_ip},  // Wildcard catch-all
+            {.name = "captiveportal.local", .ip = captive_ip}  // Common portal domain
+        }
+    };
+    ESP_ERROR_CHECK(dns_server_start_with_config(&dns_config));
 
     ESP_LOGI(TAG, "Captive portal started with SSID: %s", ap_ssid);
     return ESP_OK;
