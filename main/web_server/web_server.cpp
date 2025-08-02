@@ -14,6 +14,9 @@
 
 #define TAG "WEB_SERVER"
 
+// Global server handle for dynamic handler registration
+static httpd_handle_t g_server = NULL;
+
 esp_err_t setup_handler(httpd_req_t *req);
 
 esp_err_t nodes_handler(httpd_req_t *req)
@@ -479,85 +482,6 @@ esp_err_t rename_node_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "OK");
 }
 
-httpd_uri_t nodes_uri = {
-    .uri = "/nodes",
-    .method = HTTP_GET,
-    .handler = nodes_handler,
-};
-
-httpd_uri_t set_lightness_uri = {
-    .uri = "/set_lightness",
-    .method = HTTP_POST,
-    .handler = set_lightness_handler,
-};
-
-httpd_uri_t set_provision_uri = {
-    .uri = "/provision",
-    .method = HTTP_POST,
-    .handler = provision_handler,
-};
-
-httpd_uri_t set_unprovision_uri = {
-    .uri = "/unprovision",
-    .method = HTTP_POST,
-    .handler = unprovision_handler,
-};
-
-httpd_uri_t send_mqtt_status_uri = {
-    .uri = "/send_mqtt_status",
-    .method = HTTP_POST,
-    .handler = send_mqtt_status_handler,
-};
-
-httpd_uri_t send_mqtt_discovery_uri = {
-    .uri = "/send_mqtt_discovery",
-    .method = HTTP_POST,
-    .handler = send_mqtt_discovery_handler,
-};
-
-httpd_uri_t json_nodes_uri = {
-    .uri = "/nodes.json",
-    .method = HTTP_GET,
-    .handler = nodes_json_handler,
-};
-
-httpd_uri_t console_cmds_uri = {
-    .uri = "/api/console_commands",
-    .method = HTTP_GET,
-    .handler = list_console_commands_handler,
-    .user_ctx = NULL
-};
-
-httpd_uri_t rename_uri = {
-    .uri = "/api/rename_node",
-    .method = HTTP_POST,
-    .handler = rename_node_handler,
-    .user_ctx = nullptr
-};
-
-httpd_uri_t send_bridge_mqtt_discovery_uri = {
-    .uri = "/send_bridge_mqtt_discovery",
-    .method = HTTP_POST,
-    .handler = send_bridge_mqtt_discovery_handler,
-};
-
-httpd_uri_t send_bridge_mqtt_status_uri = {
-    .uri = "/send_bridge_mqtt_status",
-    .method = HTTP_POST,
-    .handler = send_bridge_mqtt_status_handler,
-};
-
-httpd_uri_t restart_bridge_uri = {
-    .uri = "/restart_bridge",
-    .method = HTTP_POST,
-    .handler = restart_bridge_handler,
-};
-
-httpd_uri_t reset_wifi_uri = {
-    .uri = "/reset_wifi",
-    .method = HTTP_POST,
-    .handler = reset_wifi_handler,
-};
 
 httpd_uri_t setup_uri = {
     .uri = "/setup",
@@ -592,11 +516,6 @@ esp_err_t root_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-httpd_uri_t root_uri = {
-    .uri = "/",
-    .method = HTTP_GET,
-    .handler = root_handler,
-};
 
 const char *get_content_type(const char *filename)
 {
@@ -688,6 +607,117 @@ httpd_uri_t static_uri = {
         .handler = static_handler,
     };
 
+// Bridge handlers array for maintainable registration/unregistration
+static httpd_uri_t bridge_handlers[] = {
+    {
+        .uri = "/api/rename_node",
+        .method = HTTP_POST,
+        .handler = rename_node_handler,
+        .user_ctx = nullptr
+    },
+    {
+        .uri = "/nodes",
+        .method = HTTP_GET,
+        .handler = nodes_handler,
+    },
+    {
+        .uri = "/set_lightness",
+        .method = HTTP_POST,
+        .handler = set_lightness_handler,
+    },
+    {
+        .uri = "/provision",
+        .method = HTTP_POST,
+        .handler = provision_handler,
+    },
+    {
+        .uri = "/unprovision",
+        .method = HTTP_POST,
+        .handler = unprovision_handler,
+    },
+    {
+        .uri = "/send_mqtt_status",
+        .method = HTTP_POST,
+        .handler = send_mqtt_status_handler,
+    },
+    {
+        .uri = "/send_mqtt_discovery",
+        .method = HTTP_POST,
+        .handler = send_mqtt_discovery_handler,
+    },
+    {
+        .uri = "/nodes.json",
+        .method = HTTP_GET,
+        .handler = nodes_json_handler,
+    },
+    {
+        .uri = "/api/console_commands",
+        .method = HTTP_GET,
+        .handler = list_console_commands_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/send_bridge_mqtt_discovery",
+        .method = HTTP_POST,
+        .handler = send_bridge_mqtt_discovery_handler,
+    },
+    {
+        .uri = "/send_bridge_mqtt_status",
+        .method = HTTP_POST,
+        .handler = send_bridge_mqtt_status_handler,
+    },
+    {
+        .uri = "/restart_bridge",
+        .method = HTTP_POST,
+        .handler = restart_bridge_handler,
+    },
+    {
+        .uri = "/reset_wifi",
+        .method = HTTP_POST,
+        .handler = reset_wifi_handler,
+    },
+    {
+        .uri = "/",
+        .method = HTTP_GET,
+        .handler = root_handler,
+    }
+};
+
+static const size_t bridge_handlers_count = sizeof(bridge_handlers) / sizeof(bridge_handlers[0]);
+
+// WiFi provisioning state change callback
+static void wifi_state_change_callback(wifi_provisioning_state_t state, void* event_data)
+{
+    if (!g_server) {
+        ESP_LOGW(TAG, "Web server not initialized, cannot change handlers");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "WiFi state changed to: %d", state);
+    
+    switch (state) {
+        case WIFI_PROV_STATE_AP_STARTED:
+            ESP_LOGI(TAG, "Switching to captive portal mode");
+            unregister_bridge_handlers(g_server);
+            register_captive_portal_handlers(g_server);
+            break;
+            
+        case WIFI_PROV_STATE_STA_CONNECTED:
+            ESP_LOGI(TAG, "Switching to bridge operation mode");
+            unregister_captive_portal_handlers(g_server);
+            register_bridge_handlers(g_server);
+            break;
+            
+        case WIFI_PROV_STATE_STA_CONNECTING:
+        case WIFI_PROV_STATE_STA_FAILED:
+        case WIFI_PROV_STATE_IDLE:
+        default:
+            // No handler changes needed for these states
+            ESP_LOGD(TAG, "No handler changes needed for state: %d", state);
+            break;
+    }
+}
+
 void start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -701,35 +731,139 @@ void start_webserver(void)
         wifi_provisioning_state_t current_state = wifi_provisioning_get_state();
         ESP_LOGI(TAG, "Starting web server in state: %d", current_state);
         
-        // Always register captive portal handlers - they'll be used if needed
-        wifi_provisioning_register_captive_portal_handlers(server);
-        httpd_register_uri_handler(server, &setup_uri);
-        
-        // Only register normal operation handlers when not in setup mode
-        if (current_state != WIFI_PROV_STATE_AP_STARTED) {
-            httpd_register_uri_handler(server, &rename_uri);
-            httpd_register_uri_handler(server, &nodes_uri);
-            httpd_register_uri_handler(server, &set_lightness_uri);
-            httpd_register_uri_handler(server, &set_provision_uri);
-            httpd_register_uri_handler(server, &set_unprovision_uri);
-            httpd_register_uri_handler(server, &send_mqtt_status_uri);
-            httpd_register_uri_handler(server, &send_mqtt_discovery_uri);
-            httpd_register_uri_handler(server, &send_bridge_mqtt_discovery_uri);
-            httpd_register_uri_handler(server, &send_bridge_mqtt_status_uri);
-            httpd_register_uri_handler(server, &restart_bridge_uri);
-            httpd_register_uri_handler(server, &reset_wifi_uri);
-            httpd_register_uri_handler(server, &json_nodes_uri);
-            httpd_register_uri_handler(server, &console_cmds_uri);
-           
-            websocket_logger_register_uri(server);
-            websocket_logger_install();
+        // Register handlers based on current state
+        if (current_state == WIFI_PROV_STATE_AP_STARTED) {
+            register_captive_portal_handlers(server);
+        } else {
+            register_bridge_handlers(server);
         }
 
         // Static file handler is always registered (handles both modes)
         httpd_register_uri_handler(server, &static_uri);
+        
+        // Store server handle for dynamic registration
+        g_server = server;
+        
+        // Register callback for WiFi state changes to dynamically switch handlers
+        esp_err_t callback_err = wifi_provisioning_set_event_callback(wifi_state_change_callback);
+        if (callback_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register WiFi state callback: %s", esp_err_to_name(callback_err));
+        } else {
+            ESP_LOGI(TAG, "WiFi state change callback registered successfully");
+        }
 
         ESP_LOGI(TAG, "Web server started successfully");
     } else {
         ESP_LOGE(TAG, "Failed to start web server");
     }
+}
+
+void register_captive_portal_handlers(httpd_handle_t server)
+{
+    if (!server) {
+        ESP_LOGE(TAG, "Server handle is NULL");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Registering captive portal handlers");
+    wifi_provisioning_register_captive_portal_handlers(server);
+    httpd_register_uri_handler(server, &setup_uri);
+}
+
+void unregister_captive_portal_handlers(httpd_handle_t server)
+{
+    if (!server) {
+        ESP_LOGE(TAG, "Server handle is NULL");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Unregistering captive portal handlers");
+    
+    // Array of captive portal URIs that need to be unregistered (matching wifi_provisioning.cpp)
+    struct {
+        const char* uri;
+        httpd_method_t method;
+    } captive_uris[] = {
+        // Android captive portal detection
+        { "/generate_204", HTTP_GET },
+        { "/gen_204", HTTP_GET },
+        { "/ncsi.txt", HTTP_GET },
+        { "/connectivity-check.html", HTTP_GET },
+        
+        // iOS captive portal detection  
+        { "/hotspot-detect.html", HTTP_GET },
+        { "/library/test/success.html", HTTP_GET },
+        
+        // Windows captive portal detection
+        { "/connecttest.txt", HTTP_GET },
+        { "/redirect", HTTP_GET },
+        
+        // Additional common captive portal endpoints
+        { "/mobile/status.php", HTTP_GET },
+        { "/canonical.html", HTTP_GET },
+        { "/success.txt", HTTP_GET },
+        
+        // API endpoints
+        { "/api/wifi/scan", HTTP_GET },
+        { "/api/wifi/connect", HTTP_POST },
+        { "/api/wifi/status", HTTP_GET }
+    };
+    
+    const size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);
+    
+    // Unregister all captive portal handlers
+    for (size_t i = 0; i < captive_uris_count; i++) {
+        esp_err_t err = httpd_unregister_uri_handler(server, captive_uris[i].uri, captive_uris[i].method);
+        if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to unregister captive handler %s: %s", 
+                     captive_uris[i].uri, esp_err_to_name(err));
+        }
+    }
+    
+    // Unregister setup page
+    httpd_unregister_uri_handler(server, "/setup", HTTP_GET);
+}
+
+void register_bridge_handlers(httpd_handle_t server)
+{
+    if (!server) {
+        ESP_LOGE(TAG, "Server handle is NULL");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Registering %zu bridge operation handlers", bridge_handlers_count);
+    
+    // Register all bridge handlers from array
+    for (size_t i = 0; i < bridge_handlers_count; i++) {
+        esp_err_t err = httpd_register_uri_handler(server, &bridge_handlers[i]);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register handler %s: %s", 
+                     bridge_handlers[i].uri, esp_err_to_name(err));
+        }
+    }
+   
+    // Register websocket logger separately as it's not in the array
+    websocket_logger_register_uri(server);
+    websocket_logger_install();
+}
+
+void unregister_bridge_handlers(httpd_handle_t server)
+{
+    if (!server) {
+        ESP_LOGE(TAG, "Server handle is NULL");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Unregistering %zu bridge operation handlers", bridge_handlers_count);
+    
+    // Unregister all bridge handlers from array
+    for (size_t i = 0; i < bridge_handlers_count; i++) {
+        esp_err_t err = httpd_unregister_uri_handler(server, bridge_handlers[i].uri, bridge_handlers[i].method);
+        if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to unregister handler %s: %s", 
+                     bridge_handlers[i].uri, esp_err_to_name(err));
+        }
+    }
+    
+    // Note: websocket_logger handlers are managed separately and don't need manual unregistration
 }
