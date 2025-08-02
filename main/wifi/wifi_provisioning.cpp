@@ -469,11 +469,23 @@ static esp_err_t captive_redirect_handler(httpd_req_t *req)
 static esp_err_t captive_android_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
-    // Android expects a 204 response for generate_204 when no captive portal
-    // We want to indicate captive portal, so return different response
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/setup");
-    httpd_resp_send(req, NULL, 0);
+    
+    // Modern Android captive portal detection optimization
+    // Return 200 with captive portal content for faster detection
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+    httpd_resp_set_hdr(req, "Content-Type", "text/html");
+    
+    // Send minimal HTML that triggers captive portal detection
+    const char* response = "<html><head><title>Captive Portal</title></head>"
+                          "<body><script>window.location.href='http://192.168.4.1/setup';</script>"
+                          "<h1>WiFi Setup Required</h1>"
+                          "<p><a href='http://192.168.4.1/setup'>Click here to configure WiFi</a></p>"
+                          "</body></html>";
+    
+    httpd_resp_sendstr(req, response);
     return ESP_OK;
 }
 
@@ -623,9 +635,11 @@ static esp_err_t wifi_status_handler(httpd_req_t *req)
 void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
 {
     httpd_uri_t captive_uris[] = {
-        // Android captive portal detection
+        // Android captive portal detection (modern versions)
         { .uri = "/generate_204", .method = HTTP_GET, .handler = captive_android_handler },
         { .uri = "/gen_204", .method = HTTP_GET, .handler = captive_android_handler },
+        { .uri = "/ncsi.txt", .method = HTTP_GET, .handler = captive_android_handler },
+        { .uri = "/connectivity-check.html", .method = HTTP_GET, .handler = captive_android_handler },
         
         // iOS captive portal detection  
         { .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = captive_ios_handler },

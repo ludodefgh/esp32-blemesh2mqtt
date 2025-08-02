@@ -354,6 +354,36 @@ esp_err_t restart_bridge_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t reset_wifi_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Clearing WiFi credentials via web interface...");
+    
+    // Send response first
+    httpd_resp_send(req, NULL, 0);
+    
+    // Stop WiFi completely first
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    
+    // Clear WiFi credentials from NVS
+    esp_err_t err = wifi_provisioning_clear_credentials();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi credentials cleared successfully");
+        
+        // Also clear any WiFi configuration in RAM
+        wifi_config_t wifi_config = {};
+        esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        
+        ESP_LOGI(TAG, "Restarting device to enter captive portal mode...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    } else {
+        ESP_LOGE(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
+    }
+    
+    return ESP_OK;
+}
+
 esp_err_t rename_node_handler(httpd_req_t *req) {
     ESP_LOGW(TAG, "rename_node_handler called");
     char buf[128];
@@ -463,6 +493,12 @@ httpd_uri_t restart_bridge_uri = {
     .handler = restart_bridge_handler,
 };
 
+httpd_uri_t reset_wifi_uri = {
+    .uri = "/reset_wifi",
+    .method = HTTP_POST,
+    .handler = reset_wifi_handler,
+};
+
 httpd_uri_t setup_uri = {
     .uri = "/setup",
     .method = HTTP_GET,
@@ -542,13 +578,17 @@ esp_err_t setup_handler(httpd_req_t *req)
 
 esp_err_t static_handler(httpd_req_t *req)
 {
-    if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
+    wifi_provisioning_state_t state = wifi_provisioning_get_state();
+    ESP_LOGD(TAG, "Static handler: URI=%s, WiFi state=%d", req->uri, state);
+    
+    if (state == WIFI_PROV_STATE_AP_STARTED) {
         // In AP mode, redirect everything to setup page except API calls
         if (strncmp(req->uri, "/api/", 5) == 0) {
             // Let API calls through
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
             return ESP_FAIL;
         }
+        ESP_LOGI(TAG, "Serving setup page in AP mode for URI: %s", req->uri);
         return setup_handler(req);
     }
 
@@ -594,16 +634,19 @@ void start_webserver(void)
     httpd_handle_t server = NULL;
 
      config.uri_match_fn = httpd_uri_match_wildcard;
-     config.max_uri_handlers = 28;
+     config.max_uri_handlers = 30;
 
     if (httpd_start(&server, &config) == ESP_OK)
     {
-        // Only register captive portal handlers when in AP mode
-        if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED) {
-            wifi_provisioning_register_captive_portal_handlers(server);
-            httpd_register_uri_handler(server, &setup_uri);
-        } else {
-            // Normal operation handlers - only register when not in setup mode
+        wifi_provisioning_state_t current_state = wifi_provisioning_get_state();
+        ESP_LOGI(TAG, "Starting web server in state: %d", current_state);
+        
+        // Always register captive portal handlers - they'll be used if needed
+        wifi_provisioning_register_captive_portal_handlers(server);
+        httpd_register_uri_handler(server, &setup_uri);
+        
+        // Only register normal operation handlers when not in setup mode
+        if (current_state != WIFI_PROV_STATE_AP_STARTED) {
             httpd_register_uri_handler(server, &rename_uri);
             httpd_register_uri_handler(server, &nodes_uri);
             httpd_register_uri_handler(server, &set_lightness_uri);
@@ -614,6 +657,7 @@ void start_webserver(void)
             httpd_register_uri_handler(server, &send_bridge_mqtt_discovery_uri);
             httpd_register_uri_handler(server, &send_bridge_mqtt_status_uri);
             httpd_register_uri_handler(server, &restart_bridge_uri);
+            httpd_register_uri_handler(server, &reset_wifi_uri);
             httpd_register_uri_handler(server, &json_nodes_uri);
             httpd_register_uri_handler(server, &console_cmds_uri);
            

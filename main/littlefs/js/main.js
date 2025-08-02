@@ -85,6 +85,31 @@ function restartBridge() {
   }
 }
 
+function resetWiFi() {
+  // Use a longer, more specific message to avoid browser caching
+  const message = "⚠️ RESET WiFi SETTINGS ⚠️\n\n" +
+                  "This action will:\n" +
+                  "• Clear all stored WiFi credentials\n" +
+                  "• Restart the ESP32 device\n" +
+                  "• Enter captive portal setup mode\n" +
+                  "• Require you to reconfigure WiFi access\n\n" +
+                  "Are you sure you want to proceed?";
+                  
+  if (confirm(message)) {
+    fetch("/reset_wifi?" + Date.now(), {  // Add timestamp to prevent caching
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cache-Control": "no-cache"
+      },
+      body: ""
+    }).catch(err => {
+      // Expected - device will restart and disconnect
+      console.log("Reset request sent, device restarting...");
+    });
+  }
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   fetch("/nodes.json")
     .then(res => res.json())

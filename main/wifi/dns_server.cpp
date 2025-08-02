@@ -178,7 +178,7 @@ static void dns_server_task(void *pvParameters)
         answer->name = htons(0xC00C);
         answer->type = htons(1);
         answer->class_ = htons(1);
-        answer->ttl = htonl(1);  // Very short TTL to prevent caching
+        answer->ttl = htonl(0);  // Zero TTL for immediate response
         answer->rdlength = htons(4);
         
         uint32_t captive_ip = inet_addr("192.168.4.1");
