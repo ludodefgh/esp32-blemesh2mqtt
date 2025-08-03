@@ -341,6 +341,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
         cJSON_AddItemToObject(root, "stat_t", cJSON_CreateString("~/state"));
         cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
         cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
+        cJSON_AddNumberToObject(root, "brightness_scale", node->max_lightness);
         cJSON *sup_clrm = nullptr;
         cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
         if (sup_clrm != nullptr)
@@ -384,7 +385,7 @@ std::unique_ptr<cJSON> make_status_message(std::shared_ptr<bm2mqtt_node_info> no
         if (node_info->color_mode == color_mode_t::brightness)
         {
             cJSON_AddStringToObject(root, "color_mode", "brightness");
-            cJSON_AddNumberToObject(root, "brightness", (uint16_t)map(node_info->hsl_l, node_info->min_lightness, node_info->max_lightness, 0, 255));
+            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
         }
         else if (node_info->color_mode == color_mode_t::color_temp)
         {
@@ -470,7 +471,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                             if (cJSON_IsNumber(brightness))
                             {
                                 current_mode = color_mode_t::brightness;
-                                uint16_t filteredValue = (uint16_t)map(brightness->valuedouble, 0, 255, node_info->min_lightness, node_info->max_lightness);
+                                uint16_t filteredValue = MAX(0, MIN(node_info->max_lightness, (uint16_t)brightness->valuedouble));
                                 node_info->hsl_l = filteredValue;
                                 light_value_changed = true;
                             }
