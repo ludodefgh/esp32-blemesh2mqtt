@@ -128,7 +128,7 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
 
     message_queue().enqueue(node,
                             message_payload{
-                                .send = [node]() // shared_ptr captured by value, keeps node alive
+                                .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
                                 {
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
@@ -416,7 +416,7 @@ void unprovision_device(const Uuid128& uuid)
     {
         message_queue().enqueue(node_info,
                                 message_payload{
-                                    .send = [node_info]()
+                                    .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
                                     {
                                         ESP_LOGW(TAG, "unprovision_device for node 0x%04X", __func__, node_info->unicast);
                                         esp_ble_mesh_client_common_param_t common = {0};
@@ -462,7 +462,7 @@ int unprovision_all_nodes(int argc, char **argv)
         if (auto node_info = node_manager().get_node(bla))
         {
             message_queue().enqueue(node_info, message_payload{
-                                   .send = [node_info]()
+                                   .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
                                    {
                                         esp_ble_mesh_client_common_param_t common = {0};
                                         esp_ble_mesh_cfg_client_set_state_t set_state = {0};

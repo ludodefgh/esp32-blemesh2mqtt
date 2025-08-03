@@ -543,7 +543,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                     }
 
                     message_queue().enqueue(node_info, message_payload{
-                                           .send = [node_info]()
+                                           .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
                                            {
                                                mqtt_node_send_status(node_info);
                                            },
