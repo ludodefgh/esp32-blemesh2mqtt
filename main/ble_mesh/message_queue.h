@@ -3,6 +3,7 @@
 #include <functional>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <esp_timer.h>
 #include "ble_mesh_node.h"
 
@@ -42,15 +43,15 @@ private:
 
 class message_queue_manager {
 public:
-    void enqueue(bm2mqtt_node_info* node, const message_payload &msg);
-    void handle_ack(bm2mqtt_node_info* node, uint32_t opcode);
-    void handle_timeout(bm2mqtt_node_info* node, uint32_t opcode);
+    void enqueue(std::shared_ptr<bm2mqtt_node_info> node, const message_payload &msg);
+    void handle_ack(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode);
+    void handle_timeout(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode);
 
     void print_debug() const;
-    void clear_queue(bm2mqtt_node_info* node);
+    void clear_queue(std::shared_ptr<bm2mqtt_node_info> node);
 
 private:
-    std::map<bm2mqtt_node_info*, message_queue> node_queues;
+    std::map<std::shared_ptr<bm2mqtt_node_info>, message_queue> node_queues;
 };
 
 

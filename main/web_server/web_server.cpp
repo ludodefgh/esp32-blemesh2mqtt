@@ -273,7 +273,7 @@ esp_err_t send_mqtt_status_handler(httpd_req_t *req)
 
     // Find the node by UUID and send MQTT status
     const Uuid128 dev_uuid{uuid};
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(dev_uuid))
+    if (auto node_info = node_manager().get_node(dev_uuid))
     {
         mqtt_node_send_status(node_info);
     }
@@ -306,7 +306,7 @@ esp_err_t send_mqtt_discovery_handler(httpd_req_t *req)
 
     // Find the node by UUID and send MQTT discovery
     const Uuid128 dev_uuid{uuid};
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(dev_uuid))
+    if (auto node_info = node_manager().get_node(dev_uuid))
     {
         mqtt_send_discovery(node_info);
     }
@@ -473,7 +473,7 @@ esp_err_t rename_node_handler(httpd_req_t *req) {
     Uuid128 uuid{uuid_tmp};
 
     node_manager().set_node_name(uuid, name_json->valuestring);
-    if (bm2mqtt_node_info *node = node_manager().get_node(uuid))
+    if (auto node = node_manager().get_node(uuid))
     {
         mqtt_send_discovery(node);
     }

@@ -3,6 +3,8 @@
 #include <string>
 #include <inttypes.h>
 #include <functional>
+#include <memory>
+#include <unordered_map>
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -135,21 +137,33 @@ constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 2;
 
 using bm2mqtt_node_info = bm2mqtt_node_info_v2;
 
+// Hash specialization for Uuid128 to use in unordered_map
+namespace std {
+    template<>
+    struct hash<Uuid128> {
+        std::size_t operator()(const Uuid128& uuid) const {
+            return std::hash<std::string>{}(
+                std::string(reinterpret_cast<const char*>(uuid.raw()), 16)
+            );
+        }
+    };
+}
+
 class ble2mqtt_node_manager final
 {
 public:
     ble2mqtt_node_manager() = default;
     ~ble2mqtt_node_manager() = default;
 
-    bm2mqtt_node_info *get_node(int nodeIndex);
-    bm2mqtt_node_info *get_node(const Uuid128& uuid);
-    bm2mqtt_node_info *get_node(const std::string &mac);
-    bm2mqtt_node_info *get_node(uint16_t unicast);
-    bm2mqtt_node_info* get_or_create(const uint8_t uuid[16]);
-    bm2mqtt_node_info* get_or_create(const Uuid128& uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_node(int nodeIndex);
+    std::shared_ptr<bm2mqtt_node_info> get_node(const Uuid128& uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_node(const std::string &mac);
+    std::shared_ptr<bm2mqtt_node_info> get_node(uint16_t unicast);
+    std::shared_ptr<bm2mqtt_node_info> get_or_create(const uint8_t uuid[16]);
+    std::shared_ptr<bm2mqtt_node_info> get_or_create(const Uuid128& uuid);
 
     
-    void for_each_node(std::function<void(const bm2mqtt_node_info *)> func);
+    void for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func);
 
     esp_err_t store_node_info(const Uuid128& uuid, uint16_t unicast,
                                                uint8_t elem_num, uint16_t node_index);
@@ -157,7 +171,7 @@ public:
     void remove_node(const Uuid128& uuid);
 
     esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                              bm2mqtt_node_info *node,
+                                              std::shared_ptr<bm2mqtt_node_info> node,
                                               esp_ble_mesh_model_t *model, uint32_t opcode);
 
     void print_registered_nodes();
@@ -181,7 +195,8 @@ private:
     esp_err_t save_node_info_vector();
     esp_err_t load_node_info_vector();
 
-    std::vector<bm2mqtt_node_info> tracked_nodes{};
+    std::vector<std::shared_ptr<bm2mqtt_node_info>> tracked_nodes{};
+    std::unordered_map<Uuid128, std::shared_ptr<bm2mqtt_node_info>> uuid_index{};
 
     esp_timer_handle_t save_timer;
     bool node_info_dirty = false;

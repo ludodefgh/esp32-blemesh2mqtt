@@ -4,6 +4,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <vector>
+#include <memory>
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
@@ -95,7 +96,7 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
     uint16_t net_idx = node_aparam.netkey_idx;
     uint16_t node_index = node_aparam.node_idx;
 
-    bm2mqtt_node_info *node = NULL;
+    std::shared_ptr<bm2mqtt_node_info> node = nullptr;
     char name[11] = {0};
     int err;
 
@@ -127,7 +128,7 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
 
     message_queue().enqueue(node,
                             message_payload{
-                                .send = [node]()
+                                .send = [node]() // shared_ptr captured by value, keeps node alive
                                 {
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
@@ -411,7 +412,7 @@ int list_provisioned_nodes_esp(int argc, char **argv)
 
 void unprovision_device(const Uuid128& uuid)
 {
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid))
+    if (auto node_info = node_manager().get_node(uuid))
     {
         message_queue().enqueue(node_info,
                                 message_payload{
@@ -458,7 +459,7 @@ int unprovision_all_nodes(int argc, char **argv)
 
     for (Uuid128& bla :  uuids_to_remove)
     {
-        if (bm2mqtt_node_info *node_info = node_manager().get_node(bla) )
+        if (auto node_info = node_manager().get_node(bla))
         {
             message_queue().enqueue(node_info, message_payload{
                                    .send = [node_info]()
@@ -496,7 +497,7 @@ int get_composition_data(int argc, char **argv)
         arg_print_errors(stderr, node_index_args.end, argv[0]);
         return 1;
     }
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
 
         get_composition_data_debug = true;

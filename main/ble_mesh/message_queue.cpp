@@ -126,14 +126,18 @@ void message_queue::on_failsafe_trigger()
     }
 }
 
-void message_queue_manager::enqueue(bm2mqtt_node_info *node, const message_payload &msg)
+void message_queue_manager::enqueue(std::shared_ptr<bm2mqtt_node_info> node, const message_payload &msg)
 {
+    if (!node) return;
+    
     ESP_LOGD(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, node->unicast, msg.opcode);
     node_queues[node].enqueue(msg);
 }
 
-void message_queue_manager::handle_ack(bm2mqtt_node_info *node, uint32_t opcode)
+void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
 {
+    if (!node) return;
+    
     ESP_LOGI(TAG, "[%s] Ack for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
@@ -153,8 +157,10 @@ void message_queue_manager::handle_ack(bm2mqtt_node_info *node, uint32_t opcode)
     }
 }
 
-void message_queue_manager::handle_timeout(bm2mqtt_node_info *node, uint32_t opcode)
+void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
 {
+    if (!node) return;
+    
     ESP_LOGW(TAG, "[%s] Timeout for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
@@ -174,8 +180,10 @@ void message_queue_manager::handle_timeout(bm2mqtt_node_info *node, uint32_t opc
     }
 }
 
-void message_queue_manager::clear_queue(bm2mqtt_node_info *node)
+void message_queue_manager::clear_queue(std::shared_ptr<bm2mqtt_node_info> node)
 {
+    if (!node) return;
+    
     node_queues.erase(node);
 }
 
