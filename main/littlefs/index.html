@@ -1,31 +1,99 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Mesh Control</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BLE Mesh Bridge</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div id="log-output" style="white-space:pre; font-family:monospace;
-    max-height:400px; overflow:auto; background:#111; color:#0f0;
-    padding:0.5rem; margin-bottom:1rem; border:1px solid #444;"></div>
+  <header class="header">
+    <h1>BLE Mesh Bridge</h1>
+    <div class="status-indicator" id="status"></div>
+  </header>
 
-  <h1>Provisioned Nodes</h1>
-  <div id="nodes"></div>
+  <main class="main-content">
+    <div class="grid">
+      <!-- Log Section -->
+      <section class="card log-section">
+        <h2>System Logs</h2>
+        <div class="log-container">
+          <div id="log-output" class="log-output"></div>
+          <div class="log-controls">
+            <button class="btn btn-secondary" onclick="clearLogs()">Clear</button>
+            <label class="checkbox-label">
+              <input type="checkbox" id="auto-scroll" checked>
+              Auto-scroll
+            </label>
+          </div>
+        </div>
+      </section>
 
-  <h2>Unprovisioned Devices</h2>
-  <div id="unprovisioned"></div>
+      <!-- Provisioned Nodes Section -->
+      <section class="card nodes-section">
+        <div class="section-header">
+          <h2>Provisioned Nodes</h2>
+          <div class="node-count" id="node-count">0 nodes</div>
+        </div>
+        <div id="nodes" class="nodes-grid"></div>
+        <div id="no-nodes" class="empty-state">No nodes provisioned yet</div>
+      </section>
 
-  <h2>Bridge Controls</h2>
-  <div id="bridge-controls">
-    <button onclick="sendBridgeMqttDiscovery()">Send MQTT Discovery</button>
-    <button onclick="sendBridgeMqttStatus()">Send MQTT Status</button>
-    <button onclick="restartBridge()">Restart</button>
-    <button onclick="resetWiFi()" style="background-color: #dc3545;">Reset WiFi</button>
-  </div>
+      <!-- Unprovisioned Devices Section -->
+      <section class="card devices-section">
+        <div class="section-header">
+          <h2>Unprovisioned Devices</h2>
+          <button class="btn btn-primary" onclick="refreshDevices()">
+            <span class="icon">🔄</span>
+            Refresh
+          </button>
+        </div>
+        <div id="unprovisioned" class="devices-grid"></div>
+        <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
+      </section>
 
-  <h2>Console commands</h2>
-  <div id="console-commands"></div>
-  //<div id="log-output"></div>
+      <!-- Bridge Controls Section -->
+      <section class="card controls-section">
+        <div class="section-header">
+          <h2>Bridge Controls</h2>
+          <div class="memory-info" id="memory-info">
+            <div class="memory-item">
+              <span class="memory-label">Free Memory</span>
+              <span class="memory-value" id="free-memory">-- KB</span>
+            </div>
+            <div class="memory-item">
+              <span class="memory-label">Total Memory</span>
+              <span class="memory-value" id="total-memory">-- KB</span>
+            </div>
+          </div>
+        </div>
+        <div class="controls-grid">
+          <button class="btn btn-primary" onclick="sendBridgeMqttDiscovery()">
+            <span class="icon">📡</span>
+            Send MQTT Discovery
+          </button>
+          <button class="btn btn-primary" onclick="sendBridgeMqttStatus()">
+            <span class="icon">📊</span>
+            Send MQTT Status
+          </button>
+          <button class="btn btn-warning" onclick="restartBridge()">
+            <span class="icon">🔄</span>
+            Restart Bridge
+          </button>
+          <button class="btn btn-danger" onclick="resetWiFi()">
+            <span class="icon">⚠️</span>
+            Reset WiFi
+          </button>
+        </div>
+      </section>
+
+      <!-- Console Commands Section -->
+      <section class="card commands-section">
+        <h2>Available Commands</h2>
+        <div id="console-commands" class="commands-list"></div>
+      </section>
+    </div>
+  </main>
 
   <script src="/js/main.js"></script>
 
