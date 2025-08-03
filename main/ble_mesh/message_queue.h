@@ -14,7 +14,7 @@ enum class message_type_t : uint8_t
 };
 
 struct message_payload {
-    std::function<void()> send;
+    std::function<void(std::shared_ptr<bm2mqtt_node_info>& node)> send;
     uint32_t opcode;
     uint8_t retries_left = 3;
     message_type_t type = message_type_t::ble_mesh_message;
@@ -29,6 +29,7 @@ public:
     size_t size() const { return queue.size(); }
     bool is_waiting() const { return waiting; }
     const std::queue<message_payload> &get_queue() const { return queue; }
+    void set_node(std::shared_ptr<bm2mqtt_node_info>& in_node);
 private:
     void try_send_next();
 
@@ -36,6 +37,7 @@ private:
     static void failsafe_callback(void *arg);
     void on_failsafe_trigger();
 
+    std::shared_ptr<bm2mqtt_node_info> node;
     std::queue<message_payload> queue;
     esp_timer_handle_t failsafe_timer = nullptr;
     bool waiting = false;

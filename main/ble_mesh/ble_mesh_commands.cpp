@@ -35,7 +35,7 @@ void ble_mesh_ctl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     node_info->color_mode = color_mode_t::color_temp;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
+                                .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -87,7 +87,7 @@ void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
+                                .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -119,7 +119,7 @@ void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
+                                .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -345,7 +345,7 @@ void ble_mesh_lightness_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
+                                .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[ble_mesh_ctl_lightness_set] Setting Lightness for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
