@@ -80,24 +80,24 @@ static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_i
     return {};
 }
 
-std::string get_node_root_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_root_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     return get_node_base_topic(node_info);
 }
 
-std::string get_node_set_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_set_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     const std::string base = get_node_base_topic(node_info);
     return base.empty() ? std::string{} : base + "/set";
 }
 
-std::string get_node_state_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_state_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     const std::string base = get_node_base_topic(node_info);
     return base.empty() ? std::string{} : base + "/state";
 }
 
-std::string get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info) return {};
     
@@ -113,14 +113,18 @@ std::string get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_info)
     return {};
 }
 
-void subscribe_nodes(esp_mqtt_client_handle_t client)
+void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client)
 {
     node_manager().for_each_node([&client](std::shared_ptr<bm2mqtt_node_info> node_info)
     {
-        int msg_id = esp_mqtt_client_subscribe(client, get_node_set_topic(node_info).c_str(), 0);
-        //send_status(node_info);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        mqtt_subscribe_node(client, node_info);
     });
+}
+
+void mqtt_subscribe_node(esp_mqtt_client_handle_t client, std::shared_ptr<bm2mqtt_node_info> node_info)
+{
+    int msg_id = esp_mqtt_client_subscribe(client, mqtt_get_node_set_topic(node_info).c_str(), 0);
+    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 }
 
 /*
@@ -151,7 +155,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
 
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
        
-        subscribe_nodes(client);
+        mqtt_subscribe_all_nodes(client);
         mqtt_bridge_subscribe(client);
 
         start_periodic_publish_timer();
@@ -190,7 +194,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         ESP_LOGI(TAG, "[MQTT_EVENT_DATA] TOPIC=%.*s", event->topic_len, event->topic);
         ESP_LOGI(TAG, "[MQTT_EVENT_DATA] DATA=%.*s", event->data_len, event->data);
 
-        parse_mqtt_event_data(event);
+        mqtt_parse_event_data(event);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -210,7 +214,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
 }
 esp_mqtt_client_handle_t mqtt_client;
 
-esp_mqtt_client_handle_t get_mqtt_client()
+esp_mqtt_client_handle_t mqtt_get_client()
 {
     return mqtt_client;
 }
@@ -262,7 +266,7 @@ void mqtt5_app_start(void)
         // First publish the discovery message
         send_bridge_discovery();
         // Then publish the state message
-        int msg_id = esp_mqtt_client_publish(get_mqtt_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
+        int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         ESP_LOGI(TAG, "Sent state message, msg_id=%d", msg_id);
     }
     // {
@@ -331,7 +335,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
         }
 
         //const std::string root_publish = "blemesh2mqtt/" + std::string{buf};
-        const std::string root_publish = get_node_root_topic(node);
+        const std::string root_publish = mqtt_get_node_root_topic(node);
 
         cJSON_AddItemToObject(root, "~", cJSON_CreateString(root_publish.c_str()));
         cJSON_AddItemToObject(root, "name", cJSON_CreateNull());
@@ -404,7 +408,7 @@ std::unique_ptr<cJSON> make_status_message(std::shared_ptr<bm2mqtt_node_info> no
     return std::unique_ptr<cJSON>{root};
 }
 
-void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
+void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 {
 
     if (strncmp(event->topic, get_bridge_provisioning_set_topic(), event->topic_len) == 0)
@@ -465,7 +469,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
                   
                     if ((node_info->features & FEATURE_LIGHT_LIGHTNESS) || (node_info->features & FEATURE_LIGHT_HSL))
                     {
-                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light Lightness feature supported");
+                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light Lightness feature supported");
                         if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
                         {
                             if (cJSON_IsNumber(brightness))
@@ -480,7 +484,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 
                     if (node_info->features & FEATURE_LIGHT_HSL)
                     {
-                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light HSL feature supported");
+                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light HSL feature supported");
                         if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
                         {
                             if (cJSON_IsObject(color))
@@ -508,7 +512,7 @@ void parse_mqtt_event_data(esp_mqtt_event_handle_t event)
 
                     if (node_info->features & FEATURE_LIGHT_CTL)
                     {
-                        ESP_LOGW(TAG, "[parse_mqtt_event_data] Light CTL feature supported");
+                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light CTL feature supported");
                         if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
                         {
                             if (cJSON_IsNumber(color_temp))
@@ -568,7 +572,7 @@ int send_discovery(int argc, char **argv)
         std::unique_ptr<cJSON> discovery_message = make_node_discovery_message(node_info);
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
         int msg_id = 0;
-        msg_id = esp_mqtt_client_publish(mqtt_client, get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
     
         cJSON_free(json_data);
@@ -590,7 +594,7 @@ int delete_entity(int argc, char **argv)
     {
         const char *json_data = "";
         int msg_id = 0;
-        msg_id = esp_mqtt_client_publish(mqtt_client, get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
     }
 
@@ -604,7 +608,7 @@ void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
         return;
     }
 
-    const std::string root_publish = get_node_state_topic(node_info);
+    const std::string root_publish = mqtt_get_node_state_topic(node_info);
     if (root_publish.empty()) {
         ESP_LOGE(TAG, "mqtt_node_send_status: failed to get state topic for node");
         return;
@@ -635,24 +639,48 @@ void mqtt_send_discovery(std::shared_ptr<bm2mqtt_node_info> node_info)
     std::unique_ptr<cJSON> discovery_message = make_node_discovery_message(node_info);
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
         int msg_id = 0;
-        msg_id = esp_mqtt_client_publish(mqtt_client, get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+        msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
         ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
 
         cJSON_free(json_data);
 }
 
+void mqtt_remove_node(std::shared_ptr<bm2mqtt_node_info> node_info)
+{
+    if (!node_info)
+    {
+        ESP_LOGE(TAG, "mqtt_remove_node: node_info is null");
+        return;
+    }
+
+    const std::string discovery_topic = mqtt_get_node_discovery_id(node_info);
+    if (discovery_topic.empty())
+    {
+        ESP_LOGE(TAG, "mqtt_remove_node: failed to get discovery topic for node");
+        return;
+    }
+
+    // Publishing empty string to discovery topic removes the entity from Home Assistant
+    const char *empty_payload = "";
+    int msg_id = esp_mqtt_client_publish(mqtt_client, discovery_topic.c_str(), empty_payload, 0, 0, 0);
+    ESP_LOGI(TAG, "Removed node from MQTT discovery: %s", discovery_topic.c_str());
+    msg_id = esp_mqtt_client_unsubscribe(mqtt_client, mqtt_get_node_set_topic(node_info).c_str());
+    ESP_LOGI(TAG, "Unsubscribed from node set topic: %s, msg_id=%d", mqtt_get_node_set_topic(node_info).c_str(), msg_id);
+}
+
 int mqtt_send_status(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+    int nerrors = arg_parse(argc, argv, (void **)&node_index_args);
 
-    if (nerrors != 0) {
+    if (nerrors != 0)
+    {
         arg_print_errors(stderr, node_index_args.end, argv[0]);
         return 1;
     }
 
     if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-       mqtt_node_send_status(node_info);
+        mqtt_node_send_status(node_info);
     }
 
     return 0;
