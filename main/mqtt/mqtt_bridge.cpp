@@ -265,7 +265,7 @@ void publish_bridge_info(const char *version)
 {
     CJsonPtr bridge_info_json = create_bridge_info_json(version);
     char *json_data = cJSON_PrintUnformatted(bridge_info_json.get());
-    int msg_id = esp_mqtt_client_publish(get_mqtt_client(), get_bridge_state_topic(), json_data, 0, 0, 0);
+    int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_state_topic(), json_data, 0, 0, 0);
     ESP_LOGV(TAG, "sent bridge info publish successful, msg_id=%d", msg_id);
     cJSON_free(json_data);
 }
@@ -285,7 +285,7 @@ void send_bridge_discovery()
 
                 char *json_data = cJSON_PrintUnformatted(discovery_json.get());
                 const std::string topic = "homeassistant/switch/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(get_mqtt_client(), topic.c_str(), json_data, 0, 0, 0);
+                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else{
@@ -308,7 +308,7 @@ void send_bridge_discovery()
 
                 char *json_data = cJSON_PrintUnformatted(discovery_json.get());
                 const std::string topic = "homeassistant/button/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(get_mqtt_client(), topic.c_str(), json_data, 0, 0, 0);
+                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else{
@@ -331,7 +331,7 @@ void send_bridge_discovery()
 
                 char *json_data = cJSON_PrintUnformatted(sensor_json.get());
                 const std::string topic = "homeassistant/sensor/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(get_mqtt_client(), topic.c_str(), json_data, 0, 0, 0);
+                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else {
@@ -377,7 +377,7 @@ void start_periodic_publish_timer()
 void mqtt_publish_provisioning_enabled(bool enable_provisioning)
 {
     ESP_LOGI(TAG, "[%s] Publish : %s", __func__, enable_provisioning ? "ON" : "OFF");
-    int msg_id = esp_mqtt_client_publish(get_mqtt_client(), get_bridge_provisioning_state_topic(), enable_provisioning ? "ON" : "OFF", 0, 0, 0);
+    int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_provisioning_state_topic(), enable_provisioning ? "ON" : "OFF", 0, 0, 0);
 }
 
 void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)

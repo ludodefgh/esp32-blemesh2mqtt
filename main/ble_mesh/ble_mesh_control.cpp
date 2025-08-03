@@ -355,6 +355,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
         message_queue().enqueue(node, message_payload{
                                           .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
+                                              mqtt_subscribe_node(mqtt_get_client(), node);
                                               mqtt_send_discovery(node);
                                               mqtt_node_send_status(node);
                                           },
@@ -431,6 +432,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             {
                 ESP_LOGI(TAG, "Node reset successfully");
                 ESP_LOGI(TAG, "Resetting node 0x%04X", node->unicast);
+                mqtt_remove_node(node);
                 esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
                 node_manager().remove_node(node->uuid);
                 message_queue().clear_queue(node);
