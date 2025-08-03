@@ -28,12 +28,14 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
+void ble_mesh_ctl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     node_info->color_mode = color_mode_t::color_temp;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]()
+                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -54,8 +56,10 @@ void ble_mesh_ctl_set(bm2mqtt_node_info *node_info)
                             });
 }
 
-void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
+void ble_mesh_ctl_temperature_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     ESP_LOGI(TAG, "[%s] Setting CTL Temperature for node 0x%04X", __func__, node_info->unicast);
     node_info->color_mode = color_mode_t::color_temp;
 
@@ -77,11 +81,13 @@ void ble_mesh_ctl_temperature_set(bm2mqtt_node_info *node_info)
     }
 }
 
-void light_hsl_set(bm2mqtt_node_info *node_info)
+void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]()
+                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -107,11 +113,13 @@ void light_hsl_set(bm2mqtt_node_info *node_info)
                             });
 }
 
-void gen_onoff_set(bm2mqtt_node_info *node_info)
+void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]()
+                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -157,15 +165,17 @@ int ble_mesh_hsl_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         ble_mesh_hsl_range_get(node_info);
     }
     return 0;
 }
 
-void ble_mesh_hsl_range_get(bm2mqtt_node_info *node_info)
+void ble_mesh_hsl_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
@@ -187,24 +197,26 @@ int ble_mesh_lightness_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         ble_mesh_lightness_range_get(node_info);
     }
     return 0;
 }
 
-void ble_mesh_lightness_range_get(bm2mqtt_node_info * node_info)
+void ble_mesh_lightness_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
-        esp_ble_mesh_client_common_param_t common = {0};
-        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+    if (!node_info) return;
+    
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
-        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-        if (err)
-        {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET Get failed", __func__);
-        }
+    node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
+    int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+    if (err)
+    {
+        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET Get failed", __func__);
+    }
 }
 
 int ble_mesh_ctl_temperature_get(int argc, char **argv)
@@ -217,15 +229,17 @@ int ble_mesh_ctl_temperature_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         ble_mesh_ctl_temperature_get(node_info);
     }
     return 0;
 }
 
-void ble_mesh_ctl_temperature_get(bm2mqtt_node_info *node_info)
+void ble_mesh_ctl_temperature_get(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
@@ -248,15 +262,17 @@ int ble_mesh_ctl_temperature_range_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         ble_mesh_ctl_temperature_range_get(node_info);
     }
     return 0;
 }
 
-void ble_mesh_ctl_temperature_range_get(bm2mqtt_node_info *node_info)
+void ble_mesh_ctl_temperature_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
@@ -280,7 +296,7 @@ int ble_mesh_ctl_get(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(node_index_args.node_index->ival[0]); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
@@ -305,7 +321,7 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(0); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
             node_info->hsl_l = ctl_lightness_set_args.lightness->ival[0];
             ble_mesh_lightness_set(node_info);     
@@ -316,18 +332,20 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
 
 void ble_mesh_ctl_lightness_set(int lightness_value, const Uuid128& uuid)
 {
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         node_info->hsl_l = lightness_value;
         ble_mesh_lightness_set(node_info);    
     }
 }
 
-void ble_mesh_lightness_set(bm2mqtt_node_info *node_info)
+void ble_mesh_lightness_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
+    if (!node_info) return;
+    
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [node_info]()
+                                .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                 {
                                     ESP_LOGW(TAG, "[ble_mesh_ctl_lightness_set] Setting Lightness for node 0x%04X", __func__, node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -361,7 +379,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         return 1;
     }
 
-    if (bm2mqtt_node_info *node_info = node_manager().get_node(0); node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
+    if (auto node_info = node_manager().get_node(0); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};

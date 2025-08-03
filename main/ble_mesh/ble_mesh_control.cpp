@@ -215,8 +215,10 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
     return info;
 }
 
-void Bind_App_Key_queue(bm2mqtt_node_info *node)
+void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
 {
+    if (!node) return;
+    
     ESP_LOGW(TAG, "[%s] features_to_bind : [%d]", __func__, node->features_to_bind);
 
     if ((node->features_to_bind & FEATURE_GENERIC_ONOFF) != 0)
@@ -224,7 +226,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
         node->features_to_bind &= ~FEATURE_GENERIC_ONOFF; // Clear the feature to avoid rebinding
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[%s] Generic on/off model for node 0x%04X", __func__, node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -249,7 +251,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_HSL; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[%s] Light hsl model for node 0x%04X", __func__, node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -275,7 +277,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_LIGHTNESS; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[%s] Light lightness model for node 0x%04X", __func__, node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -301,7 +303,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_CTL; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[%s] Light CTL temperature model for node 0x%04X", __func__, node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -323,7 +325,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
                                       });
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[%s] Light CTL model for node 0x%04X", __func__, node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -351,7 +353,7 @@ void Bind_App_Key_queue(bm2mqtt_node_info *node)
         refresh_node(node, nullptr);
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               mqtt_send_discovery(node);
                                               mqtt_node_send_status(node);
@@ -373,7 +375,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     ESP_LOGI(TAG, "%s, error_code = 0x%02x, event = 0x%02x, addr: 0x%04x, opcode: 0x%04" PRIx32,
              __func__, param->error_code, event, param->params->ctx.addr, opcode);
 
-    bm2mqtt_node_info *node = node_manager().get_node(addr);
+    auto node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -488,7 +490,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     }
 }
 
-void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_node_info *node)
+void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::shared_ptr<bm2mqtt_node_info> node)
 {
     uint16_t addr = param->params->ctx.addr;
 
@@ -524,7 +526,7 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_
     if (!get_composition_data_debug)
     {
         message_queue().enqueue(node, message_payload{
-                                          .send = [node]()
+                                          .send = [node]() // shared_ptr captured by value, keeps node alive
                                           {
                                               ESP_LOGW(TAG, "[on_composition_received] Requesting composition for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -551,12 +553,8 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, bm2mqtt_
 static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
                                        esp_ble_mesh_generic_client_cb_param_t *param)
 {
-    bm2mqtt_node_info *node = NULL;
-    uint32_t opcode;
-    uint16_t addr;
-
-    opcode = param->params->opcode;
-    addr = param->params->ctx.addr;
+    uint32_t opcode = param->params->opcode;
+    uint16_t addr = param->params->ctx.addr;
 
     ESP_LOGI(TAG, "%s, error_code = 0x%02x, event = 0x%02x, addr: 0x%04x, opcode: 0x%04" PRIx32,
              __func__, param->error_code, event, param->params->ctx.addr, opcode);
@@ -567,7 +565,7 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         return;
     }
 
-    node = node_manager().get_node(addr);
+    auto node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -666,12 +664,8 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
 void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                               esp_ble_mesh_light_client_cb_param_t *param)
 {
-    bm2mqtt_node_info *node = NULL;
-    uint32_t opcode;
-    uint16_t addr;
-
-    opcode = param->params->opcode;
-    addr = param->params->ctx.addr;
+    uint32_t opcode = param->params->opcode;
+    uint16_t addr = param->params->ctx.addr;
 
     ESP_LOGI(TAG, "%s, error_code = 0x%02x, event = 0x%02x, addr: 0x%04x, opcode: 0x%04" PRIx32,
              __func__, param->error_code, event, param->params->ctx.addr, opcode);
@@ -682,7 +676,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         return;
     }
 
-    node = node_manager().get_node(addr);
+    auto node = node_manager().get_node(addr);
     if (!node)
     {
         ESP_LOGE(TAG, "%s: Get node info failed", __func__);
@@ -872,14 +866,14 @@ void refresh_all_nodes()
     ESP_LOGI(TAG, "[%s] Refreshing all nodes", __func__);
     for_each_provisioned_node([](const esp_ble_mesh_node_t *node, int node_index)
     {
-        if (bm2mqtt_node_info *node_info = node_manager().get_or_create(node->dev_uuid))
+        if (auto node_info = node_manager().get_or_create(node->dev_uuid))
         {
             refresh_node(node_info, node);
         }
     });
 }
 
-void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
+void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node)
 {
     ESP_LOGI(TAG, "[%s] Refreshing node 0x%04X", __func__, node_info->unicast);
     if (node != nullptr)
@@ -894,7 +888,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
         ESP_LOGI(TAG, "[%s] Refreshing ON/OFF for node 0x%04X", __func__, node_info->unicast);
 
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [node_info]()
+                                               .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                                {
                                                    ESP_LOGW(TAG, "[%s] Generic on/off model for node 0x%04X", __func__, node_info->unicast);
                                                    esp_ble_mesh_client_common_param_t common = {0};
@@ -979,7 +973,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
     if (node_info->features & FEATURE_LIGHT_CTL)
     {
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [node_info]()
+                                               .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                                {
                                                    ESP_LOGW(TAG, "[%s] Refreshing Temperature Range for node 0x%04X", __func__, node_info->unicast);
                                                    ble_mesh_ctl_temperature_range_get(node_info);
@@ -989,7 +983,7 @@ void refresh_node(bm2mqtt_node_info *node_info, const esp_ble_mesh_node_t *node)
                                            });
 
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [node_info]()
+                                               .send = [node_info]() // shared_ptr captured by value, keeps node alive
                                                {
                                                    ESP_LOGI(TAG, "[%s] Refreshing CTL Temperature for node 0x%04X", __func__, node_info->unicast);
 
