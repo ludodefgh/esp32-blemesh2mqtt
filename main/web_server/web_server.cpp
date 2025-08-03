@@ -11,6 +11,7 @@
 #include <mqtt/mqtt_control.h>
 #include <mqtt/mqtt_bridge.h>
 #include "wifi/wifi_provisioning.h"
+#include "esp_heap_caps.h"
 
 #define TAG "WEB_SERVER"
 
@@ -246,6 +247,23 @@ esp_err_t unprovision_handler(httpd_req_t *req)
     unprovision_device(dev_uuid); // Your unprovisioning function
 
     httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t system_info_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    
+    uint32_t free_heap = esp_get_free_heap_size();
+    uint32_t min_heap = esp_get_minimum_free_heap_size();
+    uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu } }",
+        free_heap, min_heap, total_heap, total_heap - free_heap);
+    
+    httpd_resp_send(req, buf, -1);
     return ESP_OK;
 }
 
@@ -654,6 +672,12 @@ static httpd_uri_t bridge_handlers[] = {
         .uri = "/api/console_commands",
         .method = HTTP_GET,
         .handler = list_console_commands_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/api/system_info",
+        .method = HTTP_GET,
+        .handler = system_info_handler,
         .user_ctx = NULL
     },
     {
