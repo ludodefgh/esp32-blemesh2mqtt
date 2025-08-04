@@ -6,7 +6,8 @@ typedef struct {
     const char * const name;
 } company_entry_t;
 
-static constexpr company_entry_t company_map[] = {
+// Store company map in Flash to save DRAM - rodata section automatically goes to Flash
+static const company_entry_t company_map[] = {
     { 0x0F23, "Yuquan Semiconductor (Xiamen) Co., Ltd." },
     { 0x0F22, "ONESPACE TECHNOLOGIES (PTY) LTD" },
     { 0x0F21, "Rokk Limited" },
