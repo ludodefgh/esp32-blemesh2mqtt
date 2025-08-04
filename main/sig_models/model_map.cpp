@@ -1,7 +1,8 @@
 #include "model_map.h"
 #include <cstring>
 
-static constexpr model_map_entry_t model_map[] = {
+// Store model map in Flash to save DRAM - rodata section automatically goes to Flash
+static const model_map_entry_t model_map[] = {
     { 0x0000, "Configuration Server" },
     { 0x0001, "Configuration Client" },
     { 0x0002, "Health Server" },

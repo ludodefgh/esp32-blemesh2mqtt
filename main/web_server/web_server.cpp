@@ -16,6 +16,58 @@
 
 #define TAG "WEB_SERVER"
 
+// Store large JavaScript strings in Flash to save DRAM
+static const char nodes_javascript[] = 
+    "<script>\n"
+    "let lastSend = 0;\n"
+    "let throttleDelay = 200;\n"
+    "let scheduled = false;\n"
+    "let pending = {};\n"
+    "\n"
+    "function onSliderInput(uuid, el) {\n"
+    "  el.nextElementSibling.value = el.value;\n"
+    "  pending.uuid = uuid;\n"
+    "  pending.value = el.value;\n"
+    "  scheduleSend();\n"
+    "}\n"
+    "\n"
+    "function scheduleSend() {\n"
+    "  if (scheduled) return;\n"
+    "  const now = Date.now();\n"
+    "  const timeSinceLast = now - lastSend;\n"
+    "  const wait = Math.max(0, throttleDelay - timeSinceLast);\n"
+    "  scheduled = true;\n"
+    "  setTimeout(() => {\n"
+    "    sendLightness(pending.uuid, pending.value);\n"
+    "    lastSend = Date.now();\n"
+    "    scheduled = false;\n"
+    "  }, wait);\n"
+    "}\n"
+    "\n"
+    "function sendLightness(uuid, value) {\n"
+    "  fetch('/node/set_lightness', {\n"
+    "    method: 'POST',\n"
+    "    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n"
+    "    body: 'uuid=' + encodeURIComponent(uuid) + '&lightness=' + encodeURIComponent(value)\n"
+    "  }).catch(err => console.error('Failed to send lightness:', err));\n"
+    "}\n"
+    "function unprovisionNode(uuid) {"
+    "fetch('/node/unprovision', {"
+    "method: 'POST',"
+    " headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
+    "body: 'uuid=' + encodeURIComponent(uuid)"
+    "}).then(() => location.reload());"
+    "}"
+    "\n"
+    "function provisionNode(uuid) {"
+    "fetch('/node/provision', {"
+    " method: 'POST',"
+    "  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
+    "   body: 'uuid=' + encodeURIComponent(uuid)"
+    "  }).then(() => location.reload());"
+    "}"
+    "</script>\n";
+
 // Global server handle for dynamic handler registration
 static httpd_handle_t g_server = NULL;
 
@@ -31,58 +83,8 @@ esp_err_t nodes_handler(httpd_req_t *req)
     //
     // Provisioned nodes
     //
-    // Start HTML + JavaScript
-    httpd_resp_send_chunk(req,
-                          "<script>\n"
-                          "let lastSend = 0;\n"
-                          "let throttleDelay = 200;\n"
-                          "let scheduled = false;\n"
-                          "let pending = {};\n"
-                          "\n"
-                          "function onSliderInput(uuid, el) {\n"
-                          "  el.nextElementSibling.value = el.value;\n"
-                          "  pending.uuid = uuid;\n"
-                          "  pending.value = el.value;\n"
-                          "  scheduleSend();\n"
-                          "}\n"
-                          "\n"
-                          "function scheduleSend() {\n"
-                          "  if (scheduled) return;\n"
-                          "  const now = Date.now();\n"
-                          "  const timeSinceLast = now - lastSend;\n"
-                          "  const wait = Math.max(0, throttleDelay - timeSinceLast);\n"
-                          "  scheduled = true;\n"
-                          "  setTimeout(() => {\n"
-                          "    sendLightness(pending.uuid, pending.value);\n"
-                          "    lastSend = Date.now();\n"
-                          "    scheduled = false;\n"
-                          "  }, wait);\n"
-                          "}\n"
-                          "\n"
-                          "function sendLightness(uuid, value) {\n"
-                          "  fetch('/node/set_lightness', {\n"
-                          "    method: 'POST',\n"
-                          "    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n"
-                          "    body: 'uuid=' + encodeURIComponent(uuid) + '&lightness=' + encodeURIComponent(value)\n"
-                          "  }).catch(err => console.error('Failed to send lightness:', err));\n"
-                          "}\n"
-                          "function unprovisionNode(uuid) {"
-                          "fetch('/node/unprovision', {"
-                          "method: 'POST',"
-                          " headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
-                          "body: 'uuid=' + encodeURIComponent(uuid)"
-                          "}).then(() => location.reload());"
-                          "}"
-
-                          "function provisionNode(uuid) {"
-                          "fetch('/node/provision', {"
-                          " method: 'POST',"
-                          "  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
-                          "   body: 'uuid=' + encodeURIComponent(uuid)"
-                          "  }).then(() => location.reload());"
-                          "}"
-                          "</script>\n",
-                          -1);
+    // Send JavaScript from Flash memory to save DRAM
+    httpd_resp_send_chunk(req, nodes_javascript, -1);
 
     // Loop through all nodes
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
@@ -911,7 +913,7 @@ static httpd_uri_t bridge_handlers[] = {
 
 static const size_t bridge_handlers_count = sizeof(bridge_handlers) / sizeof(bridge_handlers[0]);
 
-// WiFi provisioning state change callback
+// WiFi provisioning state change callback - non-critical, keep in Flash to save IRAM
 static void wifi_state_change_callback(wifi_provisioning_state_t state, void* event_data)
 {
     if (!g_server) {
