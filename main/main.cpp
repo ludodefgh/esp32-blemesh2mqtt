@@ -8,7 +8,10 @@
 #include "esp_ble_mesh_defs.h"
 #include "esp_console.h"
 #include "esp_littlefs.h"
-#include "ble_mesh_example_init.h"
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_system.h"
+#include "esp_mac.h"
 
 #include "ble_mesh/ble_mesh_control.h"
 #include "ble_mesh/ble_mesh_provisioning.h"
@@ -81,6 +84,60 @@ REGISTER_DEBUG_COMMAND(RegisterDebugCommands);
 void mount_littlefs(void)
 {
     ESP_ERROR_CHECK(esp_vfs_littlefs_register(&conf));
+}
+
+// Implement missing functions from ble_mesh_example_init.h
+esp_err_t bluetooth_init(void)
+{
+    esp_err_t err;
+
+    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    err = esp_bt_controller_init(&bt_cfg);
+    if (err) {
+        ESP_LOGE("BLUETOOTH", "Bluetooth controller init failed");
+        return err;
+    }
+
+    err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if (err) {
+        ESP_LOGE("BLUETOOTH", "Bluetooth controller enable failed");
+        return err;
+    }
+
+    err = esp_bluedroid_init();
+    if (err) {
+        ESP_LOGE("BLUETOOTH", "Bluedroid init failed");
+        return err;
+    }
+
+    err = esp_bluedroid_enable();
+    if (err) {
+        ESP_LOGE("BLUETOOTH", "Bluedroid enable failed");
+        return err;
+    }
+
+    return ESP_OK;
+}
+
+void ble_mesh_get_dev_uuid(uint8_t *dev_uuid)
+{
+    if (dev_uuid == NULL) {
+        return;
+    }
+
+    /* Copy device address to first 6 bytes of device UUID */
+    uint8_t base_mac_addr[6] = {0};
+    esp_read_mac(base_mac_addr, ESP_MAC_BT);
+    memcpy(dev_uuid, base_mac_addr, 6);
+
+    /* The remaining 10 bytes are filled with static values */
+    dev_uuid[6] = 0xdd;
+    dev_uuid[7] = 0xdd;
+    for (int i = 8; i < 16; i++) {
+        dev_uuid[i] = 0x00;
+    }
 }
 
 extern "C" void app_main()
