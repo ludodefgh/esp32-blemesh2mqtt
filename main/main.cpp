@@ -8,7 +8,6 @@
 #include "esp_ble_mesh_defs.h"
 #include "esp_console.h"
 #include "esp_littlefs.h"
-#include "ble_mesh_example_nvs.h"
 #include "ble_mesh_example_init.h"
 
 #include "ble_mesh/ble_mesh_control.h"
@@ -28,11 +27,6 @@
 
 extern bool init_done;
 
-/// @brief Provisioning stuff
-
-static nvs_handle_t NVS_HANDLE;
-
-extern void wifi_init_sta(void);
 
 static int heap_size(int argc, char **argv)
 {
@@ -110,13 +104,6 @@ extern "C" void app_main()
         return;
     }
 
-    /* Open nvs namespace for storing/restoring mesh example info */
-    err = ble_mesh_nvs_open(&NVS_HANDLE);
-    if (err)
-    {
-        return;
-    }
-
     mount_littlefs();
 
     size_t total = 0, used = 0;
@@ -152,8 +139,6 @@ extern "C" void app_main()
         ESP_ERROR_CHECK(wifi_provisioning_start_captive_portal());
     } else {
         ESP_LOGI(TAG, "WiFi already connected via provisioning");
-        // WiFi is already connected by wifi_provisioning_should_start_captive_portal()
-        // No need to call wifi_init_sta() again
     }
 
 #if defined(DEBUG_USE_GPIO)
