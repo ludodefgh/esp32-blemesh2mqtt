@@ -13,6 +13,8 @@
 #include <mqtt/mqtt_credentials.h>
 #include "wifi/wifi_provisioning.h"
 #include "esp_heap_caps.h"
+#include "ota/ota_manager.h"
+#include "esp_system.h"
 
 #define TAG "WEB_SERVER"
 
@@ -77,6 +79,9 @@ esp_err_t reset_wifi_handler(httpd_req_t *req);
 esp_err_t rename_node_handler(httpd_req_t *req);
 esp_err_t node_send_mqtt_status_handler(httpd_req_t *req);
 esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req);
+esp_err_t ota_upload_handler(httpd_req_t *req);
+esp_err_t ota_status_handler(httpd_req_t *req);
+esp_err_t ota_restart_handler(httpd_req_t *req);
 
 esp_err_t nodes_handler(httpd_req_t *req)
 {
@@ -341,6 +346,12 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
         return system_info_handler(req);
     } else if (strstr(req->uri, "/api/console_commands")) {
         return list_console_commands_handler(req);
+    } else if (strstr(req->uri, "/api/ota/upload")) {
+        return ota_upload_handler(req);
+    } else if (strstr(req->uri, "/api/ota/status")) {
+        return ota_status_handler(req);
+    } else if (strstr(req->uri, "/api/ota/restart")) {
+        return ota_restart_handler(req);
     } else {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
         return ESP_FAIL;
@@ -724,6 +735,217 @@ esp_err_t rename_node_handler(httpd_req_t *req) {
 
     cJSON_Delete(json);
     return httpd_resp_sendstr(req, "OK");
+}
+
+// Constants for OTA security
+#define OTA_MIN_FIRMWARE_SIZE (32 * 1024)      // 32KB minimum
+#define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
+#define OTA_BUFFER_SIZE 1024
+
+// Simple OTA authentication (should be replaced with proper auth in production)
+#define OTA_API_KEY "ota_secure_key_2024"
+
+static bool authenticate_ota_request(httpd_req_t *req) {
+    char auth_header[128];
+    size_t header_len = httpd_req_get_hdr_value_len(req, "X-OTA-Key");
+    
+    if (header_len == 0 || header_len >= sizeof(auth_header)) {
+        ESP_LOGW(TAG, "OTA authentication failed: missing or invalid X-OTA-Key header");
+        return false;
+    }
+    
+    if (httpd_req_get_hdr_value_str(req, "X-OTA-Key", auth_header, sizeof(auth_header)) != ESP_OK) {
+        ESP_LOGW(TAG, "OTA authentication failed: could not read X-OTA-Key header");
+        return false;
+    }
+    
+    bool authenticated = (strcmp(auth_header, OTA_API_KEY) == 0);
+    if (!authenticated) {
+        ESP_LOGW(TAG, "OTA authentication failed: invalid API key");
+    } else {
+        ESP_LOGI(TAG, "OTA authentication successful");
+    }
+    
+    return authenticated;
+}
+
+esp_err_t validate_ota_request(httpd_req_t *req) {
+    // Validate content length
+    if (req->content_len < OTA_MIN_FIRMWARE_SIZE) {
+        ESP_LOGW(TAG, "Firmware too small: %zu bytes (min %d)", req->content_len, OTA_MIN_FIRMWARE_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    if (req->content_len > OTA_MAX_FIRMWARE_SIZE) {
+        ESP_LOGW(TAG, "Firmware too large: %zu bytes (max %d)", req->content_len, OTA_MAX_FIRMWARE_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    // Log security event
+    ESP_LOGW(TAG, "OTA upload attempt - Size: %zu bytes", req->content_len);
+    
+    return ESP_OK;
+}
+
+esp_err_t ota_upload_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "OTA upload handler called");
+    
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+    
+    // Authenticate request
+    if (!authenticate_ota_request(req)) {
+        ESP_LOGW(TAG, "Unauthorized OTA upload attempt");
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
+        return ESP_FAIL;
+    }
+    
+    // Validate request
+    esp_err_t validation_err = validate_ota_request(req);
+    if (validation_err != ESP_OK) {
+        if (validation_err == ESP_ERR_INVALID_SIZE) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid firmware size");
+        } else {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
+        }
+        return ESP_FAIL;
+    }
+    
+    // Get content length
+    size_t content_length = req->content_len;
+    
+    ESP_LOGI(TAG, "Starting OTA upload, content length: %zu bytes", content_length);
+    
+    // Begin OTA update
+    esp_err_t err = ota_manager_begin(content_length);
+    if (err != ESP_OK) {
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "Failed to begin OTA: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+    
+    // Read and write firmware data in chunks
+    char *buffer = (char*)malloc(OTA_BUFFER_SIZE);
+    if (buffer == NULL) {
+        ota_manager_abort();
+        ESP_LOGE(TAG, "Failed to allocate %d bytes for OTA buffer", OTA_BUFFER_SIZE);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+    
+    esp_err_t ret = ESP_FAIL;
+    size_t remaining = content_length;
+    size_t total_written = 0;
+    int recv_len = 0;
+    
+    while (remaining > 0) {
+        size_t chunk_size = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
+        recv_len = httpd_req_recv(req, buffer, chunk_size);
+        
+        if (recv_len <= 0) {
+            ESP_LOGE(TAG, "OTA receive failed after %zu bytes. Error: %d", total_written, recv_len);
+            goto cleanup;
+        }
+        
+        if ((size_t)recv_len > remaining) {
+            ESP_LOGE(TAG, "Received more data than expected: %d > %zu", recv_len, remaining);
+            goto cleanup;
+        }
+        
+        err = ota_manager_write((const uint8_t*)buffer, (size_t)recv_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA write failed at offset %zu: %s", total_written, esp_err_to_name(err));
+            goto cleanup;
+        }
+        
+        remaining -= (size_t)recv_len;
+        total_written += (size_t)recv_len;
+        
+        // Log progress every 64KB
+        if (total_written % (64 * 1024) == 0) {
+            ESP_LOGI(TAG, "OTA progress: %zu / %zu bytes (%.1f%%)", 
+                     total_written, content_length, 
+                     (float)total_written / content_length * 100.0);
+        }
+    }
+    
+    ret = ESP_OK;
+    ESP_LOGI(TAG, "OTA upload completed: %zu bytes", total_written);
+
+cleanup:
+    free(buffer);
+    if (ret != ESP_OK) {
+        ota_manager_abort();
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Upload timeout");
+        } else {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Upload failed");
+        }
+        return ESP_FAIL;
+    }
+    
+    // Finalize OTA update
+    err = ota_manager_end();
+    if (err != ESP_OK) {
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "OTA finalization failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+    
+    // Send success response
+    httpd_resp_set_type(req, "application/json");
+    const char* success_response = "{ \"success\": true, \"message\": \"Firmware uploaded successfully. Device will restart in 3 seconds.\" }";
+    httpd_resp_send(req, success_response, -1);
+    
+    // Restart after a short delay to allow response to be sent
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
+    
+    return ESP_OK;
+}
+
+esp_err_t ota_status_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    
+    const ota_progress_info_t* progress = ota_manager_get_progress();
+    bool in_progress = ota_manager_is_in_progress();
+    
+    char response[256];
+    snprintf(response, sizeof(response),
+        "{ \"in_progress\": %s, \"progress_percent\": %d, \"written_size\": %zu, \"total_size\": %zu, \"status_message\": \"%s\" }",
+        in_progress ? "true" : "false",
+        progress->progress_percent,
+        progress->written_size,
+        progress->total_size,
+        progress->status_message ? progress->status_message : "");
+    
+    httpd_resp_send(req, response, -1);
+    return ESP_OK;
+}
+
+esp_err_t ota_restart_handler(httpd_req_t *req)
+{
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+    
+    // Send response first
+    httpd_resp_set_type(req, "application/json");
+    const char* response = "{ \"success\": true, \"message\": \"Device restarting...\" }";
+    httpd_resp_send(req, response, -1);
+    
+    // Restart after short delay
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+    
+    return ESP_OK;
 }
 
 
