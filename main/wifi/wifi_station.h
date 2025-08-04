@@ -6,9 +6,7 @@
 extern "C" {
 #endif
 
-char* get_ip_address();
-void wifi_init_sta(void);
-esp_err_t wifi_init_sta_with_stored_credentials(void);
+//void wifi_init_sta(void);
 
 #ifdef __cplusplus
 }

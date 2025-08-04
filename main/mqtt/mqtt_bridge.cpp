@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <wifi/wifi_station.h>
+#include <wifi/wifi_provisioning.h>
 
 #define TAG "APP_MQTT_BRIDGE"
 

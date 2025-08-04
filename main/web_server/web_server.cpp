@@ -913,7 +913,7 @@ static httpd_uri_t bridge_handlers[] = {
 
 static const size_t bridge_handlers_count = sizeof(bridge_handlers) / sizeof(bridge_handlers[0]);
 
-// WiFi provisioning state change callback - non-critical, keep in Flash to save IRAM
+// WiFi provisioning state change callback
 static void wifi_state_change_callback(wifi_provisioning_state_t state, void* event_data)
 {
     if (!g_server) {

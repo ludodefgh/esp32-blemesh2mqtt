@@ -25,6 +25,13 @@ static wifi_ap_record_extended_t* s_scan_results = NULL;
 static uint16_t s_scan_count = 0;
 static EventGroupHandle_t s_wifi_event_group;
 
+static char ip_address[16] = {0};
+
+char* get_ip_address()
+{
+    return ip_address;
+}
+
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
@@ -93,6 +100,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 {
                     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
                     ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
+                    snprintf(ip_address, sizeof(ip_address), "%d.%d.%d.%d", IP2STR(&event->ip_info.ip));
+
                     s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
                     xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
                     if (s_event_callback) {
