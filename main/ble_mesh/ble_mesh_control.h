@@ -21,3 +21,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
 void RegisterBleMeshDebugCommands();
 
 void ble_mesh_set_provisioning_enabled(bool enabled_value);
+
+// Function declarations from main.cpp
+esp_err_t bluetooth_init(void);
+void ble_mesh_get_dev_uuid(uint8_t *dev_uuid);

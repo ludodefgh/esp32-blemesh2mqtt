@@ -15,7 +15,6 @@
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
 #include "esp_console.h"
-#include "ble_mesh_example_init.h"
 
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
@@ -97,8 +96,6 @@ static esp_ble_mesh_comp_t composition = {
 uint8_t MyKey[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
 static esp_ble_mesh_prov_t provision = {
-
-    .uuid = dev_uuid,
 
     .prov_uuid = dev_uuid,
     .prov_unicast_addr = PROV_OWN_ADDR,

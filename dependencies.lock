@@ -1,10 +1,4 @@
 dependencies:
-  example_init:
-    dependencies: []
-    source:
-      path: /home/ludovic/esp/esp-idf/examples/bluetooth/esp_ble_mesh/common_components/example_init
-      type: local
-    version: '*'
   idf:
     source:
       type: idf
@@ -20,8 +14,7 @@ dependencies:
       type: service
     version: 1.20.0
 direct_dependencies:
-- example_init
 - joltwallet/littlefs
-manifest_hash: 479d0db83beeea2012dd32217be3ef87835068a19906026f79b12e99440dec0c
+manifest_hash: 3e9c06cdc54164c29f5f4b0429923d5153065da16d7eebbb2aa162804a5964e6
 target: esp32
 version: 2.0.0

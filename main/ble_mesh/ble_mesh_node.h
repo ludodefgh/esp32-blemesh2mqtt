@@ -19,7 +19,6 @@
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
-#include "ble_mesh_example_init.h"
 
 #include "esp_ble_mesh_defs.h"
 #include <esp_timer.h>
