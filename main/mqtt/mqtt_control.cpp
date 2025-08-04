@@ -13,10 +13,10 @@
 #include "ble_mesh/ble_mesh_control.h"
 #include "debug_console_common.h"
 #include "mqtt_bridge.h"
+#include "mqtt_credentials.h"
 #include <memory>
 #include <string>
 #include "cJSON.h"
-#include "_config.h"
 #include <ble_mesh/ble_mesh_commands.h>
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
@@ -149,6 +149,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        mqtt_credentials().set_connection_state(mqtt_connection_state_t::CONNECTED);
         esp_mqtt5_client_set_publish_property(client, &publish_property);
         // msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 1);
         // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
@@ -168,6 +169,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
         break;
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
@@ -199,12 +201,21 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
         ESP_LOGI(TAG, "MQTT5 return code is %d", event->error_handle->connect_return_code);
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
-        {
+        
+        // Set appropriate error state based on the error type
+        if (event->error_handle->connect_return_code == 4 || event->error_handle->connect_return_code == 5) {
+            mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_AUTH);
+            mqtt_credentials().set_last_error("Authentication failed");
+        } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+            mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_NETWORK);
+            mqtt_credentials().set_last_error("Network connection failed");
             log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
             log_error_if_nonzero("captured as transport's socket errno", event->error_handle->esp_transport_sock_errno);
             ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+        } else {
+            mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_TIMEOUT);
+            mqtt_credentials().set_last_error("Connection timeout or unknown error");
         }
         break;
     default:
@@ -219,9 +230,23 @@ esp_mqtt_client_handle_t mqtt_get_client()
     return mqtt_client;
 }
 
-void mqtt5_app_start(void)
+bool mqtt5_app_start(void)
 {
     ESP_LOGI(TAG, "mqtt5_app_start");
+
+    // Load credentials from NVS
+    if (mqtt_credentials().load_credentials() != ESP_OK) {
+        ESP_LOGW(TAG, "No valid MQTT credentials found. MQTT will not start.");
+        return false;
+    }
+
+    if (!mqtt_credentials().has_valid_credentials()) {
+        ESP_LOGE(TAG, "Invalid MQTT credentials. MQTT will not start.");
+        return false;
+    }
+
+    const auto& creds = mqtt_credentials().get_credentials();
+    mqtt_credentials().set_connection_state(mqtt_connection_state_t::CONNECTING);
 
     esp_mqtt5_connection_property_config_t connect_property = {
         .session_expiry_interval = 10,
@@ -240,13 +265,15 @@ void mqtt5_app_start(void)
 
     esp_mqtt_client_config_t mqtt5_cfg{}; // = {
 
-    mqtt5_cfg.broker.address.hostname = "192.168.2.194"; // CONFIG_BROKER_URL;
-    mqtt5_cfg.broker.address.transport = esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_TCP;
-    mqtt5_cfg.broker.address.port = 1883;
+    mqtt5_cfg.broker.address.hostname = creds.broker_host.c_str();
+    mqtt5_cfg.broker.address.transport = creds.use_ssl ? 
+        esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_SSL : 
+        esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_TCP;
+    mqtt5_cfg.broker.address.port = creds.broker_port;
     mqtt5_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;
     mqtt5_cfg.network.disable_auto_reconnect = true;
-    mqtt5_cfg.credentials.username = config_mqtt_user;
-    mqtt5_cfg.credentials.authentication.password = config_mqtt_pwd;
+    mqtt5_cfg.credentials.username = creds.username.c_str();
+    mqtt5_cfg.credentials.authentication.password = creds.password.c_str();
     mqtt5_cfg.session.last_will.topic = get_bridge_availability_topic();
     mqtt5_cfg.session.last_will.msg = "offline";
     mqtt5_cfg.session.last_will.msg_len = 8;
@@ -273,7 +300,37 @@ void mqtt5_app_start(void)
     //     mqtt_init_periodic_info();
     // }
     
+    ESP_LOGI(TAG, "MQTT client started successfully with broker: %s:%d", 
+             creds.broker_host.c_str(), creds.broker_port);
+    return true;
 }
+
+void mqtt5_app_stop(void)
+{
+    ESP_LOGI(TAG, "Stopping MQTT client");
+    
+    if (mqtt_client) {
+        mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
+        esp_mqtt_client_stop(mqtt_client);
+        esp_mqtt_client_destroy(mqtt_client);
+        mqtt_client = nullptr;
+        ESP_LOGI(TAG, "MQTT client stopped and destroyed");
+    } else {
+        ESP_LOGW(TAG, "MQTT client was not running");
+    }
+}
+
+void mqtt5_app_restart(void)
+{
+    ESP_LOGI(TAG, "Restarting MQTT client");
+    
+    // Stop existing client if running
+    mqtt5_app_stop();
+    
+    // Start with new credentials
+    mqtt5_app_start();
+}
+
 #pragma endregion MQTTSetup
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -446,9 +503,11 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
         const std::string mac{topic, index_pos + 5, 12};
         if (auto node_info = node_manager().get_node(mac))
         {
-            if (cJSON *response = cJSON_Parse(event->data))
+            // Use RAII wrapper to prevent memory leaks
+            CJsonPtr response(cJSON_Parse(event->data), cJSON_Delete);
+            if (response)
             {
-                if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response, "state"))
+                if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response.get(), "state"))
                 {
                     if (cJSON_IsString(name) && (name->valuestring != NULL))
                     {
@@ -470,7 +529,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                     if ((node_info->features & FEATURE_LIGHT_LIGHTNESS) || (node_info->features & FEATURE_LIGHT_HSL))
                     {
                         ESP_LOGW(TAG, "[mqtt_parse_event_data] Light Lightness feature supported");
-                        if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response, "brightness"))
+                        if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response.get(), "brightness"))
                         {
                             if (cJSON_IsNumber(brightness))
                             {
@@ -485,7 +544,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                     if (node_info->features & FEATURE_LIGHT_HSL)
                     {
                         ESP_LOGW(TAG, "[mqtt_parse_event_data] Light HSL feature supported");
-                        if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response, "color"))
+                        if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response.get(), "color"))
                         {
                             if (cJSON_IsObject(color))
                             {
@@ -513,7 +572,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                     if (node_info->features & FEATURE_LIGHT_CTL)
                     {
                         ESP_LOGW(TAG, "[mqtt_parse_event_data] Light CTL feature supported");
-                        if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response, "color_temp"))
+                        if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response.get(), "color_temp"))
                         {
                             if (cJSON_IsNumber(color_temp))
                             {
@@ -552,7 +611,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                                            .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
                                        });
                 }
-                cJSON_Delete(response);
+                // cJSON automatically deleted by smart pointer
             }
         }
     }

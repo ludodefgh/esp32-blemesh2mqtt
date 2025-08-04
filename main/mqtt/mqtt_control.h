@@ -5,7 +5,9 @@
 
 esp_mqtt_client_handle_t mqtt_get_client();
 
-void mqtt5_app_start();
+bool mqtt5_app_start();
+void mqtt5_app_stop();
+void mqtt5_app_restart();
 void RegisterMQTTDebugCommands();
 void mqtt_parse_event_data(esp_mqtt_event_handle_t event);
 void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client);
