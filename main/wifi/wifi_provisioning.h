@@ -36,6 +36,8 @@ typedef struct {
 
 typedef void (*wifi_provisioning_event_cb_t)(wifi_provisioning_state_t state, void* event_data);
 
+char* get_ip_address();
+
 esp_err_t wifi_provisioning_init(void);
 esp_err_t wifi_provisioning_start_captive_portal(void);
 esp_err_t wifi_provisioning_stop_captive_portal(void);
