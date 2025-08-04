@@ -146,6 +146,76 @@
         </div>
       </section>
 
+      <!-- Bridge Firmware Section -->
+      <section class="card firmware-section">
+        <div class="section-header">
+          <h2>Bridge Firmware</h2>
+          <div class="firmware-info" id="firmware-info">
+            <div class="info-item">
+              <span class="info-label">Current Version</span>
+              <span class="info-value" id="current-version">Loading...</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="firmware-upload">
+          <div class="upload-area" id="upload-area">
+            <div class="upload-content">
+              <span class="upload-icon">📁</span>
+              <p class="upload-text">
+                <strong>Select firmware file (.bin)</strong><br>
+                or drag and drop here
+              </p>
+              <input type="file" id="firmware-file" accept=".bin" style="display: none;">
+              <button class="btn btn-primary" onclick="document.getElementById('firmware-file').click()">
+                <span class="icon">📂</span>
+                Choose File
+              </button>
+            </div>
+          </div>
+          
+          <div id="file-info" class="file-info" style="display: none;">
+            <div class="file-details">
+              <span class="file-icon">📄</span>
+              <div class="file-text">
+                <div class="file-name" id="file-name"></div>
+                <div class="file-size" id="file-size"></div>
+              </div>
+              <button class="btn btn-small btn-secondary" onclick="clearFile()">✕</button>
+            </div>
+          </div>
+          
+          <div id="upload-progress" class="upload-progress" style="display: none;">
+            <div class="progress-info">
+              <span class="progress-text" id="progress-text">Preparing upload...</span>
+              <span class="progress-percent" id="progress-percent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-details" id="progress-details"></div>
+          </div>
+          
+          <div class="upload-actions">
+            <button class="btn btn-danger" id="upload-btn" onclick="uploadFirmware()" disabled>
+              <span class="icon">⬆️</span>
+              Upload Firmware
+            </button>
+            <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" style="display: none;">
+              <span class="icon">✕</span>
+              Cancel
+            </button>
+          </div>
+          
+          <div class="firmware-warning">
+            <p><strong>⚠️ Warning:</strong> Uploading invalid firmware may render the device unusable. 
+               Ensure you have the correct firmware file for this device.</p>
+          </div>
+        </div>
+        
+        <div id="firmware-error" class="error-message" style="display: none;"></div>
+      </section>
+
       <!-- Console Commands Section -->
       <section class="card commands-section">
         <h2>Available Commands</h2>

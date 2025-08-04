@@ -776,3 +776,223 @@ document.getElementById("mqtt-config-form").addEventListener("submit", function(
     submitBtn.innerHTML = originalText;
   });
 });
+
+// Firmware Upload Functionality
+let selectedFirmwareFile = null;
+let uploadInProgress = false;
+
+function initFirmwareUpload() {
+  const fileInput = document.getElementById('firmware-file');
+  const uploadArea = document.getElementById('upload-area');
+  
+  // File input change handler
+  fileInput.addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+      handleFileSelection(e.target.files[0]);
+    }
+  });
+  
+  // Drag and drop handlers
+  uploadArea.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+  });
+  
+  uploadArea.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+  });
+  
+  uploadArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    
+    if (e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.name.endsWith('.bin')) {
+        handleFileSelection(file);
+      } else {
+        showFirmwareError('Please select a .bin firmware file');
+      }
+    }
+  });
+  
+  // Load current firmware version
+  loadFirmwareInfo();
+}
+
+function handleFileSelection(file) {
+  if (!file.name.endsWith('.bin')) {
+    showFirmwareError('Please select a .bin firmware file');
+    return;
+  }
+  
+  if (file.size < 1024) {
+    showFirmwareError('Firmware file appears to be too small');
+    return;
+  }
+  
+  if (file.size > 4 * 1024 * 1024) {
+    showFirmwareError('Firmware file is too large (max 4MB)');
+    return;
+  }
+  
+  selectedFirmwareFile = file;
+  
+  // Show file info
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('file-size').textContent = formatFileSize(file.size);
+  document.getElementById('file-info').style.display = 'block';
+  document.getElementById('upload-btn').disabled = false;
+  
+  // Hide upload area
+  document.getElementById('upload-area').style.display = 'none';
+  
+  hideFirmwareError();
+}
+
+function clearFile() {
+  selectedFirmwareFile = null;
+  document.getElementById('file-info').style.display = 'none';
+  document.getElementById('upload-area').style.display = 'block';
+  document.getElementById('upload-btn').disabled = true;
+  document.getElementById('firmware-file').value = '';
+  hideFirmwareError();
+}
+
+function uploadFirmware() {
+  if (!selectedFirmwareFile || uploadInProgress) {
+    return;
+  }
+  
+  uploadInProgress = true;
+  
+  // Show progress UI
+  document.getElementById('upload-progress').style.display = 'block';
+  document.getElementById('upload-btn').style.display = 'none';
+  document.getElementById('cancel-btn').style.display = 'inline-flex';
+  document.getElementById('upload-area').classList.add('disabled');
+  
+  // Update progress
+  updateProgress('Starting upload...', 0);
+  
+  // Create FormData and upload
+  const formData = new FormData();
+  formData.append('firmware', selectedFirmwareFile);
+  
+  const xhr = new XMLHttpRequest();
+  
+  xhr.upload.addEventListener('progress', function(e) {
+    if (e.lengthComputable) {
+      const percent = Math.round((e.loaded / e.total) * 100);
+      updateProgress(`Uploading firmware... ${formatFileSize(e.loaded)} / ${formatFileSize(e.total)}`, percent);
+    }
+  });
+  
+  xhr.addEventListener('load', function() {
+    if (xhr.status === 200) {
+      try {
+        const response = JSON.parse(xhr.responseText);
+        if (response.success) {
+          updateProgress('Upload successful! Device restarting...', 100);
+          showToast('Firmware uploaded successfully. Device will restart.', 'success');
+          
+          // Hide cancel button since upload is complete
+          document.getElementById('cancel-btn').style.display = 'none';
+          
+          // Reset UI after restart delay
+          setTimeout(() => {
+            resetUploadUI();
+          }, 5000);
+        } else {
+          throw new Error(response.message || 'Upload failed');
+        }
+      } catch (e) {
+        throw new Error('Invalid server response');
+      }
+    } else {
+      throw new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`);
+    }
+  });
+  
+  xhr.addEventListener('error', function() {
+    showFirmwareError('Network error during upload');
+    resetUploadUI();
+  });
+  
+  xhr.addEventListener('abort', function() {
+    showFirmwareError('Upload cancelled');
+    resetUploadUI();
+  });
+  
+  xhr.open('POST', '/api/ota/upload');
+  // Add authentication header
+  xhr.setRequestHeader('X-OTA-Key', 'ota_secure_key_2024');
+  xhr.send(selectedFirmwareFile);
+}
+
+function cancelUpload() {
+  if (uploadInProgress) {
+    // This would cancel the XMLHttpRequest if we stored it globally
+    showFirmwareError('Upload cancellation not implemented');
+  }
+  resetUploadUI();
+}
+
+function updateProgress(message, percent) {
+  document.getElementById('progress-text').textContent = message;
+  document.getElementById('progress-percent').textContent = `${percent}%`;
+  document.getElementById('progress-fill').style.width = `${percent}%`;
+  
+  const details = document.getElementById('progress-details');
+  if (selectedFirmwareFile) {
+    details.textContent = `File: ${selectedFirmwareFile.name} (${formatFileSize(selectedFirmwareFile.size)})`;
+  }
+}
+
+function resetUploadUI() {
+  uploadInProgress = false;
+  document.getElementById('upload-progress').style.display = 'none';
+  document.getElementById('upload-btn').style.display = 'inline-flex';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('upload-area').classList.remove('disabled');
+  clearFile();
+}
+
+function loadFirmwareInfo() {
+  // Load current firmware version from system info
+  fetch('/api/system_info')
+    .then(res => res.json())
+    .then(data => {
+      // For now, show a placeholder version
+      // In a real implementation, you'd add version info to the system_info endpoint
+      document.getElementById('current-version').textContent = 'v1.0.0';
+    })
+    .catch(err => {
+      console.error('Failed to load firmware info:', err);
+      document.getElementById('current-version').textContent = 'Unknown';
+    });
+}
+
+function showFirmwareError(message) {
+  const errorDiv = document.getElementById('firmware-error');
+  errorDiv.textContent = message;
+  errorDiv.style.display = 'block';
+}
+
+function hideFirmwareError() {
+  document.getElementById('firmware-error').style.display = 'none';
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Initialize firmware upload when page loads
+document.addEventListener('DOMContentLoaded', function() {
+  initFirmwareUpload();
+});
