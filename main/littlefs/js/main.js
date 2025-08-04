@@ -53,7 +53,7 @@ function throttleSendLightness(uuid, value) {
 }
 
 function sendLightness(uuid, value) {
-  fetch("/set_lightness", {
+  fetch("/node/set_lightness", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}&lightness=${encodeURIComponent(value)}`
@@ -78,7 +78,7 @@ function unprovision(uuid) {
   button.disabled = true;
   button.textContent = 'Unprovisioning...';
 
-  fetch("/unprovision", {
+  fetch("/node/unprovision", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}`
@@ -103,7 +103,7 @@ function provision(uuid) {
   button.disabled = true;
   button.textContent = 'Provisioning...';
 
-  fetch("/provision", {
+  fetch("/node/provision", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}`
@@ -130,7 +130,7 @@ function sendMqttStatus(uuid) {
   button.disabled = true;
   button.textContent = 'Sending...';
 
-  fetch("/send_mqtt_status", {
+  fetch("/node/send_mqtt_status", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}`
@@ -154,7 +154,7 @@ function sendMqttDiscovery(uuid) {
   button.disabled = true;
   button.textContent = 'Sending...';
 
-  fetch("/send_mqtt_discovery", {
+  fetch("/node/send_mqtt_discovery", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `uuid=${encodeURIComponent(uuid)}`
@@ -179,7 +179,7 @@ function sendBridgeMqttDiscovery() {
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Sending...';
 
-  fetch("/send_bridge_mqtt_discovery", {
+  fetch("/mqtt/bridge_discovery", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: ""
@@ -203,7 +203,7 @@ function sendBridgeMqttStatus() {
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Sending...';
 
-  fetch("/send_bridge_mqtt_status", {
+  fetch("/mqtt/bridge_status", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: ""
@@ -234,7 +234,7 @@ function restartBridge() {
     button.disabled = true;
     button.innerHTML = '<span class="icon">⏳</span> Restarting...';
     
-    fetch("/restart_bridge", {
+    fetch("/bridge/restart", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: ""
@@ -266,7 +266,7 @@ function resetWiFi() {
     button.disabled = true;
     button.innerHTML = '<span class="icon">⏳</span> Resetting...';
     
-    fetch("/reset_wifi?" + Date.now(), {
+    fetch("/bridge/reset_wifi?" + Date.now(), {
       method: "POST",
       headers: { 
         "Content-Type": "application/x-www-form-urlencoded",
@@ -486,7 +486,7 @@ function loadSystemInfo() {
 
 // MQTT Configuration functions
 function loadMqttStatus() {
-  fetch("/api/mqtt/status")
+  fetch("/mqtt/status")
     .then(res => res.json())
     .then(data => {
       const statusEl = document.getElementById("mqtt-state");
@@ -548,7 +548,7 @@ function clearCredentials() {
     return;
   }
   
-  fetch("/api/mqtt/clear", {
+  fetch("/mqtt/clear", {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   })
@@ -593,7 +593,7 @@ function testConnection() {
   
   // Note: This would require a separate test endpoint
   // For now, we'll just save and see if it connects
-  fetch("/api/mqtt/config", {
+  fetch("/mqtt/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config)
@@ -708,7 +708,7 @@ document.addEventListener("click", function (e) {
     button.disabled = true;
     button.textContent = 'Renaming...';
 
-    fetch("/api/rename_node", {
+    fetch("/node/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uuid, name: newName })
@@ -753,7 +753,7 @@ document.getElementById("mqtt-config-form").addEventListener("submit", function(
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="icon">⏳</span> Saving...';
   
-  fetch("/api/mqtt/config", {
+  fetch("/mqtt/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config)

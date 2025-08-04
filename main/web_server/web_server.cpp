@@ -20,6 +20,11 @@
 static httpd_handle_t g_server = NULL;
 
 esp_err_t setup_handler(httpd_req_t *req);
+esp_err_t list_console_commands_handler(httpd_req_t *req);
+esp_err_t reset_wifi_handler(httpd_req_t *req);
+esp_err_t rename_node_handler(httpd_req_t *req);
+esp_err_t node_send_mqtt_status_handler(httpd_req_t *req);
+esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req);
 
 esp_err_t nodes_handler(httpd_req_t *req)
 {
@@ -55,14 +60,14 @@ esp_err_t nodes_handler(httpd_req_t *req)
                           "}\n"
                           "\n"
                           "function sendLightness(uuid, value) {\n"
-                          "  fetch('/set_lightness', {\n"
+                          "  fetch('/node/set_lightness', {\n"
                           "    method: 'POST',\n"
                           "    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n"
                           "    body: 'uuid=' + encodeURIComponent(uuid) + '&lightness=' + encodeURIComponent(value)\n"
                           "  }).catch(err => console.error('Failed to send lightness:', err));\n"
                           "}\n"
                           "function unprovisionNode(uuid) {"
-                          "fetch('/unprovision', {"
+                          "fetch('/node/unprovision', {"
                           "method: 'POST',"
                           " headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
                           "body: 'uuid=' + encodeURIComponent(uuid)"
@@ -70,7 +75,7 @@ esp_err_t nodes_handler(httpd_req_t *req)
                           "}"
 
                           "function provisionNode(uuid) {"
-                          "fetch('/provision', {"
+                          "fetch('/node/provision', {"
                           " method: 'POST',"
                           "  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },"
                           "   body: 'uuid=' + encodeURIComponent(uuid)"
@@ -135,7 +140,7 @@ esp_err_t nodes_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t provision_handler(httpd_req_t *req)
+esp_err_t node_provision_handler(httpd_req_t *req)
 {
     char buf[128] = {0};
     int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -157,7 +162,95 @@ esp_err_t provision_handler(httpd_req_t *req)
     }
 
     const Uuid128 uuid128{uuid};
-    provision_device(uuid128.raw());  // Starts provisioning
+    provision_device(uuid128.raw());
+
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t node_unprovision_handler(httpd_req_t *req)
+{
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
+
+    char uuid_str[33] = {0};
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+    }
+
+    const Uuid128 uuid128{uuid};
+    unprovision_device(uuid128);
+
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t node_send_mqtt_status_handler(httpd_req_t *req)
+{
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
+
+    char uuid_str[33] = {0};
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+    }
+
+    const Uuid128 uuid128{uuid};
+    if (auto node_info = node_manager().get_node(uuid128)) {
+        mqtt_node_send_status(node_info);
+    }
+
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req)
+{
+    char buf[128] = {0};
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
+
+    char uuid_str[33] = {0};
+    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
+        return ESP_FAIL;
+    }
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+    }
+
+    const Uuid128 uuid128{uuid};
+    if (auto node_info = node_manager().get_node(uuid128)) {
+        mqtt_send_discovery(node_info);
+    }
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -221,35 +314,6 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t unprovision_handler(httpd_req_t *req)
-{
-    char buf[128] = {0};
-    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
-        return ESP_FAIL;
-    }
-    buf[recv_len] = '\0';
-
-    char uuid_str[33] = {0};
-    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
-        return ESP_FAIL;
-    }
-
-    uint8_t uuid[16] = {0};
-    for (int i = 0; i < 16; i++)
-    {
-        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
-    }
-
-    // Call your function to re-provision the node
-    const Uuid128 dev_uuid{uuid};
-    unprovision_device(dev_uuid); // Your unprovisioning function
-
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -268,205 +332,172 @@ esp_err_t system_info_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t mqtt_status_handler(httpd_req_t *req)
+esp_err_t api_wildcard_handler(httpd_req_t *req)
+{
+    // Route based on URI path
+    if (strstr(req->uri, "/api/system_info")) {
+        return system_info_handler(req);
+    } else if (strstr(req->uri, "/api/console_commands")) {
+        return list_console_commands_handler(req);
+    } else {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
+        return ESP_FAIL;
+    }
+}
+
+esp_err_t mqtt_api_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     
-    const auto& creds = mqtt_credentials().get_credentials();
-    auto state = mqtt_credentials().get_connection_state();
-    std::string last_error = mqtt_credentials().get_last_error();
-    
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-        "{ \"state\": \"%s\", \"configured\": %s, \"broker_host\": \"%s\", \"broker_port\": %d, \"use_ssl\": %s, \"username\": \"%s\", \"last_error\": \"%s\" }",
-        mqtt_credentials().get_connection_state_string().c_str(),
-        creds.is_valid() ? "true" : "false",
-        creds.is_valid() ? creds.broker_host.c_str() : "",
-        creds.broker_port,
-        creds.use_ssl ? "true" : "false",
-        creds.is_valid() ? creds.username.c_str() : "",
-        last_error.c_str());
-    
-    httpd_resp_send(req, buf, -1);
-    return ESP_OK;
-}
-
-esp_err_t mqtt_config_handler(httpd_req_t *req)
-{
-    char buf[768] = {0};  // Reduced from 1024 - sufficient for typical MQTT JSON
-    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
-        return ESP_FAIL;
-    }
-    buf[recv_len] = '\0';
-    
-    // Parse JSON
-    cJSON *json = cJSON_Parse(buf);
-    if (!json) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
-    
-    mqtt_credentials_t new_creds;
-    
-    // Parse broker host
-    cJSON *broker_host = cJSON_GetObjectItem(json, "broker_host");
-    if (!broker_host || !cJSON_IsString(broker_host)) {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid broker_host");
-        return ESP_FAIL;
-    }
-    new_creds.broker_host = broker_host->valuestring;
-    
-    // Parse broker port
-    cJSON *broker_port = cJSON_GetObjectItem(json, "broker_port");
-    if (broker_port && cJSON_IsNumber(broker_port)) {
-        new_creds.broker_port = (uint16_t)broker_port->valueint;
+    // Extract action from URI path
+    const char* action = nullptr;
+    if (strstr(req->uri, "/status")) {
+        action = "status";
+    } else if (strstr(req->uri, "/config")) {
+        action = "config";
+    } else if (strstr(req->uri, "/clear")) {
+        action = "clear";
     } else {
-        new_creds.broker_port = 1883; // Default
-    }
-    
-    // Parse username
-    cJSON *username = cJSON_GetObjectItem(json, "username");
-    if (!username || !cJSON_IsString(username)) {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid username");
-        return ESP_FAIL;
-    }
-    new_creds.username = username->valuestring;
-    
-    // Parse password
-    cJSON *password = cJSON_GetObjectItem(json, "password");
-    if (!password || !cJSON_IsString(password)) {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid password");
-        return ESP_FAIL;
-    }
-    new_creds.password = password->valuestring;
-    
-    // Parse SSL flag
-    cJSON *use_ssl = cJSON_GetObjectItem(json, "use_ssl");
-    if (use_ssl && cJSON_IsBool(use_ssl)) {
-        new_creds.use_ssl = cJSON_IsTrue(use_ssl);
-    } else {
-        new_creds.use_ssl = false; // Default
-    }
-    
-    cJSON_Delete(json);
-    
-    // Validate credentials
-    std::string error_msg;
-    if (!mqtt_credentials().validate_credentials(new_creds, error_msg)) {
-        char error_response[256];
-        snprintf(error_response, sizeof(error_response), 
-                 "{ \"error\": \"Invalid credentials: %s\" }", error_msg.c_str());
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, error_response);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid MQTT API endpoint");
         return ESP_FAIL;
     }
     
-    // Save credentials
-    esp_err_t err = mqtt_credentials().save_credentials(new_creds);
-    if (err != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
-        return ESP_FAIL;
+    // Handle GET requests (status)
+    if (req->method == HTTP_GET) {
+        if (strcmp(action, "status") != 0) {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        
+        const auto& creds = mqtt_credentials().get_credentials();
+        std::string last_error = mqtt_credentials().get_last_error();
+        
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+            "{ \"state\": \"%s\", \"configured\": %s, \"broker_host\": \"%s\", \"broker_port\": %d, \"use_ssl\": %s, \"username\": \"%s\", \"last_error\": \"%s\" }",
+            mqtt_credentials().get_connection_state_string().c_str(),
+            creds.is_valid() ? "true" : "false",
+            creds.is_valid() ? creds.broker_host.c_str() : "",
+            creds.broker_port,
+            creds.use_ssl ? "true" : "false",
+            creds.is_valid() ? creds.username.c_str() : "",
+            last_error.c_str());
+        
+        httpd_resp_send(req, buf, -1);
+        return ESP_OK;
     }
     
-    // Restart MQTT client with new credentials
-    mqtt5_app_restart();
+    // Handle POST requests (config, clear)
+    if (req->method == HTTP_POST) {
+        if (strcmp(action, "clear") == 0) {
+            esp_err_t err = mqtt_credentials().clear_credentials();
+            
+            // Stop MQTT client since credentials are cleared
+            if (err == ESP_OK) {
+                mqtt5_app_stop();
+            }
+            
+            if (err == ESP_OK) {
+                httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials cleared successfully\" }", -1);
+            } else {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to clear credentials");
+            }
+            return ESP_OK;
+        }
+        
+        if (strcmp(action, "config") == 0) {
+            char buf[768] = {0};
+            int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+            if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+                return ESP_FAIL;
+            }
+            buf[recv_len] = '\0';
+            
+            // Parse JSON
+            cJSON *json = cJSON_Parse(buf);
+            if (!json) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+                return ESP_FAIL;
+            }
+            
+            mqtt_credentials_t new_creds;
+            
+            // Parse broker host
+            cJSON *broker_host = cJSON_GetObjectItem(json, "broker_host");
+            if (!broker_host || !cJSON_IsString(broker_host)) {
+                cJSON_Delete(json);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid broker_host");
+                return ESP_FAIL;
+            }
+            new_creds.broker_host = broker_host->valuestring;
+            
+            // Parse broker port
+            cJSON *broker_port = cJSON_GetObjectItem(json, "broker_port");
+            if (broker_port && cJSON_IsNumber(broker_port)) {
+                new_creds.broker_port = (uint16_t)broker_port->valueint;
+            } else {
+                new_creds.broker_port = 1883; // Default
+            }
+            
+            // Parse username
+            cJSON *username = cJSON_GetObjectItem(json, "username");
+            if (!username || !cJSON_IsString(username)) {
+                cJSON_Delete(json);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid username");
+                return ESP_FAIL;
+            }
+            new_creds.username = username->valuestring;
+            
+            // Parse password
+            cJSON *password = cJSON_GetObjectItem(json, "password");
+            if (!password || !cJSON_IsString(password)) {
+                cJSON_Delete(json);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid password");
+                return ESP_FAIL;
+            }
+            new_creds.password = password->valuestring;
+            
+            // Parse SSL flag
+            cJSON *use_ssl = cJSON_GetObjectItem(json, "use_ssl");
+            if (use_ssl && cJSON_IsBool(use_ssl)) {
+                new_creds.use_ssl = cJSON_IsTrue(use_ssl);
+            } else {
+                new_creds.use_ssl = false; // Default
+            }
+            
+            cJSON_Delete(json);
+            
+            // Validate credentials
+            std::string error_msg;
+            if (!mqtt_credentials().validate_credentials(new_creds, error_msg)) {
+                char error_response[256];
+                snprintf(error_response, sizeof(error_response), 
+                         "{ \"error\": \"Invalid credentials: %s\" }", error_msg.c_str());
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, error_response);
+                return ESP_FAIL;
+            }
+            
+            // Save credentials
+            esp_err_t err = mqtt_credentials().save_credentials(new_creds);
+            if (err != ESP_OK) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
+                return ESP_FAIL;
+            }
+            
+            // Restart MQTT client with new credentials
+            mqtt5_app_restart();
+            
+            // Send success response
+            httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials saved successfully\" }", -1);
+            return ESP_OK;
+        }
+    }
     
-    // Send success response
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials saved successfully\" }", -1);
-    
-    return ESP_OK;
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
+    return ESP_FAIL;
 }
 
-esp_err_t mqtt_clear_handler(httpd_req_t *req)
-{
-    esp_err_t err = mqtt_credentials().clear_credentials();
-    
-    // Stop MQTT client since credentials are cleared
-    if (err == ESP_OK) {
-        mqtt5_app_stop();
-    }
-    
-    httpd_resp_set_type(req, "application/json");
-    if (err == ESP_OK) {
-        httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials cleared successfully\" }", -1);
-    } else {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to clear credentials");
-    }
-    
-    return ESP_OK;
-}
-
-esp_err_t send_mqtt_status_handler(httpd_req_t *req)
-{
-    char buf[128] = {0};
-    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
-        return ESP_FAIL;
-    }
-    buf[recv_len] = '\0';
-
-    char uuid_str[33] = {0};
-    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
-        return ESP_FAIL;
-    }
-
-    uint8_t uuid[16] = {0};
-    for (int i = 0; i < 16; i++)
-    {
-        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
-    }
-
-    // Find the node by UUID and send MQTT status
-    const Uuid128 dev_uuid{uuid};
-    if (auto node_info = node_manager().get_node(dev_uuid))
-    {
-        mqtt_node_send_status(node_info);
-    }
-
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-esp_err_t send_mqtt_discovery_handler(httpd_req_t *req)
-{
-    char buf[128] = {0};
-    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
-        return ESP_FAIL;
-    }
-    buf[recv_len] = '\0';
-
-    char uuid_str[33] = {0};
-    if (sscanf(buf, "uuid=%32s", uuid_str) != 1 || strlen(uuid_str) != 32) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid UUID format");
-        return ESP_FAIL;
-    }
-
-    uint8_t uuid[16] = {0};
-    for (int i = 0; i < 16; i++)
-    {
-        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
-    }
-
-    // Find the node by UUID and send MQTT discovery
-    const Uuid128 dev_uuid{uuid};
-    if (auto node_info = node_manager().get_node(dev_uuid))
-    {
-        mqtt_send_discovery(node_info);
-    }
-
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
 
 esp_err_t nodes_json_handler(httpd_req_t *req)
 {
@@ -529,26 +560,84 @@ esp_err_t list_console_commands_handler(httpd_req_t *req) {
     return httpd_resp_sendstr_chunk(req, NULL);
 }
 
-esp_err_t send_bridge_mqtt_discovery_handler(httpd_req_t *req)
+esp_err_t bridge_wildcard_handler(httpd_req_t *req)
 {
-    send_bridge_discovery();
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
+    // All bridge operations require POST method
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+    
+    // Route bridge operations
+    if (strstr(req->uri, "/bridge/reset_wifi")) {
+        return reset_wifi_handler(req);
+    } else if (strstr(req->uri, "/bridge/restart")) {
+        // Handle restart bridge functionality
+        httpd_resp_send(req, NULL, 0);
+        esp_restart();
+        return ESP_OK;
+    }
+    
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Bridge operation not found");
+    return ESP_FAIL;
 }
 
-esp_err_t send_bridge_mqtt_status_handler(httpd_req_t *req)
+esp_err_t mqtt_wildcard_handler(httpd_req_t *req)
 {
-    publish_bridge_info("0.1.0");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
+    // Route MQTT operations
+    if (strstr(req->uri, "/mqtt/status") || strstr(req->uri, "/mqtt/config") || strstr(req->uri, "/mqtt/clear")) {
+        return mqtt_api_handler(req);
+    } else if (strstr(req->uri, "/mqtt/bridge_status")) {
+        // All bridge MQTT operations require POST method
+        if (req->method != HTTP_POST) {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        publish_bridge_info("0.1.0");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    } else if (strstr(req->uri, "/mqtt/bridge_discovery")) {
+        // All bridge MQTT operations require POST method
+        if (req->method != HTTP_POST) {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        send_bridge_discovery();
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "MQTT operation not found");
+    return ESP_FAIL;
 }
 
-esp_err_t restart_bridge_handler(httpd_req_t *req)
+esp_err_t node_wildcard_handler(httpd_req_t *req)
 {
-    httpd_resp_send(req, NULL, 0);
-    esp_restart();
-    return ESP_OK;
+    // All node operations require POST method
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+    
+    // Route node operations
+    if (strstr(req->uri, "/node/provision")) {
+        return node_provision_handler(req);
+    } else if (strstr(req->uri, "/node/unprovision")) {
+        return node_unprovision_handler(req);
+    } else if (strstr(req->uri, "/node/set_lightness")) {
+        return set_lightness_handler(req);
+    } else if (strstr(req->uri, "/node/rename")) {
+        return rename_node_handler(req);
+    } else if (strstr(req->uri, "/node/send_mqtt_status")) {
+        return node_send_mqtt_status_handler(req);
+    } else if (strstr(req->uri, "/node/send_mqtt_discovery")) {
+        return node_send_mqtt_discovery_handler(req);
+    }
+    
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Node operation not found");
+    return ESP_FAIL;
 }
+
 
 esp_err_t reset_wifi_handler(httpd_req_t *req)
 {
@@ -760,98 +849,58 @@ httpd_uri_t static_uri = {
         .handler = static_handler,
     };
 
-// Bridge handlers array for maintainable registration/unregistration
+// Logically grouped bridge handlers array using wildcards
 static httpd_uri_t bridge_handlers[] = {
+    // Bridge operations handler - /bridge/*
     {
-        .uri = "/api/rename_node",
+        .uri = "/bridge/*",
         .method = HTTP_POST,
-        .handler = rename_node_handler,
-        .user_ctx = nullptr
+        .handler = bridge_wildcard_handler,
+        .user_ctx = NULL
     },
+    // MQTT operations handler - /mqtt/*
+    {
+        .uri = "/mqtt/*",
+        .method = HTTP_GET,
+        .handler = mqtt_wildcard_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/mqtt/*",
+        .method = HTTP_POST,
+        .handler = mqtt_wildcard_handler,
+        .user_ctx = NULL
+    },
+    // Node operations handler - /node/*
+    {
+        .uri = "/node/*",
+        .method = HTTP_POST,
+        .handler = node_wildcard_handler,
+        .user_ctx = NULL
+    },
+    // Remaining API endpoints - /api/*
+    {
+        .uri = "/api/*",
+        .method = HTTP_GET,
+        .handler = api_wildcard_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/api/*",
+        .method = HTTP_POST,
+        .handler = api_wildcard_handler,
+        .user_ctx = NULL
+    },
+    // Specific GET endpoints that remain as-is
     {
         .uri = "/nodes",
         .method = HTTP_GET,
         .handler = nodes_handler,
     },
     {
-        .uri = "/set_lightness",
-        .method = HTTP_POST,
-        .handler = set_lightness_handler,
-    },
-    {
-        .uri = "/provision",
-        .method = HTTP_POST,
-        .handler = provision_handler,
-    },
-    {
-        .uri = "/unprovision",
-        .method = HTTP_POST,
-        .handler = unprovision_handler,
-    },
-    {
-        .uri = "/send_mqtt_status",
-        .method = HTTP_POST,
-        .handler = send_mqtt_status_handler,
-    },
-    {
-        .uri = "/send_mqtt_discovery",
-        .method = HTTP_POST,
-        .handler = send_mqtt_discovery_handler,
-    },
-    {
         .uri = "/nodes.json",
         .method = HTTP_GET,
         .handler = nodes_json_handler,
-    },
-    {
-        .uri = "/api/console_commands",
-        .method = HTTP_GET,
-        .handler = list_console_commands_handler,
-        .user_ctx = NULL
-    },
-    {
-        .uri = "/api/system_info",
-        .method = HTTP_GET,
-        .handler = system_info_handler,
-        .user_ctx = NULL
-    },
-    {
-        .uri = "/api/mqtt/status",
-        .method = HTTP_GET,
-        .handler = mqtt_status_handler,
-        .user_ctx = NULL
-    },
-    {
-        .uri = "/api/mqtt/config",
-        .method = HTTP_POST,
-        .handler = mqtt_config_handler,
-        .user_ctx = NULL
-    },
-    {
-        .uri = "/api/mqtt/clear",
-        .method = HTTP_POST,
-        .handler = mqtt_clear_handler,
-        .user_ctx = NULL
-    },
-    {
-        .uri = "/send_bridge_mqtt_discovery",
-        .method = HTTP_POST,
-        .handler = send_bridge_mqtt_discovery_handler,
-    },
-    {
-        .uri = "/send_bridge_mqtt_status",
-        .method = HTTP_POST,
-        .handler = send_bridge_mqtt_status_handler,
-    },
-    {
-        .uri = "/restart_bridge",
-        .method = HTTP_POST,
-        .handler = restart_bridge_handler,
-    },
-    {
-        .uri = "/reset_wifi",
-        .method = HTTP_POST,
-        .handler = reset_wifi_handler,
     },
     {
         .uri = "/",
