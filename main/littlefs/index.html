@@ -52,6 +52,65 @@
         <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
       </section>
 
+      <!-- MQTT Configuration Section -->
+      <section class="card mqtt-section">
+        <div class="section-header">
+          <h2>MQTT Configuration</h2>
+          <div class="connection-status" id="mqtt-status">
+            <span class="status-label">Status:</span>
+            <span class="status-value" id="mqtt-state">Loading...</span>
+          </div>
+        </div>
+        
+        <form id="mqtt-config-form" class="mqtt-form">
+          <div class="form-group">
+            <label for="broker-host">Broker Host:</label>
+            <input type="text" id="broker-host" name="broker_host" placeholder="192.168.1.100 or mqtt.example.com" required>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="broker-port">Port:</label>
+              <input type="number" id="broker-port" name="broker_port" value="1883" min="1" max="65535" required>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="use-ssl" name="use_ssl">
+                Use SSL/TLS
+              </label>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" placeholder="homeassistant" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" placeholder="Enter MQTT password" required>
+            <button type="button" class="btn btn-small toggle-password" onclick="togglePassword()">👁️</button>
+          </div>
+          
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+              <span class="icon">💾</span>
+              Save Configuration
+            </button>
+            <button type="button" class="btn btn-warning" onclick="testConnection()">
+              <span class="icon">🔧</span>
+              Test Connection
+            </button>
+            <button type="button" class="btn btn-danger" onclick="clearCredentials()">
+              <span class="icon">🗑️</span>
+              Clear
+            </button>
+          </div>
+        </form>
+        
+        <div id="mqtt-error" class="error-message" style="display: none;"></div>
+      </section>
+
       <!-- Bridge Controls Section -->
       <section class="card controls-section">
         <div class="section-header">

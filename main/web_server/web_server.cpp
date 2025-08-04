@@ -10,6 +10,7 @@
 #include <cJSON.h>
 #include <mqtt/mqtt_control.h>
 #include <mqtt/mqtt_bridge.h>
+#include <mqtt/mqtt_credentials.h>
 #include "wifi/wifi_provisioning.h"
 #include "esp_heap_caps.h"
 
@@ -264,6 +265,140 @@ esp_err_t system_info_handler(httpd_req_t *req)
         free_heap, min_heap, total_heap, total_heap - free_heap);
     
     httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t mqtt_status_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    
+    const auto& creds = mqtt_credentials().get_credentials();
+    auto state = mqtt_credentials().get_connection_state();
+    std::string last_error = mqtt_credentials().get_last_error();
+    
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "{ \"state\": \"%s\", \"configured\": %s, \"broker_host\": \"%s\", \"broker_port\": %d, \"use_ssl\": %s, \"username\": \"%s\", \"last_error\": \"%s\" }",
+        mqtt_credentials().get_connection_state_string().c_str(),
+        creds.is_valid() ? "true" : "false",
+        creds.is_valid() ? creds.broker_host.c_str() : "",
+        creds.broker_port,
+        creds.use_ssl ? "true" : "false",
+        creds.is_valid() ? creds.username.c_str() : "",
+        last_error.c_str());
+    
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t mqtt_config_handler(httpd_req_t *req)
+{
+    char buf[768] = {0};  // Reduced from 1024 - sufficient for typical MQTT JSON
+    int recv_len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (recv_len <= 0 || recv_len >= sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[recv_len] = '\0';
+    
+    // Parse JSON
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    
+    mqtt_credentials_t new_creds;
+    
+    // Parse broker host
+    cJSON *broker_host = cJSON_GetObjectItem(json, "broker_host");
+    if (!broker_host || !cJSON_IsString(broker_host)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid broker_host");
+        return ESP_FAIL;
+    }
+    new_creds.broker_host = broker_host->valuestring;
+    
+    // Parse broker port
+    cJSON *broker_port = cJSON_GetObjectItem(json, "broker_port");
+    if (broker_port && cJSON_IsNumber(broker_port)) {
+        new_creds.broker_port = (uint16_t)broker_port->valueint;
+    } else {
+        new_creds.broker_port = 1883; // Default
+    }
+    
+    // Parse username
+    cJSON *username = cJSON_GetObjectItem(json, "username");
+    if (!username || !cJSON_IsString(username)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid username");
+        return ESP_FAIL;
+    }
+    new_creds.username = username->valuestring;
+    
+    // Parse password
+    cJSON *password = cJSON_GetObjectItem(json, "password");
+    if (!password || !cJSON_IsString(password)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid password");
+        return ESP_FAIL;
+    }
+    new_creds.password = password->valuestring;
+    
+    // Parse SSL flag
+    cJSON *use_ssl = cJSON_GetObjectItem(json, "use_ssl");
+    if (use_ssl && cJSON_IsBool(use_ssl)) {
+        new_creds.use_ssl = cJSON_IsTrue(use_ssl);
+    } else {
+        new_creds.use_ssl = false; // Default
+    }
+    
+    cJSON_Delete(json);
+    
+    // Validate credentials
+    std::string error_msg;
+    if (!mqtt_credentials().validate_credentials(new_creds, error_msg)) {
+        char error_response[256];
+        snprintf(error_response, sizeof(error_response), 
+                 "{ \"error\": \"Invalid credentials: %s\" }", error_msg.c_str());
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, error_response);
+        return ESP_FAIL;
+    }
+    
+    // Save credentials
+    esp_err_t err = mqtt_credentials().save_credentials(new_creds);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
+        return ESP_FAIL;
+    }
+    
+    // Restart MQTT client with new credentials
+    mqtt5_app_restart();
+    
+    // Send success response
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials saved successfully\" }", -1);
+    
+    return ESP_OK;
+}
+
+esp_err_t mqtt_clear_handler(httpd_req_t *req)
+{
+    esp_err_t err = mqtt_credentials().clear_credentials();
+    
+    // Stop MQTT client since credentials are cleared
+    if (err == ESP_OK) {
+        mqtt5_app_stop();
+    }
+    
+    httpd_resp_set_type(req, "application/json");
+    if (err == ESP_OK) {
+        httpd_resp_send(req, "{ \"success\": true, \"message\": \"Credentials cleared successfully\" }", -1);
+    } else {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to clear credentials");
+    }
+    
     return ESP_OK;
 }
 
@@ -681,6 +816,24 @@ static httpd_uri_t bridge_handlers[] = {
         .user_ctx = NULL
     },
     {
+        .uri = "/api/mqtt/status",
+        .method = HTTP_GET,
+        .handler = mqtt_status_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/api/mqtt/config",
+        .method = HTTP_POST,
+        .handler = mqtt_config_handler,
+        .user_ctx = NULL
+    },
+    {
+        .uri = "/api/mqtt/clear",
+        .method = HTTP_POST,
+        .handler = mqtt_clear_handler,
+        .user_ctx = NULL
+    },
+    {
         .uri = "/send_bridge_mqtt_discovery",
         .method = HTTP_POST,
         .handler = send_bridge_mqtt_discovery_handler,
@@ -749,6 +902,15 @@ void start_webserver(void)
 
      config.uri_match_fn = httpd_uri_match_wildcard;
      config.max_uri_handlers = 30;
+     config.stack_size = 5120;          // Still need 5120 or we can have stack overflow issues when the bridge connects to mqtt, or some other reason ?
+     
+     // Improve connection management to prevent file descriptor leaks
+     config.max_open_sockets = 4;       // Conservative: 4 client sockets (7 total - 3 internal)
+     config.lru_purge_enable = true;    // Enable automatic cleanup of old connections
+     config.keep_alive_enable = false;  // Disable keep-alive to force connection closure
+     config.close_fn = NULL;            // Use default close function
+     config.recv_wait_timeout = 3;      // Reduced from 5 - more aggressive cleanup
+     config.send_wait_timeout = 3;      // Reduced from 5 - more aggressive cleanup
 
     if (httpd_start(&server, &config) == ESP_OK)
     {

@@ -399,10 +399,24 @@ function createCommandElement(command) {
 }
 
 // WebSocket log handling
+let reconnectTimer = null;
+let isReconnecting = false;
+
 function startLogSocket() {
+  if (isReconnecting) return;
+  
   const ws = new WebSocket("ws://" + location.host + "/ws/logs");
   const logOutput = document.getElementById("log-output");
   const autoScrollCheckbox = document.getElementById("auto-scroll");
+
+  ws.onopen = () => {
+    console.log("WebSocket connected");
+    isReconnecting = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
 
   ws.onmessage = event => {
     if (!logOutput) return;
@@ -425,14 +439,27 @@ function startLogSocket() {
     }
   };
 
-  ws.onclose = () => setTimeout(startLogSocket, 2000);
-  ws.onerror = () => ws.close();
+  ws.onclose = (event) => {
+    console.log("WebSocket closed:", event.code, event.reason);
+    if (!isReconnecting) {
+      isReconnecting = true;
+      reconnectTimer = setTimeout(() => {
+        startLogSocket();
+      }, 3000); // Wait 3 seconds before reconnecting
+    }
+  };
+
+  ws.onerror = (error) => {
+    console.error("WebSocket error:", error);
+    ws.close();
+  };
   
   // Handle auto-scroll checkbox
-  if (autoScrollCheckbox) {
+  if (autoScrollCheckbox && !autoScrollCheckbox.hasEventListener) {
     autoScrollCheckbox.addEventListener('change', (e) => {
       logAutoScroll = e.target.checked;
     });
+    autoScrollCheckbox.hasEventListener = true;
   }
 }
 
@@ -457,6 +484,139 @@ function loadSystemInfo() {
     });
 }
 
+// MQTT Configuration functions
+function loadMqttStatus() {
+  fetch("/api/mqtt/status")
+    .then(res => res.json())
+    .then(data => {
+      const statusEl = document.getElementById("mqtt-state");
+      if (statusEl) {
+        statusEl.textContent = data.state;
+        statusEl.className = `status-value ${data.state}`;
+      }
+      
+      // Populate form if configured
+      if (data.configured) {
+        document.getElementById("broker-host").value = data.broker_host || '';
+        document.getElementById("broker-port").value = data.broker_port || 1883;
+        document.getElementById("username").value = data.username || '';
+        document.getElementById("use-ssl").checked = data.use_ssl || false;
+        // Don't populate password for security
+      }
+      
+      // Show error if any
+      if (data.last_error) {
+        showMqttError(data.last_error);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load MQTT status:', err);
+      const statusEl = document.getElementById("mqtt-state");
+      if (statusEl) {
+        statusEl.textContent = 'error';
+        statusEl.className = 'status-value network_error';
+      }
+    });
+}
+
+function showMqttError(message) {
+  const errorEl = document.getElementById("mqtt-error");
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+    setTimeout(() => {
+      errorEl.style.display = 'none';
+    }, 5000);
+  }
+}
+
+function togglePassword() {
+  const passwordInput = document.getElementById("password");
+  const toggleBtn = document.querySelector(".toggle-password");
+  
+  if (passwordInput.type === "password") {
+    passwordInput.type = "text";
+    toggleBtn.textContent = "🙈";
+  } else {
+    passwordInput.type = "password";
+    toggleBtn.textContent = "👁️";
+  }
+}
+
+function clearCredentials() {
+  if (!confirm("Are you sure you want to clear MQTT credentials? This will disconnect the bridge from MQTT.")) {
+    return;
+  }
+  
+  fetch("/api/mqtt/clear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      showToast("MQTT credentials cleared successfully", 'success');
+      document.getElementById("mqtt-config-form").reset();
+      loadMqttStatus();
+    } else {
+      showMqttError("Failed to clear credentials");
+    }
+  })
+  .catch(err => {
+    console.error('Failed to clear credentials:', err);
+    showMqttError("Network error clearing credentials");
+  });
+}
+
+function testConnection() {
+  const form = document.getElementById("mqtt-config-form");
+  const formData = new FormData(form);
+  
+  const config = {
+    broker_host: formData.get("broker_host"),
+    broker_port: parseInt(formData.get("broker_port")),
+    username: formData.get("username"),
+    password: formData.get("password"),
+    use_ssl: formData.has("use_ssl")
+  };
+  
+  // Basic validation
+  if (!config.broker_host || !config.username || !config.password) {
+    showMqttError("Please fill in all required fields");
+    return;
+  }
+  
+  const button = event.target;
+  const originalText = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="icon">⏳</span> Testing...';
+  
+  // Note: This would require a separate test endpoint
+  // For now, we'll just save and see if it connects
+  fetch("/api/mqtt/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config)
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      showToast("Configuration saved. Check connection status above.", 'success');
+      loadMqttStatus();
+    } else {
+      showMqttError(data.error || "Failed to save configuration");
+    }
+  })
+  .catch(err => {
+    console.error('Failed to test connection:', err);
+    showMqttError("Network error testing connection");
+  })
+  .finally(() => {
+    button.disabled = false;
+    button.innerHTML = originalText;
+  });
+}
+
 // Main initialization
 document.addEventListener("DOMContentLoaded", function () {
   // Start WebSocket connection for logs
@@ -465,8 +625,14 @@ document.addEventListener("DOMContentLoaded", function () {
   // Load system information
   loadSystemInfo();
   
+  // Load MQTT status
+  loadMqttStatus();
+  
   // Refresh system info every 30 seconds
   setInterval(loadSystemInfo, 30000);
+  
+  // Refresh MQTT status every 10 seconds
+  setInterval(loadMqttStatus, 10000);
   
   // Load nodes data
   fetch("/nodes.json")
@@ -561,4 +727,52 @@ document.addEventListener("click", function (e) {
       button.textContent = 'Rename';
     });
   }
+});
+
+// MQTT form submission handler
+document.getElementById("mqtt-config-form").addEventListener("submit", function(e) {
+  e.preventDefault();
+  
+  const formData = new FormData(e.target);
+  const config = {
+    broker_host: formData.get("broker_host"),
+    broker_port: parseInt(formData.get("broker_port")),
+    username: formData.get("username"),
+    password: formData.get("password"),
+    use_ssl: formData.has("use_ssl")
+  };
+  
+  // Basic validation
+  if (!config.broker_host || !config.username || !config.password) {
+    showMqttError("Please fill in all required fields");
+    return;
+  }
+  
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  const originalText = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="icon">⏳</span> Saving...';
+  
+  fetch("/api/mqtt/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config)
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      showToast("MQTT configuration saved successfully", 'success');
+      loadMqttStatus();
+    } else {
+      showMqttError(data.error || "Failed to save configuration");
+    }
+  })
+  .catch(err => {
+    console.error('Failed to save MQTT config:', err);
+    showMqttError("Network error saving configuration");
+  })
+  .finally(() => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalText;
+  });
 });
