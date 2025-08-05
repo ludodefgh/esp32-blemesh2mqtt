@@ -401,16 +401,17 @@ function createCommandElement(command) {
 // WebSocket log handling
 let reconnectTimer = null;
 let isReconnecting = false;
+let currentWebSocket = null;
 
 function startLogSocket() {
-  if (isReconnecting) return;
+  if (isReconnecting || currentWebSocket) return;
   
   const ws = new WebSocket("ws://" + location.host + "/ws/logs");
+  currentWebSocket = ws;
   const logOutput = document.getElementById("log-output");
   const autoScrollCheckbox = document.getElementById("auto-scroll");
 
   ws.onopen = () => {
-    console.log("WebSocket connected");
     isReconnecting = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -440,7 +441,7 @@ function startLogSocket() {
   };
 
   ws.onclose = (event) => {
-    console.log("WebSocket closed:", event.code, event.reason);
+    currentWebSocket = null;
     if (!isReconnecting) {
       isReconnecting = true;
       reconnectTimer = setTimeout(() => {
@@ -450,7 +451,7 @@ function startLogSocket() {
   };
 
   ws.onerror = (error) => {
-    console.error("WebSocket error:", error);
+    currentWebSocket = null;
     ws.close();
   };
   
@@ -462,6 +463,15 @@ function startLogSocket() {
     autoScrollCheckbox.hasEventListener = true;
   }
 }
+
+// Cleanup WebSocket on page unload
+window.addEventListener('beforeunload', function() {
+  if (currentWebSocket) {
+    console.log("Closing WebSocket before page unload");
+    currentWebSocket.close();
+    currentWebSocket = null;
+  }
+});
 
 // System info functions
 function loadSystemInfo() {
@@ -619,6 +629,9 @@ function testConnection() {
 
 // Main initialization
 document.addEventListener("DOMContentLoaded", function () {
+  // Initialize firmware upload
+  initFirmwareUpload();
+  
   // Start WebSocket connection for logs
   startLogSocket();
   
@@ -992,7 +1005,4 @@ function formatFileSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Initialize firmware upload when page loads
-document.addEventListener('DOMContentLoaded', function() {
-  initFirmwareUpload();
-});
+// Firmware upload initialization moved to main DOMContentLoaded handler above
