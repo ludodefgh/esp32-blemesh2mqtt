@@ -253,7 +253,6 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                               node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                                              common.ctx.addr = node->unicast;
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_SRV;
@@ -279,7 +278,6 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                               node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                                              common.ctx.addr = node->unicast;
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV;
@@ -305,8 +303,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                               node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                                              common.ctx.addr = node->unicast;
-                                              set_state.model_app_bind.element_addr = node->unicast + 1;
+                                              set_state.model_app_bind.element_addr = node->unicast  + node->light_ctl_temp_offset;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
                                               set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
@@ -327,7 +324,6 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                               node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                                              common.ctx.addr = node->unicast;
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_SRV;

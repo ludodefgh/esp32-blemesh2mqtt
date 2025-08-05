@@ -1,5 +1,6 @@
 #include "websocket_logger.h"
 #include "esp_log.h"
+#include "esp_log_write.h"
 #include <vector>
 #include <mutex>
 #include <algorithm>
@@ -10,6 +11,7 @@ static std::vector<int> ws_clients;
 static std::mutex ws_mutex;
 static RingbufHandle_t log_ringbuf = nullptr;
 static const char *TAG = "ws_logger";
+static vprintf_like_t original_vprintf = nullptr;
 
 // WebSocket connection management constants
 static constexpr size_t MAX_WS_CLIENTS = 4;
@@ -18,15 +20,17 @@ static constexpr size_t MAX_WS_CLIENTS = 4;
 static bool add_ws_client(int fd) {
     std::lock_guard<std::mutex> lock(ws_mutex);
     if (ws_clients.size() >= MAX_WS_CLIENTS) {
-        ESP_LOGW(TAG, "WebSocket client limit reached (%zu), rejecting fd: %d", MAX_WS_CLIENTS, fd);
+        // WebSocket client limit reached, rejecting connection
         return false;
     }
     if (std::find(ws_clients.begin(), ws_clients.end(), fd) == ws_clients.end()) {
         ws_clients.push_back(fd);
-        ESP_LOGI(TAG, "WebSocket client connected, fd: %d, total clients: %zu", fd, ws_clients.size());
+        // WebSocket client connected
         return true;
+    } else {
+        // WebSocket client already exists, not adding again
+        return false;
     }
-    return false;
 }
 
 // Helper function to safely remove a client
@@ -35,7 +39,7 @@ static void remove_ws_client(int fd) {
     auto it = std::find(ws_clients.begin(), ws_clients.end(), fd);
     if (it != ws_clients.end()) {
         ws_clients.erase(it);
-        ESP_LOGI(TAG, "WebSocket client disconnected, fd: %d, remaining clients: %zu", fd, ws_clients.size());
+        // WebSocket client disconnected
     }
 }
 
@@ -44,18 +48,33 @@ static esp_err_t ws_handler(httpd_req_t *req)
     int fd = httpd_req_to_sockfd(req);
     httpd_ws_client_info_t ws_info = httpd_ws_get_fd_info(ws_server, fd);
     
+    ESP_LOGD(TAG, "ws_handler called: fd=%d, ws_info=%d", fd, ws_info);
+    
     if (ws_info == HTTPD_WS_CLIENT_INVALID) {
-        ESP_LOGW(TAG, "Invalid WebSocket client fd: %d", fd);
+        // Invalid WebSocket client
         return ESP_FAIL;
     }
     
     if (ws_info == HTTPD_WS_CLIENT_WEBSOCKET) {
-        // New WebSocket connection - use safe helper
-        if (!add_ws_client(fd)) {
-            ESP_LOGW(TAG, "Failed to add WebSocket client fd: %d", fd);
-            return ESP_FAIL;
+        // Check if this is a new connection or an existing one (without double-locking)
+        bool already_exists = false;
+        {
+            std::lock_guard<std::mutex> lock(ws_mutex);
+            already_exists = std::find(ws_clients.begin(), ws_clients.end(), fd) != ws_clients.end();
         }
+        
+        // Checking WebSocket client status
+        
+        if (!already_exists) {
+            // New WebSocket connection - use safe helper
+            if (!add_ws_client(fd)) {
+                // Failed to add WebSocket client
+                return ESP_FAIL;
+            }
+        }
+        // If client already exists, this is just a regular WebSocket frame, continue normally
     } else if (ws_info == HTTPD_WS_CLIENT_HTTP) {
+        // HTTP to WebSocket upgrade
         // Upgrade to WebSocket
         httpd_ws_frame_t ws_pkt;
         memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
@@ -73,7 +92,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
 void websocket_logger_register_uri(httpd_handle_t server)
 {
-    ESP_LOGE(TAG, "websocket_logger_register_uri");
+    ESP_LOGI(TAG, "WebSocket logger URI registered at /ws/logs");
     httpd_uri_t uri = {
         .uri = "/ws/logs",
         .method = HTTP_GET,
@@ -87,16 +106,21 @@ void websocket_logger_register_uri(httpd_handle_t server)
 int log_ws_vprintf(const char *fmt, va_list args)
 {
     char line[256];
-
     int len = vsnprintf(line, sizeof(line), fmt, args);
-    vprintf(fmt, args); // still output to UART
+    
+    // Use original vprintf to avoid recursive logging
+    if (original_vprintf) {
+        original_vprintf(fmt, args);
+    }
 
-    if (log_ringbuf)
+    // Prevent recursive logging: don't send ws_logger messages to WebSocket
+    if (log_ringbuf && !strstr(line, "ws_logger"))
     {
         BaseType_t result = xRingbufferSend(log_ringbuf, line, len + 1, 0); // include null terminator
         if (result != pdTRUE)
         {
-            printf("Failed to send log line to ringbuffer");
+            // Use printf directly for error logging to avoid recursion
+            printf("Failed to send log line to ringbuffer\n");
         }
     }
 
@@ -127,18 +151,21 @@ void ws_log_sender_task(void *arg)
             frame.len = strlen(line);
             frame.final = true;
 
+            // Sending log to WebSocket clients
+
             for (int fd : clients_copy) {
                 // Check if client is still valid before sending
                 httpd_ws_client_info_t ws_info = httpd_ws_get_fd_info(ws_server, fd);
                 if (ws_info == HTTPD_WS_CLIENT_INVALID) {
-                    ESP_LOGW(TAG, "Client fd %d is invalid, marking for removal", fd);
+                    // Client is invalid, marking for removal
                     failed_clients.push_back(fd);
                     continue;
                 }
                 
+                // Sending to WebSocket client
                 esp_err_t ret = httpd_ws_send_frame_async(ws_server, fd, &frame);
                 if (ret != ESP_OK) {
-                    ESP_LOGW(TAG, "Failed to send to WebSocket client fd: %d, error: %s", fd, esp_err_to_name(ret));
+                    // Failed to send to WebSocket client
                     failed_clients.push_back(fd);
                 }
             }
@@ -150,7 +177,7 @@ void ws_log_sender_task(void *arg)
                     auto it = std::find(ws_clients.begin(), ws_clients.end(), fd);
                     if (it != ws_clients.end()) {
                         ws_clients.erase(it);
-                        ESP_LOGW(TAG, "Removed failed WebSocket client fd: %d", fd);
+                        // Removed failed WebSocket client
                     }
                 }
             }
@@ -189,7 +216,7 @@ void ws_cleanup_task(void *arg)
                 auto it = std::find(ws_clients.begin(), ws_clients.end(), fd);
                 if (it != ws_clients.end()) {
                     ws_clients.erase(it);
-                    ESP_LOGW(TAG, "Cleanup: Removed stale WebSocket client fd: %d", fd);
+                    // Cleanup: Removed stale WebSocket client
                 }
             }
         }
@@ -197,7 +224,7 @@ void ws_cleanup_task(void *arg)
         {
             std::lock_guard<std::mutex> lock(ws_mutex);
             if (!ws_clients.empty()) {
-                ESP_LOGD(TAG, "WebSocket cleanup: %zu active clients", ws_clients.size());
+                // WebSocket cleanup running
             }
         }
     }
@@ -215,7 +242,9 @@ void websocket_logger_install()
     }
 
     xTaskCreate(ws_log_sender_task, "ws_log_sender", 3072, nullptr, 5, nullptr);  // Reduced from 4096
-    xTaskCreate(ws_cleanup_task, "ws_cleanup", 1536, nullptr, 2, nullptr);        // Reduced from 2048, lowered priority
-    esp_log_set_vprintf(log_ws_vprintf);
+    xTaskCreate(ws_cleanup_task, "ws_cleanup", 2048, nullptr, 2, nullptr);        // Increased stack size to prevent overflow
+    
+    // Store original vprintf function before replacing it
+    original_vprintf = esp_log_set_vprintf(log_ws_vprintf);
 }
 

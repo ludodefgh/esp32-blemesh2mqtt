@@ -226,31 +226,5 @@
 
   <script src="/js/main.js"></script>
 
-  <script>
-    function startLogSocket() {
-  const ws = new WebSocket("ws://" + location.host + "/ws/logs");
-
-  ws.onmessage = event => {
-    const log = document.getElementById("log-output");
-    const line = event.data;
-
-    let cls = "log-default";
-    if (line.startsWith('E')) cls = "log-error";
-    else if (line.startsWith('W')) cls = "log-warning";
-    else if (line.startsWith('I')) cls = "log-info";
-
-    const div = document.createElement("div");
-    div.className = cls;
-    div.textContent = line;
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-  };
-
-  ws.onclose = () => setTimeout(startLogSocket, 2000);
-  ws.onerror = () => ws.close();
-}
-startLogSocket();
-</script>
-
 </body>
 </html>
