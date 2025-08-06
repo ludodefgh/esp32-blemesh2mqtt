@@ -97,7 +97,10 @@
     "cinttypes": "cpp",
     "variant": "cpp",
     "*.inc": "cpp",
-    "queue": "cpp"
+    "queue": "cpp",
+    "codecvt": "cpp",
+    "ranges": "cpp",
+    "shared_mutex": "cpp"
   },
   "files.autoSave": "afterDelay",
   "editor.fontSize": 13

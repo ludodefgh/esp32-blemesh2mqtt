@@ -25,6 +25,7 @@
 #include "wifi/wifi_provisioning.h"
 #include "wifi/wifi_station.h"
 #include "wifi/wifi_commands.h"
+#include "security/credential_encryption.h"
 
 #define TAG "EXAMPLE"
 
@@ -140,19 +141,27 @@ void ble_mesh_get_dev_uuid(uint8_t *dev_uuid)
     }
 }
 
+
 extern "C" void app_main()
 {
     esp_err_t err;
     
     ESP_LOGI(TAG, "Initializing...");
 
+    // Initialize NVS
     err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES)
-    {
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    // Initialize credential encryption system
+    err = CredentialEncryption::instance().initialize();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize credential encryption: %s", esp_err_to_name(err));
+        return;
+    }
 
     err = bluetooth_init();
     if (err)
