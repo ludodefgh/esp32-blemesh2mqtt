@@ -267,7 +267,7 @@ void publish_bridge_info(const char *version)
     CJsonPtr bridge_info_json = create_bridge_info_json(version);
     char *json_data = cJSON_PrintUnformatted(bridge_info_json.get());
     int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_state_topic(), json_data, 0, 0, 0);
-    ESP_LOGV(TAG, "sent bridge info publish successful, msg_id=%d", msg_id);
+    ESP_LOGV(TAG, "publish_bridge_info, msg_id=%d", msg_id);
     cJSON_free(json_data);
 }
 
@@ -388,4 +388,7 @@ void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)
     
     msg_id = esp_mqtt_client_subscribe(client, get_bridge_restart_set_topic(), 0);
     ESP_LOGI(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);
+
+    msg_id = esp_mqtt_client_subscribe(client, "homeassistant/status", 0);
+    ESP_LOGI(TAG, "sent homeassistant/status subscribe successful, msg_id=%d", msg_id);
 }
