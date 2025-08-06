@@ -26,6 +26,8 @@ static esp_netif_t* s_sta_netif = NULL;
 static wifi_ap_record_extended_t* s_scan_results = NULL;
 static uint16_t s_scan_count = 0;
 static EventGroupHandle_t s_wifi_event_group;
+static bool s_scan_in_progress = false;
+static bool s_mode_switched_for_scan = false;
 
 static char ip_address[16] = {0};
 
@@ -56,7 +58,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
             case WIFI_EVENT_AP_STACONNECTED:
                 {
                     wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-                    ESP_LOGI(TAG, "Station connected: MAC=" MACSTR, MAC2STR(event->mac));
+                    ESP_LOGI(TAG, "Station connected: MAC=" MACSTR ", waiting for DHCP IP assignment", MAC2STR(event->mac));
                 }
                 break;
                 
@@ -90,7 +92,42 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 break;
                 
             case WIFI_EVENT_SCAN_DONE:
-                ESP_LOGI(TAG, "WiFi scan completed");
+                {
+                    ESP_LOGI(TAG, "WiFi scan completed");
+                    s_scan_in_progress = false;
+                    
+                    // Process scan results asynchronously
+                    uint16_t max_aps = 20;
+                    wifi_ap_record_t* ap_records = (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * max_aps);
+                    if (ap_records) {
+                        esp_err_t err = esp_wifi_scan_get_ap_records(&max_aps, ap_records);
+                        if (err == ESP_OK) {
+                            // Free previous results
+                            if (s_scan_results) {
+                                free(s_scan_results);
+                            }
+                            
+                            s_scan_results = (wifi_ap_record_extended_t*)malloc(sizeof(wifi_ap_record_extended_t) * max_aps);
+                            if (s_scan_results) {
+                                s_scan_count = max_aps;
+                                for (int i = 0; i < max_aps; i++) {
+                                    strcpy(s_scan_results[i].ssid, (char*)ap_records[i].ssid);
+                                    s_scan_results[i].rssi = ap_records[i].rssi;
+                                    s_scan_results[i].authmode = ap_records[i].authmode;
+                                }
+                                ESP_LOGI(TAG, "Processed %d WiFi networks from scan", s_scan_count);
+                            } else {
+                                ESP_LOGE(TAG, "Failed to allocate memory for scan results");
+                                s_scan_count = 0;
+                            }
+                        } else {
+                            ESP_LOGE(TAG, "Failed to get scan results: %s", esp_err_to_name(err));
+                        }
+                        free(ap_records);
+                    } else {
+                        ESP_LOGE(TAG, "Failed to allocate memory for AP records");
+                    }
+                }
                 break;
                 
             default:
@@ -108,6 +145,32 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                     xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
                     if (s_event_callback) {
                         s_event_callback(s_provisioning_state, event_data);
+                    }
+                }
+                break;
+                
+            case IP_EVENT_AP_STAIPASSIGNED:
+                {
+                    ip_event_ap_staipassigned_t* event = (ip_event_ap_staipassigned_t*) event_data;
+                    ESP_LOGI(TAG, "DHCP assigned IP " IPSTR " to station MAC=" MACSTR, 
+                             IP2STR(&event->ip), MAC2STR(event->mac));
+                    
+                    // Now it's safe to switch to APSTA mode - client has IP and can use WiFi scanning
+                    wifi_mode_t current_mode;
+                    esp_err_t err = esp_wifi_get_mode(&current_mode);
+                    if (err == ESP_OK && current_mode == WIFI_MODE_AP) {
+                        ESP_LOGI(TAG, "Switching to APSTA mode now that client has IP address");
+                        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+                        if (err != ESP_OK) {
+                            ESP_LOGW(TAG, "Failed to switch to APSTA mode: %s", esp_err_to_name(err));
+                        } else {
+                            ESP_LOGI(TAG, "Successfully switched to APSTA mode - WiFi scanning now available");
+                            
+                            // Start a background WiFi scan to populate the list
+                            ESP_LOGI(TAG, "Starting background WiFi scan to populate network list");
+                            vTaskDelay(pdMS_TO_TICKS(500)); // Give mode switch time to complete
+                            wifi_provisioning_scan_start();
+                        }
                     }
                 }
                 break;
@@ -141,6 +204,7 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     if (!event_handlers_registered) {
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &wifi_event_handler, NULL, NULL));
         event_handlers_registered = true;
     }
 
@@ -176,12 +240,24 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     esp_netif_str_to_ip4("255.255.255.0", &ip_info.netmask);
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.gw);
     
-    ESP_ERROR_CHECK(esp_netif_dhcps_stop(s_ap_netif));
+    // Force clean DHCP server state
+    ESP_LOGI(TAG, "Stopping any existing DHCP server...");
+    esp_err_t stop_err = esp_netif_dhcps_stop(s_ap_netif);
+    if (stop_err == ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED) {
+        ESP_LOGW(TAG, "DHCP server was not running");
+    } else if (stop_err != ESP_OK) {
+        ESP_LOGW(TAG, "DHCP stop failed: %s", esp_err_to_name(stop_err));
+    } else {
+        ESP_LOGI(TAG, "DHCP server stopped successfully");
+    }
+    
+    // Small delay to ensure clean state
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
     
-    uint32_t retry_time = 5;
-    ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_IP_REQUEST_RETRY_TIME, 
-                                           &retry_time, sizeof(retry_time))); // 5 seconds retry
+    // Keep DHCP configuration simple - let ESP-IDF handle defaults
+    ESP_LOGI(TAG, "Using default DHCP server configuration for maximum compatibility");
     
     // Set DHCP Option 114 for modern captive portal detection (RFC 8910)
     char captive_portal_uri[] = "http://192.168.4.1/setup";
@@ -197,22 +273,54 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     }
     
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    // Start in AP-only mode for faster client connections
+    ESP_LOGI(TAG, "Starting in AP mode for faster client connections");
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    
+    // Wait for WiFi AP to be fully started before configuring DHCP
+    ESP_LOGI(TAG, "Waiting for WiFi AP to fully start...");
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
+    // Debug network interface state before starting DHCP
+    esp_netif_ip_info_t current_ip;
+    esp_netif_get_ip_info(s_ap_netif, &current_ip);
+    ESP_LOGI(TAG, "AP interface IP: " IPSTR ", Gateway: " IPSTR ", Netmask: " IPSTR, 
+             IP2STR(&current_ip.ip), IP2STR(&current_ip.gw), IP2STR(&current_ip.netmask));
+    
+    // Check if DHCP server is already running
+    esp_netif_dhcp_status_t dhcp_status;
+    esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
+    ESP_LOGI(TAG, "DHCP server status before start: %s", 
+             dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : 
+             dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED" : "UNKNOWN");
+    
+    ESP_LOGI(TAG, "Starting DHCP server with IP range: 192.168.4.2-192.168.4.254");
+    ESP_LOGI(TAG, "Gateway: 192.168.4.1, DNS: 192.168.4.1");
+    
+    esp_err_t dhcps_start_err = esp_netif_dhcps_start(s_ap_netif);
+    if (dhcps_start_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
+        return dhcps_start_err;
+    } else {
+        ESP_LOGI(TAG, "DHCP server started successfully");
+        
+        // Verify DHCP server is actually running
+        esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
+        ESP_LOGI(TAG, "DHCP server status after start: %s", 
+                 dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : 
+                 dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED" : "UNKNOWN");
+    }
+    
+    // Add delay to ensure DHCP server fully initializes
+    ESP_LOGI(TAG, "Waiting 2 seconds for DHCP server to fully initialize...");
+    vTaskDelay(pdMS_TO_TICKS(2000));
 
 
-    // Configure DNS server for captive portal
+    // Re-enable DNS server now that DHCP is working reliably
     esp_ip4_addr_t captive_ip;
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &captive_ip);
-    
-    esp_netif_dns_info_t dns_info;
-    dns_info.ip.u_addr.ip4.addr = captive_ip.addr;
-    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
-
-    esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
 
     dns_server_config_t dns_config = {
         .num_of_entries = 2,
@@ -221,7 +329,13 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
             {.name = "captiveportal.local", .ip = captive_ip}  // Common portal domain
         }
     };
-    ESP_ERROR_CHECK(dns_server_start_with_config(&dns_config));
+    
+    esp_err_t dns_start_err = dns_server_start_with_config(&dns_config);
+    if (dns_start_err != ESP_OK) {
+        ESP_LOGW(TAG, "DNS server failed to start: %s", esp_err_to_name(dns_start_err));
+    } else {
+        ESP_LOGI(TAG, "DNS server started successfully for captive portal detection");
+    }
 
     ESP_LOGI(TAG, "Captive portal started with SSID: %s", ap_ssid);
     return ESP_OK;
@@ -236,7 +350,16 @@ esp_err_t wifi_provisioning_stop_captive_portal(void)
 
     ESP_LOGI(TAG, "Stopping captive portal...");
     
-    // Stop DNS server first
+    // Stop DHCP server first
+    ESP_LOGI(TAG, "Stopping DHCP server...");
+    esp_err_t dhcp_stop_err = esp_netif_dhcps_stop(s_ap_netif);
+    if (dhcp_stop_err != ESP_OK && dhcp_stop_err != ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED) {
+        ESP_LOGW(TAG, "DHCP server stop failed: %s", esp_err_to_name(dhcp_stop_err));
+    } else {
+        ESP_LOGI(TAG, "DHCP server stopped");
+    }
+    
+    // Stop DNS server
     dns_server_stop();
     
     // Give some time for any ongoing operations to complete
@@ -559,16 +682,34 @@ esp_err_t wifi_provisioning_scan_start(void)
     static uint32_t last_scan_time = 0;
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     
-    // Only scan if more than 30 seconds have passed since last scan
-    if (s_scan_results && (current_time - last_scan_time) < 30000) {
-        ESP_LOGD(TAG, "Using cached scan results (%d networks)", s_scan_count);
+    // Only scan if more than 10 seconds have passed since last scan (reduced for better UX)
+    if (s_scan_results && (current_time - last_scan_time) < 10000) {
+        ESP_LOGI(TAG, "Using cached scan results (%d networks) - last scan was %d ms ago", 
+                s_scan_count, (int)(current_time - last_scan_time));
+        return ESP_OK;
+    }
+    
+    // Check if scan is already in progress
+    if (s_scan_in_progress) {
+        ESP_LOGD(TAG, "WiFi scan already in progress");
         return ESP_OK;
     }
 
-    if (s_scan_results) {
-        free(s_scan_results);
-        s_scan_results = NULL;
-        s_scan_count = 0;
+    // Check if we're in APSTA mode for scanning
+    wifi_mode_t current_mode;
+    esp_err_t err = esp_wifi_get_mode(&current_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get WiFi mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    if (current_mode != WIFI_MODE_APSTA) {
+        ESP_LOGW(TAG, "WiFi scan requested but not in APSTA mode (mode=%d). Scan may not work.", current_mode);
+        ESP_LOGW(TAG, "This usually means client hasn't connected yet to trigger mode switch");
+        // Don't switch modes during active connections as it can disrupt the AP
+        return ESP_ERR_INVALID_STATE;
+    } else {
+        ESP_LOGI(TAG, "WiFi scanning in APSTA mode");
     }
 
     wifi_scan_config_t scan_config = {
@@ -579,30 +720,27 @@ esp_err_t wifi_provisioning_scan_start(void)
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
         .scan_time = {
             .active = {
-                .min = 100,
-                .max = 200  // Reduced scan time for faster response
+                .min = 50,   // Reduced for less AP disruption
+                .max = 120   // Much shorter scan time to minimize disruption
             }
         }
     };
 
-    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
-    last_scan_time = current_time;
-
-    uint16_t max_aps = 20;
-    wifi_ap_record_t* ap_records = (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * max_aps);
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&max_aps, ap_records));
-
-    s_scan_results = (wifi_ap_record_extended_t*)malloc(sizeof(wifi_ap_record_extended_t) * max_aps);
-    s_scan_count = max_aps;
-
-    for (int i = 0; i < max_aps; i++) {
-        strcpy(s_scan_results[i].ssid, (char*)ap_records[i].ssid);
-        s_scan_results[i].rssi = ap_records[i].rssi;
-        s_scan_results[i].authmode = ap_records[i].authmode;
+    // Small delay to ensure AP operations are stable before scanning
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Start non-blocking scan with minimal disruption
+    ESP_LOGI(TAG, "Starting gentle non-blocking WiFi scan...");
+    s_scan_in_progress = true;
+    err = esp_wifi_scan_start(&scan_config, false);  // false = non-blocking
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
+        s_scan_in_progress = false;
+        return err;
     }
-
-    free(ap_records);
-    ESP_LOGI(TAG, "WiFi scan completed, found %d networks", s_scan_count);
+    
+    last_scan_time = current_time;
+    ESP_LOGI(TAG, "Non-blocking WiFi scan started successfully");
     return ESP_OK;
 }
 
@@ -656,6 +794,7 @@ esp_err_t wifi_provisioning_try_connect_sta(void)
     if (!event_handlers_registered) {
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &wifi_event_handler, NULL, NULL));
         event_handlers_registered = true;
     }
 
@@ -764,12 +903,31 @@ static esp_err_t captive_windows_handler(httpd_req_t *req)
 
 static esp_err_t wifi_scan_handler(httpd_req_t *req)
 {
+    // Check if scan is in progress
+    if (s_scan_in_progress) {
+        // Return a "scan in progress" response
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "scanning");
+        cJSON_AddStringToObject(response, "message", "WiFi scan in progress, try again in a moment");
+        
+        char *json_string = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_string);
+        
+        free(json_string);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+    
     esp_err_t err = wifi_provisioning_scan_start();
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Scan failed");
         return ESP_FAIL;
     }
-
+    
+    // For non-blocking scan, we need to wait a bit or return cached results
+    // If scan just started, return cached results (if any) or empty array
     wifi_ap_record_extended_t* ap_records;
     uint16_t count;
     wifi_provisioning_get_scan_results(&ap_records, &count);
