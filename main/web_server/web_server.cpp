@@ -15,6 +15,8 @@
 #include "esp_heap_caps.h"
 #include "ota/ota_manager.h"
 #include "esp_system.h"
+#include "sig_companies/company_map.h"
+#include "ble_mesh/ble_mesh_node.h"
 
 #define TAG "WEB_SERVER"
 
@@ -528,10 +530,19 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         char unicast_str[6];
         sprintf(unicast_str, "%04X", node->unicast_addr);
 
-        char buf[256];
+        // Get company name from node manager
+        const char* company_name = "Unknown";
+        if (auto node_info = node_manager().get_node(Uuid128{node->dev_uuid})) {
+            if (node_info->company_id != 0) {
+                company_name = lookup_company_name(node_info->company_id);
+                if (!company_name) company_name = "Unknown";
+            }
+        }
+        
+        char buf[512];
         snprintf(buf, sizeof(buf),
-            "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\" }",
-            i > 0 ? "," : "", uuid_str, node->name,unicast_str);
+            "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\" }",
+            i > 0 ? "," : "", uuid_str, node->name, unicast_str, company_name);
         httpd_resp_sendstr_chunk(req, buf);
     }
 

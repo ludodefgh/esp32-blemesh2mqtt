@@ -20,6 +20,7 @@
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
 #include <ble_mesh/message_queue.h>
+#include "sig_companies/company_map.h"
 
 #define TAG "APP_MQTT"
 
@@ -365,6 +366,12 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
                 cJSON_AddItemToObject(dev, "ids", cJSON_CreateString(buf));
                 std::string identifier = get_bridge_mac_identifier();
                 cJSON_AddItemToObject(dev, "via_device", cJSON_CreateString(identifier.c_str()));
+                
+                // Add company information if available
+                if (node->company_id != 0) {
+                    const char* company_name = lookup_company_name(node->company_id);
+                    cJSON_AddItemToObject(dev, "mf", cJSON_CreateString(company_name ? company_name : "Unknown"));
+                }
             }
         }
 

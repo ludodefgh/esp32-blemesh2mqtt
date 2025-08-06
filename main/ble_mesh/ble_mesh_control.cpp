@@ -498,6 +498,13 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::sha
 
     node->features = node_info.features;
     node->light_ctl_temp_offset = node_info.light_ctl_temp_offset;
+    
+    // Store the company ID from composition data (reuse existing buf and data variables)
+    if (len >= 2) {
+        uint16_t cid = data[0] | (data[1] << 8);
+        node->company_id = cid;
+        ESP_LOGI(TAG, "Stored CID 0x%04X for node 0x%04X", cid, node->unicast);
+    }
 
     if(node->features & FEATURE_LIGHT_LIGHTNESS)
     {
