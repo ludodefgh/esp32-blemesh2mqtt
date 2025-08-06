@@ -308,7 +308,7 @@ static void dns_server_task(void *pvParameters)
         answer->name = htons(0xC00C);
         answer->type = htons(1);
         answer->class_ = htons(1);
-        answer->ttl = htonl(0);  // Zero TTL for immediate response
+        answer->ttl = htonl(60);  // 60 seconds TTL to reduce DNS queries
         answer->rdlength = htons(4);
         
         // Get IP address based on domain configuration

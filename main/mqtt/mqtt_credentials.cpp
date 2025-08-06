@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "security/credential_encryption.h"
 #include <cstring>
 #include <cctype>
 
@@ -138,9 +139,24 @@ esp_err_t MqttCredentialManager::encrypt_and_store(const std::string& key, const
         return err;
     }
     
-    // For now, store as plain text. In production, you'd want to encrypt this
-    // using esp_partition_encrypt or a similar mechanism
-    err = nvs_set_str(nvs_handle, key.c_str(), value.c_str());
+    // Encrypt the value
+    std::string encrypted_value;
+    if (!CredentialEncryption::instance().is_initialized()) {
+        ESP_LOGE(TAG, "Encryption not initialized");
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(value, encrypted_value);
+    if (encrypt_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to encrypt %s: %s", key.c_str(), esp_err_to_name(encrypt_err));
+        nvs_close(nvs_handle);
+        return encrypt_err;
+    }
+    
+    ESP_LOGI(TAG, "MQTT %s encrypted successfully", key.c_str());
+    
+    err = nvs_set_str(nvs_handle, key.c_str(), encrypted_value.c_str());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set NVS key %s: %s", key.c_str(), esp_err_to_name(err));
         nvs_close(nvs_handle);
@@ -173,18 +189,39 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string& key, std::s
         return err;
     }
     
-    char* buffer = new char[required_size];
-    err = nvs_get_str(nvs_handle, key.c_str(), buffer, &required_size);
-    if (err == ESP_OK) {
-        value = std::string(buffer);
+    char* encrypted_buffer = new char[required_size];
+    err = nvs_get_str(nvs_handle, key.c_str(), encrypted_buffer, &required_size);
+    if (err != ESP_OK) {
+        delete[] encrypted_buffer;
+        nvs_close(nvs_handle);
+        return err;
     }
     
+    // Decrypt the value
+    std::string decrypted_value;
+    if (!CredentialEncryption::instance().is_initialized()) {
+        ESP_LOGE(TAG, "Encryption not initialized");
+        delete[] encrypted_buffer;
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_buffer, decrypted_value);
+    if (decrypt_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to decrypt %s: %s", key.c_str(), esp_err_to_name(decrypt_err));
+        delete[] encrypted_buffer;
+        nvs_close(nvs_handle);
+        return decrypt_err;
+    }
+    
+    value = decrypted_value;
+    
     // Clear sensitive data from memory
-    memset(buffer, 0, required_size);
-    delete[] buffer;
+    memset(encrypted_buffer, 0, required_size);
+    delete[] encrypted_buffer;
     
     nvs_close(nvs_handle);
-    return err;
+    return ESP_OK;
 }
 
 esp_err_t MqttCredentialManager::load_credentials() {
@@ -195,7 +232,12 @@ esp_err_t MqttCredentialManager::load_credentials() {
     // Load broker host
     esp_err_t err = decrypt_and_load(KEY_BROKER_HOST, credentials_.broker_host);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "No broker host found in NVS");
+        if (err == ESP_FAIL) {
+            ESP_LOGW(TAG, "MQTT credentials appear to be in old plain text format, clearing them");
+            ESP_LOGW(TAG, "Please reconfigure MQTT settings via the web interface");
+            clear_credentials(); // Clear old plain text credentials
+        }
+        ESP_LOGW(TAG, "No valid broker host found in NVS");
         set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
         return err;
     }

@@ -12,8 +12,10 @@
 #include "lwip/ip4_addr.h"
 #include "lwip/dns.h"
 #include "cJSON.h"
+#include "security/credential_encryption.h"
 #include <string.h>
 #include <stdio.h>
+#include <dhcpserver/dhcpserver.h>
 
 static const char* TAG = "wifi_provisioning";
 
@@ -156,6 +158,7 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     ap_config.ap.channel = CAPTIVE_PORTAL_CHANNEL;
     ap_config.ap.max_connection = CAPTIVE_PORTAL_MAX_CONNECTIONS;
     ap_config.ap.authmode = strlen(CAPTIVE_PORTAL_PASSWORD) == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    ap_config.ap.beacon_interval = 100;  // Default beacon interval for faster detection
 
     static bool wifi_initialized = false;
     if (!wifi_initialized) {
@@ -176,6 +179,10 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     ESP_ERROR_CHECK(esp_netif_dhcps_stop(s_ap_netif));
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
     
+    uint32_t retry_time = 5;
+    ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_IP_REQUEST_RETRY_TIME, 
+                                           &retry_time, sizeof(retry_time))); // 5 seconds retry
+    
     // Set DHCP Option 114 for modern captive portal detection (RFC 8910)
     char captive_portal_uri[] = "http://192.168.4.1/setup";
     esp_err_t dhcp_opt_err = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, 
@@ -189,16 +196,24 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
         ESP_LOGW(TAG, "Fallback to DNS-based captive portal detection");
     }
     
-    ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
+
+
     // Configure DNS server for captive portal
     esp_ip4_addr_t captive_ip;
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &captive_ip);
     
+    esp_netif_dns_info_t dns_info;
+    dns_info.ip.u_addr.ip4.addr = captive_ip.addr;
+    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+
+    esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+
     dns_server_config_t dns_config = {
         .num_of_entries = 2,
         .item = {
@@ -324,13 +339,43 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
         return err;
     }
 
-    err = nvs_set_str(nvs_handle, WIFI_SSID_KEY, ssid);
+    // Encrypt and store SSID
+    std::string encrypted_ssid;
+    if (CredentialEncryption::instance().is_initialized()) {
+        esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(ssid, encrypted_ssid);
+        if (encrypt_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to encrypt SSID, storing as plain text");
+            encrypted_ssid = ssid;
+        } else {
+            ESP_LOGI(TAG, "SSID encrypted successfully");
+        }
+    } else {
+        ESP_LOGW(TAG, "Encryption not initialized, storing SSID as plain text");
+        encrypted_ssid = ssid;
+    }
+    
+    err = nvs_set_str(nvs_handle, WIFI_SSID_KEY, encrypted_ssid.c_str());
     if (err != ESP_OK) {
         nvs_close(nvs_handle);
         return err;
     }
 
-    err = nvs_set_str(nvs_handle, WIFI_PASSWORD_KEY, password);
+    // Encrypt and store password
+    std::string encrypted_password;
+    if (CredentialEncryption::instance().is_initialized()) {
+        esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(password, encrypted_password);
+        if (encrypt_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to encrypt password, storing as plain text");
+            encrypted_password = password;
+        } else {
+            ESP_LOGI(TAG, "Password encrypted successfully");
+        }
+    } else {
+        ESP_LOGW(TAG, "Encryption not initialized, storing password as plain text");
+        encrypted_password = password;
+    }
+    
+    err = nvs_set_str(nvs_handle, WIFI_PASSWORD_KEY, encrypted_password.c_str());
     if (err != ESP_OK) {
         nvs_close(nvs_handle);
         return err;
@@ -344,43 +389,138 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
     }
 
     err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit WiFi credentials to NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    
     nvs_close(nvs_handle);
+    
+    // Add a small delay to ensure NVS operations complete
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    ESP_LOGI(TAG, "WiFi credentials saved: SSID=%s", ssid);
-    return err;
+    ESP_LOGI(TAG, "WiFi credentials saved and committed: SSID=%s", ssid);
+    return ESP_OK;
 }
 
 esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t ssid_len, size_t password_len)
 {
     if (!ssid || !password) {
+        ESP_LOGE(TAG, "Invalid parameters: ssid=%p, password=%p", ssid, password);
         return ESP_ERR_INVALID_ARG;
     }
+
+    ESP_LOGI(TAG, "Loading WiFi credentials from NVS namespace: %s", WIFI_CREDENTIALS_NAMESPACE);
 
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(WIFI_CREDENTIALS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS namespace '%s': %s", WIFI_CREDENTIALS_NAMESPACE, esp_err_to_name(err));
         return err;
     }
 
-    size_t required_size = ssid_len;
-    err = nvs_get_str(nvs_handle, WIFI_SSID_KEY, ssid, &required_size);
+    // Get encrypted SSID
+    size_t required_size = 0;
+    err = nvs_get_str(nvs_handle, WIFI_SSID_KEY, nullptr, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SSID size from NVS key '%s': %s", WIFI_SSID_KEY, esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+    ESP_LOGI(TAG, "Found SSID in NVS, size: %zu bytes", required_size);
+    
+    char* encrypted_ssid_buf = new char[required_size];
+    err = nvs_get_str(nvs_handle, WIFI_SSID_KEY, encrypted_ssid_buf, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read SSID from NVS: %s", esp_err_to_name(err));
+        delete[] encrypted_ssid_buf;
+        nvs_close(nvs_handle);
+        return err;
+    }
+    ESP_LOGI(TAG, "Read SSID from NVS: %zu bytes", required_size);
+    
+    // Decrypt SSID
+    std::string decrypted_ssid;
+    if (!CredentialEncryption::instance().is_initialized()) {
+        ESP_LOGE(TAG, "Encryption not initialized");
+        delete[] encrypted_ssid_buf;
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Attempting to decrypt SSID...");
+    esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_ssid_buf, decrypted_ssid);
+    if (decrypt_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to decrypt SSID: %s", esp_err_to_name(decrypt_err));
+        delete[] encrypted_ssid_buf;
+        nvs_close(nvs_handle);
+        return decrypt_err;
+    }
+    
+    ESP_LOGI(TAG, "SSID decrypted successfully: '%s'", decrypted_ssid.c_str());
+    
+    if (decrypted_ssid.length() >= ssid_len) {
+        ESP_LOGE(TAG, "SSID too long: %zu bytes, buffer size: %zu", decrypted_ssid.length(), ssid_len);
+        delete[] encrypted_ssid_buf;
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    strcpy(ssid, decrypted_ssid.c_str());
+    delete[] encrypted_ssid_buf;
+
+    // Get encrypted password
+    required_size = 0;
+    err = nvs_get_str(nvs_handle, WIFI_PASSWORD_KEY, nullptr, &required_size);
     if (err != ESP_OK) {
         nvs_close(nvs_handle);
         return err;
     }
-
-    required_size = password_len;
-    err = nvs_get_str(nvs_handle, WIFI_PASSWORD_KEY, password, &required_size);
+    
+    char* encrypted_password_buf = new char[required_size];
+    err = nvs_get_str(nvs_handle, WIFI_PASSWORD_KEY, encrypted_password_buf, &required_size);
+    if (err != ESP_OK) {
+        delete[] encrypted_password_buf;
+        nvs_close(nvs_handle);
+        return err;
+    }
+    
+    // Decrypt password
+    std::string decrypted_password;
+    esp_err_t password_decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_password_buf, decrypted_password);
+    if (password_decrypt_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to decrypt password: %s", esp_err_to_name(password_decrypt_err));
+        delete[] encrypted_password_buf;
+        nvs_close(nvs_handle);
+        return password_decrypt_err;
+    }
+    
+    ESP_LOGI(TAG, "Password decrypted successfully");
+    
+    if (decrypted_password.length() >= password_len) {
+        ESP_LOGE(TAG, "Password too long: %zu bytes, buffer size: %zu", decrypted_password.length(), password_len);
+        delete[] encrypted_password_buf;
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    strcpy(password, decrypted_password.c_str());
+    
+    // Clear sensitive data from memory
+    memset(encrypted_password_buf, 0, required_size);
+    delete[] encrypted_password_buf;
+    
     nvs_close(nvs_handle);
-
-    return err;
+    return ESP_OK;
 }
 
 bool wifi_provisioning_is_configured(void)
 {
+    ESP_LOGI(TAG, "Checking if WiFi is configured...");
+    
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(WIFI_CREDENTIALS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
+        ESP_LOGI(TAG, "WiFi not configured: failed to open NVS namespace: %s", esp_err_to_name(err));
         return false;
     }
 
@@ -388,7 +528,11 @@ bool wifi_provisioning_is_configured(void)
     err = nvs_get_u8(nvs_handle, WIFI_CONFIGURED_KEY, &configured);
     nvs_close(nvs_handle);
 
-    return (err == ESP_OK && configured == 1);
+    bool is_configured = (err == ESP_OK && configured == 1);
+    ESP_LOGI(TAG, "WiFi configured check: %s (configured flag: %d, error: %s)", 
+             is_configured ? "YES" : "NO", configured, esp_err_to_name(err));
+    
+    return is_configured;
 }
 
 esp_err_t wifi_provisioning_clear_credentials(void)
@@ -486,14 +630,18 @@ esp_err_t wifi_provisioning_set_event_callback(wifi_provisioning_event_cb_t call
 
 esp_err_t wifi_provisioning_try_connect_sta(void)
 {
+    ESP_LOGI(TAG, "Attempting to connect to WiFi using stored credentials...");
+    
     char ssid[32] = {0};
     char password[64] = {0};
     
     esp_err_t err = wifi_provisioning_get_credentials(ssid, password, sizeof(ssid), sizeof(password));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get WiFi credentials");
+        ESP_LOGE(TAG, "Failed to get WiFi credentials: %s", esp_err_to_name(err));
         return err;
     }
+    
+    ESP_LOGI(TAG, "Retrieved credentials for SSID: %s", ssid);
 
     // Initialize WiFi if not already done
     static bool wifi_initialized = false;
@@ -544,17 +692,21 @@ esp_err_t wifi_provisioning_try_connect_sta(void)
 
 bool wifi_provisioning_should_start_captive_portal(void)
 {
+    ESP_LOGI(TAG, "Determining if captive portal should start...");
+    
     if (!wifi_provisioning_is_configured()) {
         ESP_LOGI(TAG, "No WiFi credentials configured, starting captive portal");
         return true;
     }
 
+    ESP_LOGI(TAG, "WiFi credentials found, attempting to connect...");
     esp_err_t connect_result = wifi_provisioning_try_connect_sta();
     if (connect_result != ESP_OK) {
-        ESP_LOGI(TAG, "Failed to connect with stored credentials, starting captive portal");
+        ESP_LOGE(TAG, "Failed to connect with stored credentials: %s, starting captive portal", esp_err_to_name(connect_result));
         return true;
     }
 
+    ESP_LOGI(TAG, "Successfully connected with stored credentials, no need for captive portal");
     return false;
 }
 
@@ -694,6 +846,27 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Give extra time for NVS operations to complete and verify the write
+    ESP_LOGI(TAG, "Verifying credentials were saved correctly...");
+    vTaskDelay(pdMS_TO_TICKS(500)); // Allow NVS operations to complete
+    
+    // Verify the credentials were actually saved by reading them back
+    char verify_ssid[32] = {0};
+    char verify_password[64] = {0};
+    esp_err_t verify_err = wifi_provisioning_get_credentials(verify_ssid, verify_password, sizeof(verify_ssid), sizeof(verify_password));
+    if (verify_err == ESP_OK && strcmp(verify_ssid, ssid) == 0 && strcmp(verify_password, password) == 0) {
+        ESP_LOGI(TAG, "Credentials verified successfully in NVS");
+    } else {
+        ESP_LOGW(TAG, "Credential verification failed: %s", esp_err_to_name(verify_err));
+        // Clear sensitive verification data
+        memset(verify_ssid, 0, sizeof(verify_ssid));
+        memset(verify_password, 0, sizeof(verify_password));
+    }
+    
+    // Clear sensitive verification data
+    memset(verify_ssid, 0, sizeof(verify_ssid));
+    memset(verify_password, 0, sizeof(verify_password));
+
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
     cJSON_AddStringToObject(response, "message", "Credentials saved, restarting device...");
@@ -711,6 +884,10 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     // Stop captive portal cleanly before restart
     wifi_provisioning_stop_captive_portal();
     vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // Additional delay to ensure all NVS operations are fully completed
+    ESP_LOGI(TAG, "Final synchronization before restart...");
+    vTaskDelay(pdMS_TO_TICKS(500));
     
     ESP_LOGI(TAG, "Restarting ESP32 to connect with new credentials...");
     esp_restart();
