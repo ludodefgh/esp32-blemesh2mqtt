@@ -327,6 +327,12 @@ function createNodeElement(node) {
         <span class="info-value">${node.unicast || 'Not assigned'}</span>
       </div>
     </div>
+    ${node.company ? `<div class="node-info">
+      <div class="info-item">
+        <span class="info-label">Manufacturer</span>
+        <span class="info-value">${node.company}</span>
+      </div>
+    </div>` : ''}
     
     <div class="rename-section">
       <input type="text" class="name-input" placeholder="New name" value="">

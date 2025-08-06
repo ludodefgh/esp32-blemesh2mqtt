@@ -86,6 +86,7 @@ typedef struct
     uint16_t features{0};
     uint16_t features_to_bind{0};
     uint16_t node_index{0}; // Node index in the provisioning table
+    uint16_t company_id{0}; // Company ID (CID) from composition data
     uint8_t elem_num{0};
     uint8_t onoff{0};
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
@@ -114,6 +115,7 @@ typedef struct
         onoff = other.onoff;
         light_ctl_temp_offset = other.light_ctl_temp_offset;
         color_mode = other.color_mode;
+        company_id = 0; // Initialize company_id for v1 -> v2 conversion
     }
 
     void convert_from_v1(const bm2mqtt_node_info_v1& v1)
