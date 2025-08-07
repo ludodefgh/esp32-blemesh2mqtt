@@ -1,22 +1,27 @@
-#include   "web_server.h"
+#include "web_server.h"
 
-#include "esp_http_server.h"
-#include "common/log_common.h"
-#include <esp_ble_mesh_networking_api.h>
-#include <ble_mesh/ble_mesh_provisioning.h>
-#include <ble_mesh/ble_mesh_commands.h>
-#include "debug/console_cmd.h"
-#include <debug/websocket_logger.h>
-#include <cJSON.h>
-#include <mqtt/mqtt_control.h>
-#include <mqtt/mqtt_bridge.h>
-#include <mqtt/mqtt_credentials.h>
-#include "wifi/wifi_provisioning.h"
+// ESP-IDF includes
 #include "esp_heap_caps.h"
-#include "ota/ota_manager.h"
+#include "esp_http_server.h"
 #include "esp_system.h"
-#include "sig_companies/company_map.h"
+#include <esp_ble_mesh_networking_api.h>
+
+// Third-party libraries
+#include <cJSON.h>
+
+// Project includes
+#include "ble_mesh/ble_mesh_commands.h"
 #include "ble_mesh/ble_mesh_node.h"
+#include "ble_mesh/ble_mesh_provisioning.h"
+#include "common/log_common.h"
+#include "debug/console_cmd.h"
+#include "debug/websocket_logger.h"
+#include "mqtt/mqtt_bridge.h"
+#include "mqtt/mqtt_control.h"
+#include "mqtt/mqtt_credentials.h"
+#include "ota/ota_manager.h"
+#include "sig_companies/company_map.h"
+#include "wifi/wifi_provisioning.h"
 
 #define TAG "WEB_SERVER"
 

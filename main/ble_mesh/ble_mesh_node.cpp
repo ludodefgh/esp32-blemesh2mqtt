@@ -1,17 +1,21 @@
 #include "ble_mesh_node.h"
+
+// Standard C/C++ libraries
 #include <inttypes.h>
+#include <mutex>
 #include <string>
-#include "common/log_common.h"
+
+// ESP-IDF includes
+#include "esp_ble_mesh_common_api.h"
+#include "esp_ble_mesh_config_model_api.h"
+#include "esp_ble_mesh_defs.h"
+#include "esp_ble_mesh_networking_api.h"
+#include "esp_ble_mesh_provisioning_api.h"
 #include "nvs_flash.h"
 
-#include "esp_ble_mesh_defs.h"
-#include "esp_ble_mesh_common_api.h"
-#include "esp_ble_mesh_provisioning_api.h"
-#include "esp_ble_mesh_networking_api.h"
-#include "esp_ble_mesh_config_model_api.h"
-
+// Project includes
 #include "ble_mesh_provisioning.h"
-#include <mutex>
+#include "common/log_common.h"
 
 #define TAG "NODE_MANAGER"
 

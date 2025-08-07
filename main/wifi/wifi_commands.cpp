@@ -1,11 +1,14 @@
 #include "wifi_commands.h"
-#include "wifi_provisioning.h"
 
+// ESP-IDF includes
 #include "esp_console.h"
 #include "esp_system.h"
+
+// Project includes
+#include "common/log_common.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
-#include "common/log_common.h"
+#include "wifi_provisioning.h"
 
 static const char* TAG = "wifi_commands";
 

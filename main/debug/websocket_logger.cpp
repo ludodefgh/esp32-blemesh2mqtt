@@ -1,10 +1,15 @@
 #include "websocket_logger.h"
 
-#include "esp_log_write.h"
-#include <vector>
-#include <mutex>
+// Standard C/C++ libraries
 #include <algorithm>
+#include <mutex>
+#include <vector>
+
+// ESP-IDF includes
+#include "esp_log_write.h"
 #include <freertos/ringbuf.h>
+
+// Project includes
 #include "common/log_common.h"
 
 static httpd_handle_t ws_server = nullptr;

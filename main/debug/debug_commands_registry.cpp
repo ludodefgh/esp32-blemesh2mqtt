@@ -1,5 +1,8 @@
 #include "debug_commands_registry.h"
 
+// Standard C/C++ libraries
+#include <vector>
+
 std::vector<DebugInitFunc> &debug_command_registry::get_list()
 {
     static std::vector<DebugInitFunc> list;

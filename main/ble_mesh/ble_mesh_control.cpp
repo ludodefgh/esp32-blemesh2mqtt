@@ -1,31 +1,36 @@
 #include "ble_mesh_control.h"
-#include <stdio.h>
-#include <string.h>
+
+// Standard C/C++ libraries
 #include <inttypes.h>
 #include <memory>
-#include "nvs_flash.h"
+#include <stdio.h>
+#include <string.h>
+
+// ESP-IDF includes
 #include "argtable3/argtable3.h"
-#include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
-#include "esp_ble_mesh_provisioning_api.h"
-#include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_config_model_api.h"
+#include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_ble_mesh_networking_api.h"
+#include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
+#include "nvs_flash.h"
 
+// Project includes
+#include "ble_mesh_commands.h"
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
-#include "debug_console_common.h"
-#include "mqtt/mqtt_bridge.h"
-#include "sig_models/model_map.h"
-#include "sig_companies/company_map.h"
-#include "message_queue.h"
-#include "ble_mesh_commands.h"
-#include "debug/debug_commands_registry.h"
-#include "debug/console_cmd.h"
-#include <mqtt/mqtt_control.h>
 #include "common/log_common.h"
+#include "debug/console_cmd.h"
+#include "debug/debug_commands_registry.h"
+#include "debug_console_common.h"
+#include "message_queue.h"
+#include "mqtt/mqtt_bridge.h"
+#include "mqtt/mqtt_control.h"
+#include "sig_companies/company_map.h"
+#include "sig_models/model_map.h"
 
 #define TAG "APP_CONTROL"
 

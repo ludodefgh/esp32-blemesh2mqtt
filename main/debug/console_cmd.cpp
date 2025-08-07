@@ -1,7 +1,8 @@
 #include "console_cmd.h"
 
-#include <vector>
+// Standard C/C++ libraries
 #include <string>
+#include <vector>
 
 static std::vector<console_command_info> registered_commands;
 

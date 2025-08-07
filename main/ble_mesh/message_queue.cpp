@@ -1,12 +1,17 @@
 #include "message_queue.h"
 
+// Standard C/C++ libraries
 #include <map>
-#include <esp_console.h>
-#include "debug/debug_commands_registry.h"
-#include "debug/console_cmd.h"
-#include <esp_timer.h>
+
+// ESP-IDF includes
 #include <esp_ble_mesh_defs.h>
+#include <esp_console.h>
+#include <esp_timer.h>
+
+// Project includes
 #include "common/log_common.h"
+#include "debug/console_cmd.h"
+#include "debug/debug_commands_registry.h"
 
 static const char *TAG = "MESS_QUEUE";
 

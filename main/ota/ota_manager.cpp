@@ -1,9 +1,14 @@
 #include "ota_manager.h"
 
+// Standard C/C++ libraries
+#include <cstring>
+
+// ESP-IDF includes
 #include "esp_app_desc.h"
 #include "esp_image_format.h"
 #include "esp_system.h"
-#include <cstring>
+
+// Project includes
 #include "common/log_common.h"
 
 static const char *TAG = "OTA_MANAGER";
