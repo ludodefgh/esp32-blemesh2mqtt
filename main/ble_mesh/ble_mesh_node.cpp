@@ -1,8 +1,7 @@
 #include "ble_mesh_node.h"
 #include <inttypes.h>
 #include <string>
-
-#include "esp_log.h"
+#include "common/log_common.h"
 #include "nvs_flash.h"
 
 #include "esp_ble_mesh_defs.h"
@@ -132,14 +131,14 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const std::st
 
 void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
 {
-    ESP_LOGW(TAG, "%s: Removing node with UUID %s", __func__, uuid.to_string().c_str());
+    LOG_WARN(TAG, "Removing node with UUID %s", uuid.to_string().c_str());
     std::lock_guard<std::mutex> lock(tn_mutex);
     
     // Remove from UUID index first
     auto uuid_it = uuid_index.find(uuid);
     if (uuid_it != uuid_index.end())
     {
-        ESP_LOGW(TAG, "%s: Remove unprovisioned device 0x%04x", __func__, uuid_it->second->unicast);
+        LOG_WARN(TAG, "Remove unprovisioned device 0x%04x", uuid_it->second->unicast);
         
         // Remove from vector
         tracked_nodes.erase(
@@ -216,7 +215,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(uint16_t unic
 void ble2mqtt_node_manager::print_registered_nodes()
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
-    ESP_LOGI(TAG, "Provisioned nodes: %d", tracked_nodes.size());
+    LOG_INFO(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
         if (!node) continue;
@@ -228,21 +227,21 @@ void ble2mqtt_node_manager::print_registered_nodes()
             node_name = "Unknown";
         }
         
-        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node->uuid.raw(), 16));
-        ESP_LOGI(TAG, "  Node Name: %s", node_name);
-        ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast);
-        ESP_LOGI(TAG, "  Element Count: %d", node->elem_num);
-        ESP_LOGI(TAG, "  On/Off State: %d", node->onoff);
-        ESP_LOGI(TAG, "  Level: %d", node->level);
-        ESP_LOGI(TAG, "  HSL: H=%d S=%d L=%d", node->hsl_h, node->hsl_s, node->hsl_l);
-        ESP_LOGI(TAG, "  HSL Ranges - Hue: %d-%d, Saturation: %d-%d, Lightness: %d-%d", 
+        LOG_INFO(TAG, "==device uuid: %s", bt_hex(node->uuid.raw(), 16));
+        LOG_INFO(TAG, "  Node Name: %s", node_name);
+        LOG_INFO(TAG, "  Primary Address: 0x%04X", node->unicast);
+        LOG_INFO(TAG, "  Element Count: %d", node->elem_num);
+        LOG_INFO(TAG, "  On/Off State: %d", node->onoff);
+        LOG_INFO(TAG, "  Level: %d", node->level);
+        LOG_INFO(TAG, "  HSL: H=%d S=%d L=%d", node->hsl_h, node->hsl_s, node->hsl_l);
+        LOG_INFO(TAG, "  HSL Ranges - Hue: %d-%d, Saturation: %d-%d, Lightness: %d-%d", 
                  node->min_hue, node->max_hue, node->min_saturation, node->max_saturation, 
                  node->min_lightness, node->max_lightness);
-        ESP_LOGI(TAG, "  Temperature: Current=%d, Range=%d-%d", node->curr_temp, node->min_temp, node->max_temp);
-        ESP_LOGI(TAG, "  Color Mode: %s", get_color_mode_string(node->color_mode));
-        ESP_LOGI(TAG, "  Light CTL Temp Offset: %d", node->light_ctl_temp_offset);
-        ESP_LOGI(TAG, "  Features: 0x%04X", node->features);
-        ESP_LOGI(TAG, "  Features to Bind: 0x%04X", node->features_to_bind);
+        LOG_INFO(TAG, "  Temperature: Current=%d, Range=%d-%d", node->curr_temp, node->min_temp, node->max_temp);
+        LOG_INFO(TAG, "  Color Mode: %s", get_color_mode_string(node->color_mode));
+        LOG_INFO(TAG, "  Light CTL Temp Offset: %d", node->light_ctl_temp_offset);
+        LOG_INFO(TAG, "  Features: 0x%04X", node->features);
+        LOG_INFO(TAG, "  Features to Bind: 0x%04X", node->features_to_bind);
     }
 }
 
@@ -252,7 +251,7 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
     esp_err_t err = nvs_open("ble_mesh", NVS_READWRITE, &handle);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
     nvs_set_u32(handle, "version", NODE_INFO_SCHEMA_VERSION);
@@ -280,7 +279,7 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
         }
         else
         {
-            ESP_LOGE(TAG, "Failed to save node info vector to NVS: %s", esp_err_to_name(err));
+            LOG_ERROR(TAG, "Failed to save node info vector to NVS: %s", esp_err_to_name(err));
         }
     }
 
@@ -294,7 +293,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
     esp_err_t err = nvs_open("ble_mesh", NVS_READONLY, &handle);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -302,7 +301,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
     if (nvs_get_u32(handle, "version", &version) != ESP_OK || version > NODE_INFO_SCHEMA_VERSION)
     {
         nvs_close(handle);
-        ESP_LOGE(TAG, "NVS version mismatch: expected %u, got %u", NODE_INFO_SCHEMA_VERSION, version);
+        LOG_ERROR(TAG, "NVS version mismatch: expected %u, got %u", NODE_INFO_SCHEMA_VERSION, version);
         // Optionally, you could handle the version mismatch by migrating data or resetting.
         // For now, we just return an error.
         return ESP_ERR_INVALID_VERSION;
@@ -313,12 +312,12 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
     if (err != ESP_OK || size == 0)
     {
         nvs_close(handle);
-        ESP_LOGE(TAG, "Failed to load node info vector to NVS: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to load node info vector to NVS: %s", esp_err_to_name(err));
         return err;
     }
     if (version == 1)
     {
-        ESP_LOGW(TAG, "Detected old node info schema version 1, converting to version 2");
+        LOG_WARN(TAG, "Detected old node info schema version 1, converting to version 2");
 
         size_t count = size / sizeof(bm2mqtt_node_info_v1);
         
@@ -327,11 +326,11 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
         err = nvs_get_blob(handle, "nodes", tracked_nodes_v1.data(), &size);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
+            LOG_ERROR(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
         }
         else
         {
-            ESP_LOGI(TAG, "Loaded %zu nodes from NVS", tracked_nodes_v1.size());
+            LOG_INFO(TAG, "Loaded %zu nodes from NVS", tracked_nodes_v1.size());
         }
 
         std::lock_guard<std::mutex> lock(tn_mutex);
@@ -346,7 +345,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
             tracked_nodes.push_back(node);
             uuid_index[node->uuid] = node;
             
-            ESP_LOGI(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
+            LOG_INFO(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
                      i, node->uuid.to_string().c_str(),
                      node->unicast, node->elem_num);
         }
@@ -361,7 +360,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
         err = nvs_get_blob(handle, "nodes", raw_nodes.data(), &size);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
+            LOG_ERROR(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
         }
         else
         {
@@ -377,7 +376,7 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
                 uuid_index[node->uuid] = node;
             }
             
-            ESP_LOGI(TAG, "Loaded %zu nodes from NVS", tracked_nodes.size());
+            LOG_INFO(TAG, "Loaded %zu nodes from NVS", tracked_nodes.size());
         }
     }
 
@@ -397,7 +396,7 @@ void ble2mqtt_node_manager::on_timer_callback()
 {
     if (node_info_dirty)
     {
-        ESP_LOGI(TAG, "Saving node info to NVS...");
+        LOG_INFO(TAG, "Saving node info to NVS...");
         save_node_info_vector();
         node_info_dirty = false;
     }
@@ -433,6 +432,6 @@ void ble2mqtt_node_manager::set_node_name(const Uuid128& uuid, const char* name)
         mark_node_info_dirty();
     }
     else{
-        ESP_LOGW(TAG, "Node with UUID %s not found", uuid.to_string().c_str());
+        LOG_WARN(TAG, "Node with UUID %s not found", uuid.to_string().c_str());
     }
 }

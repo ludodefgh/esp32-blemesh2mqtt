@@ -1,10 +1,11 @@
 #include "websocket_logger.h"
-#include "esp_log.h"
+
 #include "esp_log_write.h"
 #include <vector>
 #include <mutex>
 #include <algorithm>
 #include <freertos/ringbuf.h>
+#include "common/log_common.h"
 
 static httpd_handle_t ws_server = nullptr;
 static std::vector<int> ws_clients;
@@ -48,7 +49,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     int fd = httpd_req_to_sockfd(req);
     httpd_ws_client_info_t ws_info = httpd_ws_get_fd_info(ws_server, fd);
     
-    ESP_LOGD(TAG, "ws_handler called: fd=%d, ws_info=%d", fd, ws_info);
+    LOG_DEBUG(TAG, "ws_handler called: fd=%d, ws_info=%d", fd, ws_info);
     
     if (ws_info == HTTPD_WS_CLIENT_INVALID) {
         // Invalid WebSocket client
@@ -81,7 +82,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
         
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "httpd_ws_recv_frame failed: %s", esp_err_to_name(ret));
+            LOG_ERROR(TAG, "httpd_ws_recv_frame failed: %s", esp_err_to_name(ret));
             remove_ws_client(fd);
             return ret;
         }
@@ -92,7 +93,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
 void websocket_logger_register_uri(httpd_handle_t server)
 {
-    ESP_LOGI(TAG, "WebSocket logger URI registered at /ws/logs");
+    LOG_INFO(TAG, "WebSocket logger URI registered at /ws/logs");
     httpd_uri_t uri = {
         .uri = "/ws/logs",
         .method = HTTP_GET,

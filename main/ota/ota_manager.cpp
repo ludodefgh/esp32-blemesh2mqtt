@@ -1,265 +1,312 @@
 #include "ota_manager.h"
-#include "esp_log.h"
+
 #include "esp_app_desc.h"
 #include "esp_image_format.h"
 #include "esp_system.h"
 #include <cstring>
+#include "common/log_common.h"
 
-static const char* TAG = "OTA_MANAGER";
+static const char *TAG = "OTA_MANAGER";
 
-OTAManager& OTAManager::instance() {
+OTAManager &OTAManager::instance()
+{
     static OTAManager instance;
     return instance;
 }
 
-esp_err_t OTAManager::begin_ota_update(size_t firmware_size) {
-    if (ota_in_progress_) {
+esp_err_t OTAManager::begin_ota_update(size_t firmware_size)
+{
+    if (ota_in_progress_)
+    {
         set_error("OTA already in progress");
         return ESP_ERR_INVALID_STATE;
     }
-    
-    ESP_LOGI(TAG, "Starting OTA update, firmware size: %zu bytes", firmware_size);
-    
+
+    LOG_INFO(TAG, "Starting OTA update, firmware size: %zu bytes", firmware_size);
+
     // Find next available OTA partition
     update_partition_ = esp_ota_get_next_update_partition(nullptr);
-    if (update_partition_ == nullptr) {
+    if (update_partition_ == nullptr)
+    {
         set_error("No available OTA partition");
-        ESP_LOGE(TAG, "No available OTA partition found");
+        LOG_ERROR(TAG, "No available OTA partition found");
         return ESP_ERR_NOT_FOUND;
     }
-    
-    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%lx",
+
+    LOG_INFO(TAG, "Writing to partition subtype %d at offset 0x%lx",
              update_partition_->subtype, update_partition_->address);
-    
+
     // Begin OTA operation
     esp_err_t err = esp_ota_begin(update_partition_, firmware_size, &ota_handle_);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         set_error("Failed to begin OTA");
-        ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
+        LOG_ERROR(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
         return err;
     }
-    
+
     // Initialize progress tracking
     progress_info_.total_size = firmware_size;
     progress_info_.written_size = 0;
     progress_info_.progress_percent = 0;
     progress_info_.status_message = "OTA update started";
-    
+
     ota_in_progress_ = true;
     update_progress("OTA update started");
-    
+
     return ESP_OK;
 }
 
-esp_err_t OTAManager::write_ota_data(const uint8_t* data, size_t size) {
-    if (!ota_in_progress_) {
+esp_err_t OTAManager::write_ota_data(const uint8_t *data, size_t size)
+{
+    if (!ota_in_progress_)
+    {
         set_error("OTA not in progress");
         return ESP_ERR_INVALID_STATE;
     }
-    
-    if (data == nullptr || size == 0) {
+
+    if (data == nullptr || size == 0)
+    {
         set_error("Invalid data parameters");
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     // Validate first chunk contains valid ESP32 firmware header
-    if (progress_info_.written_size == 0) {
-        if (!validate_firmware_header(data, size)) {
+    if (progress_info_.written_size == 0)
+    {
+        if (!validate_firmware_header(data, size))
+        {
             set_error("Invalid firmware header");
-            ESP_LOGE(TAG, "Firmware validation failed");
+            LOG_ERROR(TAG, "Firmware validation failed");
             abort_ota_update();
             return ESP_ERR_INVALID_ARG;
         }
     }
-    
+
     esp_err_t err = esp_ota_write(ota_handle_, data, size);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         set_error("Failed to write OTA data");
-        ESP_LOGE(TAG, "esp_ota_write failed (%s)", esp_err_to_name(err));
+        LOG_ERROR(TAG, "esp_ota_write failed (%s)", esp_err_to_name(err));
         abort_ota_update();
         return err;
     }
-    
+
     // Update progress
     progress_info_.written_size += size;
-    if (progress_info_.total_size > 0) {
+    if (progress_info_.total_size > 0)
+    {
         progress_info_.progress_percent = (progress_info_.written_size * 100) / progress_info_.total_size;
         progress_info_.progress_percent = (progress_info_.progress_percent > 100) ? 100 : progress_info_.progress_percent;
     }
-    
+
     char progress_msg[64];
-    snprintf(progress_msg, sizeof(progress_msg), "Written %zu/%zu bytes (%d%%)", 
+    snprintf(progress_msg, sizeof(progress_msg), "Written %zu/%zu bytes (%d%%)",
              progress_info_.written_size, progress_info_.total_size, progress_info_.progress_percent);
     update_progress(progress_msg);
-    
-    ESP_LOGD(TAG, "OTA write: %zu bytes, total: %zu/%zu (%d%%)", 
-             size, progress_info_.written_size, progress_info_.total_size, progress_info_.progress_percent);
-    
+
+    LOG_DEBUG(TAG, "OTA write: %zu bytes, total: %zu/%zu (%d%%)",
+              size, progress_info_.written_size, progress_info_.total_size, progress_info_.progress_percent);
+
     return ESP_OK;
 }
 
-esp_err_t OTAManager::end_ota_update() {
-    if (!ota_in_progress_) {
+esp_err_t OTAManager::end_ota_update()
+{
+    if (!ota_in_progress_)
+    {
         set_error("OTA not in progress");
         return ESP_ERR_INVALID_STATE;
     }
-    
-    ESP_LOGI(TAG, "Finalizing OTA update");
+
+    LOG_INFO(TAG, "Finalizing OTA update");
     update_progress("Validating firmware...");
-    
+
     esp_err_t err = esp_ota_end(ota_handle_);
-    if (err != ESP_OK) {
-        if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+    if (err != ESP_OK)
+    {
+        if (err == ESP_ERR_OTA_VALIDATE_FAILED)
+        {
             set_error("Firmware validation failed");
-            ESP_LOGE(TAG, "Firmware validation failed");
-        } else {
+            LOG_ERROR(TAG, "Firmware validation failed");
+        }
+        else
+        {
             set_error("Failed to finalize OTA");
-            ESP_LOGE(TAG, "esp_ota_end failed (%s)", esp_err_to_name(err));
+            LOG_ERROR(TAG, "esp_ota_end failed (%s)", esp_err_to_name(err));
         }
         ota_in_progress_ = false;
         return err;
     }
-    
+
     // Set boot partition
     err = esp_ota_set_boot_partition(update_partition_);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         set_error("Failed to set boot partition");
-        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)", esp_err_to_name(err));
+        LOG_ERROR(TAG, "esp_ota_set_boot_partition failed (%s)", esp_err_to_name(err));
         ota_in_progress_ = false;
         return err;
     }
-    
+
     ota_in_progress_ = false;
     progress_info_.progress_percent = 100;
     update_progress("OTA update completed successfully");
-    
-    ESP_LOGI(TAG, "OTA update completed successfully. Restart required.");
+
+    LOG_INFO(TAG, "OTA update completed successfully. Restart required.");
     return ESP_OK;
 }
 
-esp_err_t OTAManager::abort_ota_update() {
-    if (!ota_in_progress_) {
+esp_err_t OTAManager::abort_ota_update()
+{
+    if (!ota_in_progress_)
+    {
         return ESP_OK;
     }
-    
-    ESP_LOGW(TAG, "Aborting OTA update");
+
+    LOG_WARN(TAG, "Aborting OTA update");
     esp_ota_abort(ota_handle_);
     ota_in_progress_ = false;
-    
+
     progress_info_.status_message = "OTA update aborted";
-    if (progress_callback_) {
+    if (progress_callback_)
+    {
         progress_callback_(progress_info_);
     }
-    
+
     return ESP_OK;
 }
 
-void OTAManager::set_progress_callback(ota_progress_callback_t callback) {
+void OTAManager::set_progress_callback(ota_progress_callback_t callback)
+{
     progress_callback_ = callback;
 }
 
-bool OTAManager::is_ota_in_progress() const {
+bool OTAManager::is_ota_in_progress() const
+{
     return ota_in_progress_;
 }
 
-const ota_progress_info_t& OTAManager::get_progress_info() const {
+const ota_progress_info_t &OTAManager::get_progress_info() const
+{
     return progress_info_;
 }
 
-esp_err_t OTAManager::mark_app_valid() {
-    ESP_LOGI(TAG, "Marking current app as valid");
+esp_err_t OTAManager::mark_app_valid()
+{
+    LOG_INFO(TAG, "Marking current app as valid");
     return esp_ota_mark_app_valid_cancel_rollback();
 }
 
-esp_err_t OTAManager::rollback_if_possible() {
-    const esp_partition_t* last_invalid_app = esp_ota_get_last_invalid_partition();
-    const esp_partition_t* currently_running = esp_ota_get_running_partition();
-    
-    if (last_invalid_app != nullptr && last_invalid_app != currently_running) {
-        ESP_LOGW(TAG, "Rolling back to previous partition");
+esp_err_t OTAManager::rollback_if_possible()
+{
+    const esp_partition_t *last_invalid_app = esp_ota_get_last_invalid_partition();
+    const esp_partition_t *currently_running = esp_ota_get_running_partition();
+
+    if (last_invalid_app != nullptr && last_invalid_app != currently_running)
+    {
+        LOG_WARN(TAG, "Rolling back to previous partition");
         esp_err_t err = esp_ota_set_boot_partition(last_invalid_app);
-        if (err == ESP_OK) {
+        if (err == ESP_OK)
+        {
             esp_restart();
         }
         return err;
     }
-    
-    ESP_LOGW(TAG, "No valid partition available for rollback");
+
+    LOG_WARN(TAG, "No valid partition available for rollback");
     return ESP_ERR_NOT_FOUND;
 }
 
-bool OTAManager::validate_firmware_header(const uint8_t* data, size_t size) {
-    if (size < sizeof(esp_image_header_t)) {
-        ESP_LOGE(TAG, "Data too small for image header");
+bool OTAManager::validate_firmware_header(const uint8_t *data, size_t size)
+{
+    if (size < sizeof(esp_image_header_t))
+    {
+        LOG_ERROR(TAG, "Data too small for image header");
         return false;
     }
-    
-    const esp_image_header_t* header = (const esp_image_header_t*)data;
-    
+
+    const esp_image_header_t *header = (const esp_image_header_t *)data;
+
     // Check magic number
-    if (header->magic != ESP_IMAGE_HEADER_MAGIC) {
-        ESP_LOGE(TAG, "Invalid image magic: 0x%02x", header->magic);
+    if (header->magic != ESP_IMAGE_HEADER_MAGIC)
+    {
+        LOG_ERROR(TAG, "Invalid image magic: 0x%02x", header->magic);
         return false;
     }
-    
+
     // Check chip ID
-    if (header->chip_id != ESP_CHIP_ID_ESP32) {
-        ESP_LOGE(TAG, "Invalid chip ID: %d", header->chip_id);
+    if (header->chip_id != ESP_CHIP_ID_ESP32)
+    {
+        LOG_ERROR(TAG, "Invalid chip ID: %d", header->chip_id);
         return false;
     }
-    
-    ESP_LOGI(TAG, "Firmware header validation passed");
+
+    LOG_INFO(TAG, "Firmware header validation passed");
     return true;
 }
 
-const char* OTAManager::get_last_error() const {
+const char *OTAManager::get_last_error() const
+{
     return last_error_;
 }
 
-void OTAManager::update_progress(const char* message) {
+void OTAManager::update_progress(const char *message)
+{
     progress_info_.status_message = message;
-    if (progress_callback_) {
+    if (progress_callback_)
+    {
         progress_callback_(progress_info_);
     }
 }
 
-void OTAManager::set_error(const char* error) {
+void OTAManager::set_error(const char *error)
+{
     strncpy(last_error_, error, sizeof(last_error_) - 1);
     last_error_[sizeof(last_error_) - 1] = '\0';
-    ESP_LOGE(TAG, "%s", error);
+    LOG_ERROR(TAG, "%s", error);
 }
 
 // C-style API implementation
-extern "C" {
-    esp_err_t ota_manager_begin(size_t firmware_size) {
+extern "C"
+{
+    esp_err_t ota_manager_begin(size_t firmware_size)
+    {
         return OTAManager::instance().begin_ota_update(firmware_size);
     }
-    
-    esp_err_t ota_manager_write(const uint8_t* data, size_t size) {
+
+    esp_err_t ota_manager_write(const uint8_t *data, size_t size)
+    {
         return OTAManager::instance().write_ota_data(data, size);
     }
-    
-    esp_err_t ota_manager_end() {
+
+    esp_err_t ota_manager_end()
+    {
         return OTAManager::instance().end_ota_update();
     }
-    
-    esp_err_t ota_manager_abort() {
+
+    esp_err_t ota_manager_abort()
+    {
         return OTAManager::instance().abort_ota_update();
     }
-    
-    bool ota_manager_is_in_progress() {
+
+    bool ota_manager_is_in_progress()
+    {
         return OTAManager::instance().is_ota_in_progress();
     }
-    
-    const ota_progress_info_t* ota_manager_get_progress() {
+
+    const ota_progress_info_t *ota_manager_get_progress()
+    {
         return &OTAManager::instance().get_progress_info();
     }
-    
-    void ota_manager_set_progress_callback(ota_progress_callback_t callback) {
+
+    void ota_manager_set_progress_callback(ota_progress_callback_t callback)
+    {
         OTAManager::instance().set_progress_callback(callback);
     }
-    
-    esp_err_t ota_manager_mark_app_valid() {
+
+    esp_err_t ota_manager_mark_app_valid()
+    {
         return OTAManager::instance().mark_app_valid();
     }
 }

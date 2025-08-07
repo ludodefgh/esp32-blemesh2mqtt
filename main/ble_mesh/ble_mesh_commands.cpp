@@ -1,7 +1,6 @@
 #include "ble_mesh_commands.h"
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
-#include <esp_log.h>
 #include <esp_err.h>
 #include <esp_console.h>
 #include <argtable3/argtable3.h>
@@ -10,6 +9,7 @@
 #include "debug/console_cmd.h"
 #include "message_queue.h"
 #include "Uui128.h"
+#include "common/log_common.h"
 
 #define TAG "MESH_COMMANDS"
 
@@ -37,7 +37,7 @@ void ble_mesh_ctl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             message_payload{
                                 .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
-                                    ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node_info->unicast);
+                                    LOG_WARN(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
@@ -49,7 +49,7 @@ void ble_mesh_ctl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     set_state_light.ctl_set.op_en = false;
                                     set_state_light.ctl_set.delay = 0;
                                     set_state_light.ctl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
-                                    int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
+                                    esp_ble_mesh_light_client_set_state(&common, &set_state_light);
                                 },
                                 .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET,
                                 .retries_left = 3,
@@ -60,7 +60,7 @@ void ble_mesh_ctl_temperature_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info) return;
     
-    ESP_LOGI(TAG, "[%s] Setting CTL Temperature for node 0x%04X", __func__, node_info->unicast);
+    LOG_INFO(TAG, "Setting CTL Temperature for node 0x%04X", node_info->unicast);
     node_info->color_mode = color_mode_t::color_temp;
 
     esp_ble_mesh_client_common_param_t common = {0};
@@ -77,7 +77,7 @@ void ble_mesh_ctl_temperature_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Set failed", __func__);
+        LOG_ERROR(TAG, "failed");
     }
 }
 
@@ -89,7 +89,7 @@ void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             message_payload{
                                 .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
-                                    ESP_LOGW(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", __func__, node_info->unicast);
+                                    LOG_WARN(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state = {0};
 
@@ -105,7 +105,7 @@ void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
                                     if (err)
                                     {
-                                        ESP_LOGE(TAG, "%s: call to esp_ble_mesh_light_client_set_state failed", __func__);
+                                        LOG_ERROR(TAG, "Call to esp_ble_mesh_light_client_set_state failed");
                                     }
                                 },
                                 .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET,
@@ -121,7 +121,7 @@ void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             message_payload{
                                 .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
-                                    ESP_LOGW(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
+                                    LOG_WARN(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
@@ -132,7 +132,7 @@ void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
                                     if (err)
                                     {
-                                        ESP_LOGE(TAG, "%s: call to esp_ble_mesh_config_client_set_state failed", __func__);
+                                        LOG_ERROR(TAG, "call to esp_ble_mesh_config_client_set_state failed");
                                     }
                                 },
                                 .opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET,
@@ -183,7 +183,7 @@ void ble_mesh_hsl_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET Get failed", __func__);
+        LOG_ERROR(TAG, "failed");
     }
 }
 
@@ -215,7 +215,7 @@ void ble_mesh_lightness_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET Get failed", __func__);
+        LOG_ERROR(TAG, "failed");
     }
 }
 
@@ -248,7 +248,7 @@ void ble_mesh_ctl_temperature_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: failed", __func__);
+        LOG_ERROR(TAG, "failed");
     }
 }
 
@@ -282,7 +282,7 @@ void ble_mesh_ctl_temperature_range_get(std::shared_ptr<bm2mqtt_node_info> node_
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: failed", __func__);
+        LOG_ERROR(TAG, "failed");
     }
 }
 
@@ -305,7 +305,7 @@ int ble_mesh_ctl_get(int argc, char **argv)
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET Get failed", __func__);
+            LOG_ERROR(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET Get failed");
         }
     }
     return 0;
@@ -347,7 +347,7 @@ void ble_mesh_lightness_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             message_payload{
                                 .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
                                 {
-                                    ESP_LOGW(TAG, "[ble_mesh_ctl_lightness_set] Setting Lightness for node 0x%04X", __func__, node_info->unicast);
+                                    LOG_WARN(TAG, "Setting Lightness for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
@@ -361,7 +361,7 @@ void ble_mesh_lightness_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
                                     if (err)
                                     {
-                                        ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed", __func__);
+                                        LOG_ERROR(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET Set failed");
                                     }
                                 },
                                 .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET,
@@ -395,7 +395,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         int err = esp_ble_mesh_light_client_set_state(&common, &set_state_light);
         if (err)
         {
-            ESP_LOGE(TAG, "%s: ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Get failed", __func__);
+            LOG_ERROR(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET Get failed");
         }
     }
     return 0;

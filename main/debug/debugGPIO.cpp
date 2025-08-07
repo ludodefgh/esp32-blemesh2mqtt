@@ -5,7 +5,7 @@
 // #include "esp_adc_cal.h"
 // #include "driver/gpio.h"
 
-// #define TAG "DEBUG_GPIO"
+#define TAG "DEBUG_GPIO"
 // #define BUTTON_GPIO GPIO_NUM_18  // Use the appropriate GPIO number for your button
 // #define BUTTON_GPIO2 GPIO_NUM_19 // Use the appropriate GPIO number for your button
 // #define DEBOUNCE_TIME_MS 200     // Debounce time in milliseconds
@@ -21,7 +21,7 @@
 
 // extern "C" void initDebugGPIO()
 // {
-//     ESP_LOGI(TAG, "initDebugGPIO");
+//     LOG_INFO(TAG, "initDebugGPIO");
 //     // Configure button GPIO
 //     gpio_config_t io_conf = {};
 

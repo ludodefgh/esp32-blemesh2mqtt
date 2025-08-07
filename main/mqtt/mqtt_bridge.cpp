@@ -1,7 +1,6 @@
 #include "mqtt_bridge.h"
 #include "mqtt_control.h"
-
-#include "esp_log.h"
+#include "common/log_common.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_mac.h"
@@ -11,8 +10,7 @@
 #include <stdlib.h>
 
 #include <memory>
-#include <wifi/wifi_station.h>
-#include <wifi/wifi_provisioning.h>
+#include "wifi/wifi_provisioning.h"
 
 #define TAG "APP_MQTT_BRIDGE"
 
@@ -267,7 +265,7 @@ void publish_bridge_info(const char *version)
     CJsonPtr bridge_info_json = create_bridge_info_json(version);
     char *json_data = cJSON_PrintUnformatted(bridge_info_json.get());
     int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_state_topic(), json_data, 0, 0, 0);
-    ESP_LOGV(TAG, "publish_bridge_info, msg_id=%d", msg_id);
+    LOG_VERBOSE(TAG, "publish_bridge_info, msg_id=%d", msg_id);
     cJSON_free(json_data);
 }
 
@@ -282,19 +280,19 @@ void send_bridge_discovery()
         {
             if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
             {
-                ESP_LOGI(TAG, "[send_bridge_discovery] Publishing switch discovery for %s", unique_id->valuestring);
+                LOG_INFO(TAG, "Publishing switch discovery for %s", unique_id->valuestring);
 
                 char *json_data = cJSON_PrintUnformatted(discovery_json.get());
                 const std::string topic = "homeassistant/switch/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
+                esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else{
-                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in switch discovery JSON");
+                LOG_ERROR(TAG, "Invalid unique_id in switch discovery JSON");
             }
         }
         else{
-            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in switch discovery JSON");
+            LOG_ERROR(TAG, "No unique_id found in switch discovery JSON");
         }
     }
 
@@ -305,19 +303,19 @@ void send_bridge_discovery()
         {
             if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
             {
-                ESP_LOGI(TAG, "[send_bridge_discovery] Publishing button discovery for %s", unique_id->valuestring);
+                LOG_INFO(TAG, "Publishing button discovery for %s", unique_id->valuestring);
 
                 char *json_data = cJSON_PrintUnformatted(discovery_json.get());
                 const std::string topic = "homeassistant/button/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
+                esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else{
-                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in button discovery JSON");
+                LOG_ERROR(TAG, "Invalid unique_id in button discovery JSON");
             }
         }
         else{
-            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in button discovery JSON");
+            LOG_ERROR(TAG, "No unique_id found in button discovery JSON");
         }
     }
 
@@ -328,19 +326,19 @@ void send_bridge_discovery()
         {
             if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
             {
-                ESP_LOGI(TAG, "[send_bridge_discovery] Publishing discovery for %s", unique_id->valuestring);
+                LOG_INFO(TAG, "Publishing discovery for %s", unique_id->valuestring);
 
                 char *json_data = cJSON_PrintUnformatted(sensor_json.get());
                 const std::string topic = "homeassistant/sensor/" + std::string{unique_id->valuestring} + "/config";
-                int msg_id = esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
+                esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
             else {
-                ESP_LOGE(TAG, "[send_bridge_discovery] Invalid unique_id in sensor JSON");
+                LOG_ERROR(TAG, "Invalid unique_id in sensor JSON");
             }
         }
         else{
-            ESP_LOGE(TAG, "[send_bridge_discovery] No unique_id found in sensor JSON");
+            LOG_ERROR(TAG, "No unique_id found in sensor JSON");
         }
     }
     
@@ -377,18 +375,18 @@ void start_periodic_publish_timer()
 
 void mqtt_publish_provisioning_enabled(bool enable_provisioning)
 {
-    ESP_LOGI(TAG, "[%s] Publish : %s", __func__, enable_provisioning ? "ON" : "OFF");
-    int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_provisioning_state_topic(), enable_provisioning ? "ON" : "OFF", 0, 0, 0);
+    LOG_INFO(TAG, "Publish : %s", enable_provisioning ? "ON" : "OFF");
+    esp_mqtt_client_publish(mqtt_get_client(), get_bridge_provisioning_state_topic(), enable_provisioning ? "ON" : "OFF", 0, 0, 0);
 }
 
 void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)
 {
     int msg_id = esp_mqtt_client_subscribe(client, get_bridge_provisioning_set_topic(), 0);
-    ESP_LOGI(TAG, "sent provisioning subscribe successful, msg_id=%d", msg_id);
+    LOG_INFO(TAG, "sent provisioning subscribe successful, msg_id=%d", msg_id);
     
     msg_id = esp_mqtt_client_subscribe(client, get_bridge_restart_set_topic(), 0);
-    ESP_LOGI(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);
+    LOG_INFO(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);
 
     msg_id = esp_mqtt_client_subscribe(client, "homeassistant/status", 0);
-    ESP_LOGI(TAG, "sent homeassistant/status subscribe successful, msg_id=%d", msg_id);
+    LOG_INFO(TAG, "sent homeassistant/status subscribe successful, msg_id=%d", msg_id);
 }
