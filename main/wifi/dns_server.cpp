@@ -1,11 +1,16 @@
 #include "dns_server.h"
 
-#include "lwip/sockets.h"
-#include "lwip/netdb.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+// Standard C/C++ libraries
 #include <string.h>
 #include <sys/socket.h>
+
+// ESP-IDF includes
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+
+// Project includes
 #include "common/log_common.h"
 
 static const char* TAG = "dns_server";

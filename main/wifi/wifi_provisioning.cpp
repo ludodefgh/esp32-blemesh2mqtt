@@ -1,22 +1,32 @@
-#include "wifi_provisioning.h"
-#include "dns_server.h"
+// Standard C/C++ libraries
+#include <stdio.h>
+#include <string.h>
 
-#include "common/log_common.h"
-#include "esp_wifi.h"
-#include "esp_netif.h"
+// ESP-IDF core includes
 #include "esp_http_server.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 #include "esp_system.h"
-#include "nvs_flash.h"
+#include "esp_wifi.h"
+
+// ESP-IDF component includes
 #include "nvs.h"
+#include "nvs_flash.h"
+
+// Third-party libraries
+#include "cJSON.h"
+#include <dhcpserver/dhcpserver.h>
+
+// LWIP includes
+#include "lwip/dns.h"
 #include "lwip/inet.h"
 #include "lwip/ip4_addr.h"
-#include "lwip/dns.h"
-#include "cJSON.h"
+
+// Project includes
+#include "common/log_common.h"
+#include "dns_server.h"
 #include "security/credential_encryption.h"
-#include <string.h>
-#include <stdio.h>
-#include <dhcpserver/dhcpserver.h>
+#include "wifi_provisioning.h"
 
 static const char* TAG = "wifi_provisioning";
 

@@ -1,15 +1,21 @@
 #include "ble_mesh_commands.h"
+
+// Standard C/C++ libraries
+#include <esp_console.h>
+#include <esp_err.h>
+
+// Third-party libraries
+#include <argtable3/argtable3.h>
+
+// Project includes
+#include "Uui128.h"
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
-#include <esp_err.h>
-#include <esp_console.h>
-#include <argtable3/argtable3.h>
-#include "debug_console_common.h"
-#include "debug/debug_commands_registry.h"
-#include "debug/console_cmd.h"
-#include "message_queue.h"
-#include "Uui128.h"
 #include "common/log_common.h"
+#include "debug/console_cmd.h"
+#include "debug/debug_commands_registry.h"
+#include "debug_console_common.h"
+#include "message_queue.h"
 
 #define TAG "MESH_COMMANDS"
 

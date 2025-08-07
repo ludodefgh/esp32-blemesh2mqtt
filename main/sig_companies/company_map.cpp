@@ -1,7 +1,13 @@
 #include "company_map.h"
+
+// Standard C/C++ libraries
 #include <cstring>
 #include <memory>
+
+// ESP-IDF includes
 #include "esp_littlefs.h"
+
+// Project includes
 #include "common/log_common.h"
 
 #define TAG "COMPANY_MAP_FS"

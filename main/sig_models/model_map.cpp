@@ -1,4 +1,6 @@
 #include "model_map.h"
+
+// Standard C/C++ libraries
 #include <cstring>
 
 // Store model map in Flash to save DRAM - rodata section automatically goes to Flash

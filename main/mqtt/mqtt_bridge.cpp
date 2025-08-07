@@ -1,15 +1,20 @@
 #include "mqtt_bridge.h"
-#include "mqtt_control.h"
-#include "common/log_common.h"
-#include "esp_timer.h"
-#include "esp_heap_caps.h"
-#include "esp_mac.h"
-#include "esp_wifi.h"
-#include "cJSON.h"
+
+// Standard C/C++ libraries
+#include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <memory>
+// ESP-IDF includes
+#include "cJSON.h"
+#include "esp_heap_caps.h"
+#include "esp_mac.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
+
+// Project includes
+#include "common/log_common.h"
+#include "mqtt_control.h"
 #include "wifi/wifi_provisioning.h"
 
 #define TAG "APP_MQTT_BRIDGE"

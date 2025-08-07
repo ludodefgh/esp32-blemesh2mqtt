@@ -1,11 +1,16 @@
 #include "mqtt_credentials.h"
 
-#include "nvs_flash.h"
-#include "nvs.h"
-#include "security/credential_encryption.h"
-#include <cstring>
+// Standard C/C++ libraries
 #include <cctype>
+#include <cstring>
+
+// ESP-IDF includes
+#include "nvs.h"
+#include "nvs_flash.h"
+
+// Project includes
 #include "common/log_common.h"
+#include "security/credential_encryption.h"
 
 static const char* TAG = "MQTT_CREDS";
 

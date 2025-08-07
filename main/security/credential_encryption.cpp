@@ -1,12 +1,17 @@
 #include "credential_encryption.h"
 
-#include "esp_system.h"
+// Standard C/C++ libraries
+#include <cstring>
+
+// ESP-IDF includes
 #include "esp_mac.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
-#include <cstring>
+
+// Project includes
 #include "common/log_common.h"
 
 static const char* TAG = "CRED_ENCRYPT";

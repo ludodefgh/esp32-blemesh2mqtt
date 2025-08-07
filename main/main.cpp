@@ -1,32 +1,34 @@
+// Standard C/C++ libraries
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
-#include <inttypes.h>
-#include "common/log_common.h"
-#include "nvs_flash.h"
 
+// ESP-IDF includes
 #include "esp_ble_mesh_defs.h"
-#include "esp_console.h"
-#include "esp_littlefs.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
-#include "esp_system.h"
+#include "esp_console.h"
+#include "esp_littlefs.h"
 #include "esp_mac.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
 
-#include "ble_mesh/ble_mesh_control.h"
-#include "ble_mesh/ble_mesh_provisioning.h"
-#include "ble_mesh/ble_mesh_node.h"
-#include "mqtt/mqtt_control.h"
-#include "web_server/web_server.h"
+// Project includes
 #include "ble_mesh/ble_mesh_commands.h"
-#include "debug/debug_commands_registry.h"
+#include "ble_mesh/ble_mesh_control.h"
+#include "ble_mesh/ble_mesh_node.h"
+#include "ble_mesh/ble_mesh_provisioning.h"
+#include "common/log_common.h"
 #include "debug/console_cmd.h"
-#include "wifi/wifi_provisioning.h"
-#include "wifi/wifi_commands.h"
+#include "debug/debug_commands_registry.h"
+#include "mqtt/mqtt_control.h"
 #include "security/credential_encryption.h"
+#include "web_server/web_server.h"
+#include "wifi/wifi_commands.h"
+#include "wifi/wifi_provisioning.h"
 
 #define TAG "MAIN"
 
-extern bool init_done;
 static int heap_size(int argc, char **argv)
 {
     uint32_t heap_size = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);

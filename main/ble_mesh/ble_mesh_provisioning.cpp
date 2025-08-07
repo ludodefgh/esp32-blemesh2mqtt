@@ -1,28 +1,30 @@
 #include "ble_mesh_provisioning.h"
 
+// Standard C/C++ libraries
+#include <inttypes.h>
+#include <memory>
 #include <stdio.h>
 #include <string.h>
-#include <inttypes.h>
 #include <vector>
-#include <memory>
 
-#include "esp_ble_mesh_defs.h"
+// ESP-IDF includes
 #include "esp_ble_mesh_common_api.h"
-#include "esp_ble_mesh_provisioning_api.h"
 #include "esp_ble_mesh_config_model_api.h"
+#include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_generic_model_api.h"
-
-#include "common/log_common.h"
-#include "nvs_flash.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_ble_mesh_local_data_operation_api.h"
+#include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
 #include "esp_mac.h"
-#include "esp_ble_mesh_local_data_operation_api.h"
+#include "nvs_flash.h"
 
+// Project includes
 #include "ble_mesh_node.h"
-#include "debug_console_common.h"
-#include "debug/debug_commands_registry.h"
+#include "common/log_common.h"
 #include "debug/console_cmd.h"
+#include "debug/debug_commands_registry.h"
+#include "debug_console_common.h"
 #include "message_queue.h"
 
 #define TAG "APP_PROV"
