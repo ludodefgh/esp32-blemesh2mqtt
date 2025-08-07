@@ -1,24 +1,25 @@
 #include "wifi_commands.h"
 #include "wifi_provisioning.h"
-#include "esp_log.h"
+
 #include "esp_console.h"
 #include "esp_system.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
+#include "common/log_common.h"
 
 static const char* TAG = "wifi_commands";
 
 static int wifi_clear_cmd(int argc, char **argv)
 {
-    ESP_LOGI(TAG, "Clearing WiFi credentials...");
+    LOG_INFO(TAG, "Clearing WiFi credentials...");
     esp_err_t err = wifi_provisioning_clear_credentials();
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi credentials cleared successfully");
-        ESP_LOGI(TAG, "Restarting device to enter captive portal mode...");
+        LOG_INFO(TAG, "WiFi credentials cleared successfully");
+        LOG_INFO(TAG, "Restarting device to enter captive portal mode...");
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     } else {
-        ESP_LOGE(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
     }
     return 0;
 }
@@ -30,12 +31,12 @@ static int wifi_status_cmd(int argc, char **argv)
         char password[64] = {0};
         esp_err_t err = wifi_provisioning_get_credentials(ssid, password, sizeof(ssid), sizeof(password));
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "WiFi configured - SSID: %s", ssid);
+            LOG_INFO(TAG, "WiFi configured - SSID: %s", ssid);
         } else {
-            ESP_LOGI(TAG, "WiFi configured but failed to read credentials");
+            LOG_INFO(TAG, "WiFi configured but failed to read credentials");
         }
     } else {
-        ESP_LOGI(TAG, "WiFi not configured - will start captive portal on boot");
+        LOG_INFO(TAG, "WiFi not configured - will start captive portal on boot");
     }
     
     wifi_provisioning_state_t state = wifi_provisioning_get_state();
@@ -48,7 +49,7 @@ static int wifi_status_cmd(int argc, char **argv)
         case WIFI_PROV_STATE_STA_FAILED: state_str = "STA_FAILED"; break;
         default: state_str = "UNKNOWN"; break;
     }
-    ESP_LOGI(TAG, "Current state: %s", state_str);
+    LOG_INFO(TAG, "Current state: %s", state_str);
     
     return 0;
 }

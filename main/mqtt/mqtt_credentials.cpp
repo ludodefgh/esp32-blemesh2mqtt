@@ -1,10 +1,11 @@
 #include "mqtt_credentials.h"
-#include "esp_log.h"
+
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "security/credential_encryption.h"
 #include <cstring>
 #include <cctype>
+#include "common/log_common.h"
 
 static const char* TAG = "MQTT_CREDS";
 
@@ -32,14 +33,14 @@ void MqttCredentialManager::set_connection_state(mqtt_connection_state_t state) 
         std::string old_state = get_connection_state_string();
         connection_state_ = state;
         std::string new_state = get_connection_state_string();
-        ESP_LOGI(TAG, "Connection state changed: %s -> %s", 
+        LOG_INFO(TAG, "Connection state changed: %s -> %s", 
                  old_state.c_str(), new_state.c_str());
     }
 }
 
 void MqttCredentialManager::set_last_error(const std::string& error) {
     last_error_ = error;
-    ESP_LOGW(TAG, "MQTT Error: %s", error.c_str());
+    LOG_WARN(TAG, "MQTT Error: %s", error.c_str());
 }
 
 // Helper function to validate IP address
@@ -135,37 +136,37 @@ esp_err_t MqttCredentialManager::encrypt_and_store(const std::string& key, const
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
     
     // Encrypt the value
     std::string encrypted_value;
     if (!CredentialEncryption::instance().is_initialized()) {
-        ESP_LOGE(TAG, "Encryption not initialized");
+        LOG_ERROR(TAG, "Encryption not initialized");
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_STATE;
     }
     
     esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(value, encrypted_value);
     if (encrypt_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to encrypt %s: %s", key.c_str(), esp_err_to_name(encrypt_err));
+        LOG_ERROR(TAG, "Failed to encrypt %s: %s", key.c_str(), esp_err_to_name(encrypt_err));
         nvs_close(nvs_handle);
         return encrypt_err;
     }
     
-    ESP_LOGI(TAG, "MQTT %s encrypted successfully", key.c_str());
+    LOG_INFO(TAG, "MQTT %s encrypted successfully", key.c_str());
     
     err = nvs_set_str(nvs_handle, key.c_str(), encrypted_value.c_str());
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set NVS key %s: %s", key.c_str(), esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to set NVS key %s: %s", key.c_str(), esp_err_to_name(err));
         nvs_close(nvs_handle);
         return err;
     }
     
     err = nvs_commit(nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
     }
     
     nvs_close(nvs_handle);
@@ -177,7 +178,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string& key, std::s
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
         if (err != ESP_ERR_NVS_NOT_FOUND) {
-            ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+            LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         }
         return err;
     }
@@ -200,7 +201,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string& key, std::s
     // Decrypt the value
     std::string decrypted_value;
     if (!CredentialEncryption::instance().is_initialized()) {
-        ESP_LOGE(TAG, "Encryption not initialized");
+        LOG_ERROR(TAG, "Encryption not initialized");
         delete[] encrypted_buffer;
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_STATE;
@@ -208,7 +209,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string& key, std::s
     
     esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_buffer, decrypted_value);
     if (decrypt_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to decrypt %s: %s", key.c_str(), esp_err_to_name(decrypt_err));
+        LOG_ERROR(TAG, "Failed to decrypt %s: %s", key.c_str(), esp_err_to_name(decrypt_err));
         delete[] encrypted_buffer;
         nvs_close(nvs_handle);
         return decrypt_err;
@@ -225,7 +226,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string& key, std::s
 }
 
 esp_err_t MqttCredentialManager::load_credentials() {
-    ESP_LOGI(TAG, "Loading MQTT credentials from NVS");
+    LOG_INFO(TAG, "Loading MQTT credentials from NVS");
     
     credentials_.clear();
     
@@ -233,11 +234,11 @@ esp_err_t MqttCredentialManager::load_credentials() {
     esp_err_t err = decrypt_and_load(KEY_BROKER_HOST, credentials_.broker_host);
     if (err != ESP_OK) {
         if (err == ESP_FAIL) {
-            ESP_LOGW(TAG, "MQTT credentials appear to be in old plain text format, clearing them");
-            ESP_LOGW(TAG, "Please reconfigure MQTT settings via the web interface");
+            LOG_WARN(TAG, "MQTT credentials appear to be in old plain text format, clearing them");
+            LOG_WARN(TAG, "Please reconfigure MQTT settings via the web interface");
             clear_credentials(); // Clear old plain text credentials
         }
-        ESP_LOGW(TAG, "No valid broker host found in NVS");
+        LOG_WARN(TAG, "No valid broker host found in NVS");
         set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
         return err;
     }
@@ -268,7 +269,7 @@ esp_err_t MqttCredentialManager::load_credentials() {
     // Load username
     err = decrypt_and_load(KEY_USERNAME, credentials_.username);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "No username found in NVS");
+        LOG_WARN(TAG, "No username found in NVS");
         credentials_.clear();
         set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
         return err;
@@ -277,7 +278,7 @@ esp_err_t MqttCredentialManager::load_credentials() {
     // Load password
     err = decrypt_and_load(KEY_PASSWORD, credentials_.password);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "No password found in NVS");
+        LOG_WARN(TAG, "No password found in NVS");
         credentials_.clear();
         set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
         return err;
@@ -286,13 +287,13 @@ esp_err_t MqttCredentialManager::load_credentials() {
     // Validate loaded credentials
     std::string error_msg;
     if (!validate_credentials(credentials_, error_msg)) {
-        ESP_LOGE(TAG, "Loaded credentials are invalid: %s", error_msg.c_str());
+        LOG_ERROR(TAG, "Loaded credentials are invalid: %s", error_msg.c_str());
         credentials_.clear();
         set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Successfully loaded MQTT credentials for broker: %s:%d", 
+    LOG_INFO(TAG, "Successfully loaded MQTT credentials for broker: %s:%d", 
              credentials_.broker_host.c_str(), credentials_.broker_port);
     set_connection_state(mqtt_connection_state_t::CONFIGURED);
     
@@ -300,19 +301,19 @@ esp_err_t MqttCredentialManager::load_credentials() {
 }
 
 esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t& creds) {
-    ESP_LOGI(TAG, "Saving MQTT credentials to NVS");
+    LOG_INFO(TAG, "Saving MQTT credentials to NVS");
     
     // Validate before saving
     std::string error_msg;
     if (!validate_credentials(creds, error_msg)) {
-        ESP_LOGE(TAG, "Invalid credentials: %s", error_msg.c_str());
+        LOG_ERROR(TAG, "Invalid credentials: %s", error_msg.c_str());
         return ESP_ERR_INVALID_ARG;
     }
     
     // Save broker host
     esp_err_t err = encrypt_and_store(KEY_BROKER_HOST, creds.broker_host);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save broker host");
+        LOG_ERROR(TAG, "Failed to save broker host");
         return err;
     }
     
@@ -320,20 +321,20 @@ esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t& cred
     nvs_handle_t nvs_handle;
     err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
     
     err = nvs_set_u16(nvs_handle, KEY_BROKER_PORT, creds.broker_port);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save broker port");
+        LOG_ERROR(TAG, "Failed to save broker port");
         nvs_close(nvs_handle);
         return err;
     }
     
     err = nvs_set_u8(nvs_handle, KEY_USE_SSL, creds.use_ssl ? 1 : 0);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save SSL flag");
+        LOG_ERROR(TAG, "Failed to save SSL flag");
         nvs_close(nvs_handle);
         return err;
     }
@@ -341,21 +342,21 @@ esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t& cred
     err = nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to commit NVS");
+        LOG_ERROR(TAG, "Failed to commit NVS");
         return err;
     }
     
     // Save username
     err = encrypt_and_store(KEY_USERNAME, creds.username);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save username");
+        LOG_ERROR(TAG, "Failed to save username");
         return err;
     }
     
     // Save password
     err = encrypt_and_store(KEY_PASSWORD, creds.password);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save password");
+        LOG_ERROR(TAG, "Failed to save password");
         return err;
     }
     
@@ -363,19 +364,19 @@ esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t& cred
     credentials_ = creds;
     set_connection_state(mqtt_connection_state_t::CONFIGURED);
     
-    ESP_LOGI(TAG, "Successfully saved MQTT credentials for broker: %s:%d", 
+    LOG_INFO(TAG, "Successfully saved MQTT credentials for broker: %s:%d", 
              credentials_.broker_host.c_str(), credentials_.broker_port);
     
     return ESP_OK;
 }
 
 esp_err_t MqttCredentialManager::clear_credentials() {
-    ESP_LOGI(TAG, "Clearing MQTT credentials from NVS");
+    LOG_INFO(TAG, "Clearing MQTT credentials from NVS");
     
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
     }
     
@@ -394,7 +395,7 @@ esp_err_t MqttCredentialManager::clear_credentials() {
     credentials_.clear();
     set_connection_state(mqtt_connection_state_t::UNCONFIGURED);
     
-    ESP_LOGI(TAG, "Successfully cleared MQTT credentials");
+    LOG_INFO(TAG, "Successfully cleared MQTT credentials");
     return err;
 }
 

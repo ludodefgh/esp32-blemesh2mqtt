@@ -3,7 +3,7 @@
 //// MQTT includes start
 #include "esp_event.h"
 #include "esp_netif.h"
-#include "esp_log.h"
+#include "common/log_common.h"
 #include "esp_console.h"
 #include "esp_system.h"
 //// MQTT includes end
@@ -32,7 +32,7 @@ static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0)
     {
-        ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
+        LOG_ERROR(TAG, "Last error %s: 0x%x", message, error_code);
     }
 }
 
@@ -67,7 +67,7 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
 static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info) {
-        ESP_LOGW(TAG, "Failed to get node base topic - node_info is null");
+        LOG_WARN(TAG, "Failed to get node base topic - node_info is null");
         return {};
     }
     
@@ -76,7 +76,7 @@ static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_i
         std::string node_addr {bt_hex(mesh_node->addr, BD_ADDR_LEN)};
         return get_bridge_base_topic() + "/node_" + node_addr;
     }
-    ESP_LOGW(TAG, "Failed to get node base topic - node not found");
+    LOG_WARN(TAG, "Failed to get node base topic - node not found");
     return {};
 }
 
@@ -124,7 +124,7 @@ void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client)
 void mqtt_subscribe_node(esp_mqtt_client_handle_t client, std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     int msg_id = esp_mqtt_client_subscribe(client, mqtt_get_node_set_topic(node_info).c_str(), 0);
-    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+    LOG_INFO(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 }
 
 /*
@@ -139,16 +139,15 @@ void mqtt_subscribe_node(esp_mqtt_client_handle_t client, std::shared_ptr<bm2mqt
  */
 static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
-    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32, base, event_id);
+    LOG_DEBUG(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32, base, event_id);
     esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
     esp_mqtt_client_handle_t client = event->client;
-    int msg_id = 0;
 
-    ESP_LOGD(TAG, "free heap size is %" PRIu32 ", minimum %" PRIu32, esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+    LOG_DEBUG(TAG, "free heap size is %" PRIu32 ", minimum %" PRIu32, esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
     switch ((esp_mqtt_event_id_t)event_id)
     {
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        LOG_INFO(TAG, "MQTT_EVENT_CONNECTED");
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::CONNECTED);
         esp_mqtt5_client_set_publish_property(client, &publish_property);
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
@@ -158,7 +157,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
 
         {
             send_bridge_discovery();
-            int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
+            esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         }
 
         start_periodic_publish_timer();
@@ -166,32 +165,32 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         break;
     case MQTT_EVENT_DISCONNECTED:
     {
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        LOG_INFO(TAG, "MQTT_EVENT_DISCONNECTED");
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
     }
         break;
     case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGD(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        LOG_DEBUG(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+        LOG_INFO(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
         esp_mqtt5_client_set_disconnect_property(client, &disconnect_property);
         esp_mqtt5_client_delete_user_property(disconnect_property.user_property);
         disconnect_property.user_property = NULL;
         esp_mqtt_client_disconnect(client);
         break;
     case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        LOG_INFO(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "[MQTT_EVENT_DATA] TOPIC=%.*s", event->topic_len, event->topic);
-        ESP_LOGI(TAG, "[MQTT_EVENT_DATA] DATA=%.*s", event->data_len, event->data);
+        LOG_INFO(TAG, "[MQTT_EVENT_DATA] TOPIC=%.*s", event->topic_len, event->topic);
+        LOG_INFO(TAG, "[MQTT_EVENT_DATA] DATA=%.*s", event->data_len, event->data);
 
         mqtt_parse_event_data(event);
         break;
     case MQTT_EVENT_ERROR:
-        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        ESP_LOGI(TAG, "MQTT5 return code is %d", event->error_handle->connect_return_code);
+        LOG_INFO(TAG, "MQTT_EVENT_ERROR");
+        LOG_INFO(TAG, "MQTT5 return code is %d", event->error_handle->connect_return_code);
         
         // Set appropriate error state based on the error type
         if (event->error_handle->connect_return_code == 4 || event->error_handle->connect_return_code == 5) {
@@ -203,14 +202,14 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
             log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
             log_error_if_nonzero("captured as transport's socket errno", event->error_handle->esp_transport_sock_errno);
-            ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
+            LOG_INFO(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
         } else {
             mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_TIMEOUT);
             mqtt_credentials().set_last_error("Connection timeout or unknown error");
         }
         break;
     default:
-        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        LOG_INFO(TAG, "Other event id:%d", event->event_id);
         break;
     }
 }
@@ -227,16 +226,16 @@ std::string user{};
 std::string pass{};
 bool mqtt5_app_start(void)
 {
-    ESP_LOGD(TAG, "mqtt5_app_start");
+    LOG_DEBUG(TAG, "mqtt5_app_start");
 
     // Load credentials from NVS
     if (mqtt_credentials().load_credentials() != ESP_OK) {
-        ESP_LOGW(TAG, "No valid MQTT credentials found. MQTT will not start.");
+        LOG_WARN(TAG, "No valid MQTT credentials found. MQTT will not start.");
         return false;
     }
 
     if (!mqtt_credentials().has_valid_credentials()) {
-        ESP_LOGE(TAG, "Invalid MQTT credentials. MQTT will not start.");
+        LOG_ERROR(TAG, "Invalid MQTT credentials. MQTT will not start.");
         return false;
     }
 
@@ -289,29 +288,29 @@ bool mqtt5_app_start(void)
     esp_mqtt_client_start(mqtt_client);
 
     
-    ESP_LOGI(TAG, "MQTT client started successfully with broker: %s:%d", 
+    LOG_INFO(TAG, "MQTT client started successfully with broker: %s:%d", 
              creds.broker_host.c_str(), creds.broker_port);
     return true;
 }
 
 void mqtt5_app_stop(void)
 {
-    ESP_LOGI(TAG, "Stopping MQTT client");
+    LOG_INFO(TAG, "Stopping MQTT client");
     
     if (mqtt_client) {
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
         esp_mqtt_client_stop(mqtt_client);
         esp_mqtt_client_destroy(mqtt_client);
         mqtt_client = nullptr;
-        ESP_LOGI(TAG, "MQTT client stopped and destroyed");
+        LOG_INFO(TAG, "MQTT client stopped and destroyed");
     } else {
-        ESP_LOGW(TAG, "MQTT client was not running");
+        LOG_WARN(TAG, "MQTT client was not running");
     }
 }
 
 void mqtt5_app_restart(void)
 {
-    ESP_LOGI(TAG, "Restarting MQTT client");
+    LOG_INFO(TAG, "Restarting MQTT client");
     
     // Stop existing client if running
     mqtt5_app_stop();
@@ -340,7 +339,6 @@ namespace std
 }
 
 /*
-
 To remove the component, publish an empty string to the discovery topic. This will remove the component and clear the published discovery payload. It will also remove the device entry if there are no further references to it.
 */
 std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_info> node)
@@ -471,17 +469,17 @@ void on_home_assistant_restart_timer(void *arg)
         mqtt_subscribe_all_nodes(mqtt_get_client());
         mqtt_bridge_subscribe(mqtt_get_client());
         send_bridge_discovery();
-        int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
+        esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         const char *version = "0.1.0";
         publish_bridge_info(version);
     }
     else
     {
-        ESP_LOGW(TAG, "MQTT client not connected, skipping resubscribe");
+        LOG_WARN(TAG, "MQTT client not connected, skipping resubscribe");
     }
     if (num_try == 0)
     {
-        ESP_LOGW(TAG, "home_assistant_restart_timer expired - stopping timer and cleaning up");
+        LOG_WARN(TAG, "home_assistant_restart_timer expired - stopping timer and cleaning up");
         if (home_assistant_restart_timer)
         {
             esp_timer_stop(home_assistant_restart_timer);
@@ -497,7 +495,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
     {
         if (strncmp(event->data, "online", event->data_len) == 0)
         {
-            ESP_LOGI(TAG, "Home Assistant is online - scheduling discovery republish");
+            LOG_INFO(TAG, "Home Assistant is online - scheduling discovery republish");
         
             // Stop existing timer if running
             if (home_assistant_restart_timer) {
@@ -516,23 +514,23 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                 err = esp_timer_start_periodic(home_assistant_restart_timer, 60 * 1000 * 1000); // 60 second intervals
                 if (err == ESP_OK) {
                     num_try = 3;
-                    ESP_LOGI(TAG, "Started Home Assistant restart timer (60s intervals, 3 retries)");
+                    LOG_INFO(TAG, "Started Home Assistant restart timer (60s intervals, 3 retries)");
                 } else {
-                    ESP_LOGE(TAG, "Failed to start Home Assistant restart timer: %s", esp_err_to_name(err));
+                    LOG_ERROR(TAG, "Failed to start Home Assistant restart timer: %s", esp_err_to_name(err));
                 }
             } else {
-                ESP_LOGE(TAG, "Failed to create Home Assistant restart timer: %s", esp_err_to_name(err));
+                LOG_ERROR(TAG, "Failed to create Home Assistant restart timer: %s", esp_err_to_name(err));
             }
         }
         else if (strncmp(event->data, "offline", event->data_len) == 0)
         {
-            ESP_LOGI(TAG, "Home Assistant is offline - doing nothing");
+            LOG_INFO(TAG, "Home Assistant is offline - doing nothing");
         }
     }
 
     if (strncmp(event->topic, get_bridge_provisioning_set_topic(), event->topic_len) == 0)
     {
-        ESP_LOGI(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data  );
+        LOG_INFO(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data  );
         ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON",event->data_len) == 0);
    
         return;
@@ -540,11 +538,11 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
     if (strncmp(event->topic, get_bridge_restart_set_topic(), event->topic_len) == 0)
     {
-        ESP_LOGI(TAG, "Received restart command from MQTT: [%.*s]", event->data_len, event->data);
+        LOG_INFO(TAG, "Received restart command from MQTT: [%.*s]", event->data_len, event->data);
 
         if (strncmp(event->data, "RESTART", event->data_len) == 0)
         {
-            ESP_LOGW(TAG, "Bridge restart requested via MQTT - restarting in 2 seconds...");
+            LOG_WARN(TAG, "Bridge restart requested via MQTT - restarting in 2 seconds...");
             
             // Give time for MQTT response to be sent before restarting
             vTaskDelay(pdMS_TO_TICKS(2000));
@@ -588,7 +586,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                   
                     if ((node_info->features & FEATURE_LIGHT_LIGHTNESS) || (node_info->features & FEATURE_LIGHT_HSL))
                     {
-                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light Lightness feature supported");
+                        LOG_WARN(TAG, "[mqtt_parse_event_data] Light Lightness feature supported");
                         if (cJSON *brightness = cJSON_GetObjectItemCaseSensitive(response.get(), "brightness"))
                         {
                             if (cJSON_IsNumber(brightness))
@@ -603,7 +601,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
                     if (node_info->features & FEATURE_LIGHT_HSL)
                     {
-                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light HSL feature supported");
+                        LOG_WARN(TAG, "[mqtt_parse_event_data] Light HSL feature supported");
                         if (cJSON *color = cJSON_GetObjectItemCaseSensitive(response.get(), "color"))
                         {
                             if (cJSON_IsObject(color))
@@ -631,7 +629,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
                     if (node_info->features & FEATURE_LIGHT_CTL)
                     {
-                        ESP_LOGW(TAG, "[mqtt_parse_event_data] Light CTL feature supported");
+                        LOG_WARN(TAG, "[mqtt_parse_event_data] Light CTL feature supported");
                         if (cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(response.get(), "color_temp"))
                         {
                             if (cJSON_IsNumber(color_temp))
@@ -692,7 +690,7 @@ int send_discovery(int argc, char **argv)
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
-        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+        LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
     
         cJSON_free(json_data);
     }
@@ -714,7 +712,7 @@ int delete_entity(int argc, char **argv)
         const char *json_data = "";
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
-        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+        LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
     }
 
     return 0;
@@ -723,32 +721,32 @@ int delete_entity(int argc, char **argv)
 void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info) {
-        ESP_LOGE(TAG, "mqtt_node_send_status: node_info is null");
+        LOG_ERROR(TAG, "mqtt_node_send_status: node_info is null");
         return;
     }
 
     const std::string root_publish = mqtt_get_node_state_topic(node_info);
     if (root_publish.empty()) {
-        ESP_LOGE(TAG, "mqtt_node_send_status: failed to get state topic for node");
+        LOG_ERROR(TAG, "mqtt_node_send_status: failed to get state topic for node");
         return;
     }
 
     std::unique_ptr<cJSON> status_message = make_status_message(node_info);
     if (!status_message) {
-        ESP_LOGE(TAG, "mqtt_node_send_status: failed to create status message");
+        LOG_ERROR(TAG, "mqtt_node_send_status: failed to create status message");
         return;
     }
 
     char *json_data = cJSON_PrintUnformatted(status_message.get());
     if (!json_data) {
-        ESP_LOGE(TAG, "mqtt_node_send_status: failed to format JSON");
+        LOG_ERROR(TAG, "mqtt_node_send_status: failed to format JSON");
         return;
     }
 
     int msg_id = esp_mqtt_client_publish(mqtt_client, root_publish.c_str(), json_data, 0, 0, 0);
-    ESP_LOGI(TAG, "sent status publish successful, msg_id=%d", msg_id);
-    ESP_LOGI(TAG, "TOPIC=%s", root_publish.c_str());
-    ESP_LOGI(TAG, "DATA=%s", json_data);
+    LOG_INFO(TAG, "sent status publish successful, msg_id=%d", msg_id);
+    LOG_INFO(TAG, "TOPIC=%s", root_publish.c_str());
+    LOG_INFO(TAG, "DATA=%s", json_data);
 
     cJSON_free(json_data);
 }
@@ -759,7 +757,7 @@ void mqtt_send_discovery(std::shared_ptr<bm2mqtt_node_info> node_info)
         char *json_data = cJSON_PrintUnformatted(discovery_message.get());
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
-        ESP_LOGI(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+        LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
 
         cJSON_free(json_data);
 }
@@ -768,23 +766,23 @@ void mqtt_remove_node(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info)
     {
-        ESP_LOGE(TAG, "mqtt_remove_node: node_info is null");
+        LOG_ERROR(TAG, "mqtt_remove_node: node_info is null");
         return;
     }
 
     const std::string discovery_topic = mqtt_get_node_discovery_id(node_info);
     if (discovery_topic.empty())
     {
-        ESP_LOGE(TAG, "mqtt_remove_node: failed to get discovery topic for node");
+        LOG_ERROR(TAG, "mqtt_remove_node: failed to get discovery topic for node");
         return;
     }
 
     // Publishing empty string to discovery topic removes the entity from Home Assistant
     const char *empty_payload = "";
     int msg_id = esp_mqtt_client_publish(mqtt_client, discovery_topic.c_str(), empty_payload, 0, 0, 0);
-    ESP_LOGI(TAG, "Removed node from MQTT discovery: %s", discovery_topic.c_str());
+    LOG_INFO(TAG, "Removed node from MQTT discovery: %s", discovery_topic.c_str());
     msg_id = esp_mqtt_client_unsubscribe(mqtt_client, mqtt_get_node_set_topic(node_info).c_str());
-    ESP_LOGI(TAG, "Unsubscribed from node set topic: %s, msg_id=%d", mqtt_get_node_set_topic(node_info).c_str(), msg_id);
+    LOG_INFO(TAG, "Unsubscribed from node set topic: %s, msg_id=%d", mqtt_get_node_set_topic(node_info).c_str(), msg_id);
 }
 
 int mqtt_send_status(int argc, char **argv)

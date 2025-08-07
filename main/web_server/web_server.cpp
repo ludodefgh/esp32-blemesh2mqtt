@@ -1,7 +1,7 @@
 #include   "web_server.h"
 
 #include "esp_http_server.h"
-#include "esp_log.h"
+#include "common/log_common.h"
 #include <esp_ble_mesh_networking_api.h>
 #include <ble_mesh/ble_mesh_provisioning.h>
 #include <ble_mesh/ble_mesh_commands.h>
@@ -665,7 +665,7 @@ esp_err_t node_wildcard_handler(httpd_req_t *req)
 
 esp_err_t reset_wifi_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Clearing WiFi credentials via web interface...");
+    LOG_INFO(TAG, "Clearing WiFi credentials via web interface...");
     
     // Send response first
     httpd_resp_send(req, NULL, 0);
@@ -677,24 +677,24 @@ esp_err_t reset_wifi_handler(httpd_req_t *req)
     // Clear WiFi credentials from NVS
     esp_err_t err = wifi_provisioning_clear_credentials();
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi credentials cleared successfully");
+        LOG_INFO(TAG, "WiFi credentials cleared successfully");
         
         // Also clear any WiFi configuration in RAM
         wifi_config_t wifi_config = {};
         esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
         
-        ESP_LOGI(TAG, "Restarting device to enter captive portal mode...");
+        LOG_INFO(TAG, "Restarting device to enter captive portal mode...");
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     } else {
-        ESP_LOGE(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
     }
     
     return ESP_OK;
 }
 
 esp_err_t rename_node_handler(httpd_req_t *req) {
-    ESP_LOGW(TAG, "rename_node_handler called");
+    LOG_WARN(TAG, "rename_node_handler called");
     char buf[256];
     int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (len <= 0 || len >= sizeof(buf)) {
@@ -761,20 +761,20 @@ static bool authenticate_ota_request(httpd_req_t *req) {
     size_t header_len = httpd_req_get_hdr_value_len(req, "X-OTA-Key");
     
     if (header_len == 0 || header_len >= sizeof(auth_header)) {
-        ESP_LOGW(TAG, "OTA authentication failed: missing or invalid X-OTA-Key header");
+        LOG_WARN(TAG, "OTA authentication failed: missing or invalid X-OTA-Key header");
         return false;
     }
     
     if (httpd_req_get_hdr_value_str(req, "X-OTA-Key", auth_header, sizeof(auth_header)) != ESP_OK) {
-        ESP_LOGW(TAG, "OTA authentication failed: could not read X-OTA-Key header");
+        LOG_WARN(TAG, "OTA authentication failed: could not read X-OTA-Key header");
         return false;
     }
     
     bool authenticated = (strcmp(auth_header, OTA_API_KEY) == 0);
     if (!authenticated) {
-        ESP_LOGW(TAG, "OTA authentication failed: invalid API key");
+        LOG_WARN(TAG, "OTA authentication failed: invalid API key");
     } else {
-        ESP_LOGI(TAG, "OTA authentication successful");
+        LOG_INFO(TAG, "OTA authentication successful");
     }
     
     return authenticated;
@@ -783,24 +783,24 @@ static bool authenticate_ota_request(httpd_req_t *req) {
 esp_err_t validate_ota_request(httpd_req_t *req) {
     // Validate content length
     if (req->content_len < OTA_MIN_FIRMWARE_SIZE) {
-        ESP_LOGW(TAG, "Firmware too small: %zu bytes (min %d)", req->content_len, OTA_MIN_FIRMWARE_SIZE);
+        LOG_WARN(TAG, "Firmware too small: %zu bytes (min %d)", req->content_len, OTA_MIN_FIRMWARE_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
     
     if (req->content_len > OTA_MAX_FIRMWARE_SIZE) {
-        ESP_LOGW(TAG, "Firmware too large: %zu bytes (max %d)", req->content_len, OTA_MAX_FIRMWARE_SIZE);
+        LOG_WARN(TAG, "Firmware too large: %zu bytes (max %d)", req->content_len, OTA_MAX_FIRMWARE_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
     
     // Log security event
-    ESP_LOGW(TAG, "OTA upload attempt - Size: %zu bytes", req->content_len);
+    LOG_WARN(TAG, "OTA upload attempt - Size: %zu bytes", req->content_len);
     
     return ESP_OK;
 }
 
 esp_err_t ota_upload_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "OTA upload handler called");
+    LOG_INFO(TAG, "OTA upload handler called");
     
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
@@ -809,7 +809,7 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
     
     // Authenticate request
     if (!authenticate_ota_request(req)) {
-        ESP_LOGW(TAG, "Unauthorized OTA upload attempt");
+        LOG_WARN(TAG, "Unauthorized OTA upload attempt");
         httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
         return ESP_FAIL;
     }
@@ -828,7 +828,7 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
     // Get content length
     size_t content_length = req->content_len;
     
-    ESP_LOGI(TAG, "Starting OTA upload, content length: %zu bytes", content_length);
+    LOG_INFO(TAG, "Starting OTA upload, content length: %zu bytes", content_length);
     
     // Begin OTA update
     esp_err_t err = ota_manager_begin(content_length);
@@ -843,7 +843,7 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
     char *buffer = (char*)malloc(OTA_BUFFER_SIZE);
     if (buffer == NULL) {
         ota_manager_abort();
-        ESP_LOGE(TAG, "Failed to allocate %d bytes for OTA buffer", OTA_BUFFER_SIZE);
+        LOG_ERROR(TAG, "Failed to allocate %d bytes for OTA buffer", OTA_BUFFER_SIZE);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
         return ESP_FAIL;
     }
@@ -858,18 +858,18 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
         recv_len = httpd_req_recv(req, buffer, chunk_size);
         
         if (recv_len <= 0) {
-            ESP_LOGE(TAG, "OTA receive failed after %zu bytes. Error: %d", total_written, recv_len);
+            LOG_ERROR(TAG, "OTA receive failed after %zu bytes. Error: %d", total_written, recv_len);
             goto cleanup;
         }
         
         if ((size_t)recv_len > remaining) {
-            ESP_LOGE(TAG, "Received more data than expected: %d > %zu", recv_len, remaining);
+            LOG_ERROR(TAG, "Received more data than expected: %d > %zu", recv_len, remaining);
             goto cleanup;
         }
         
         err = ota_manager_write((const uint8_t*)buffer, (size_t)recv_len);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "OTA write failed at offset %zu: %s", total_written, esp_err_to_name(err));
+            LOG_ERROR(TAG, "OTA write failed at offset %zu: %s", total_written, esp_err_to_name(err));
             goto cleanup;
         }
         
@@ -878,14 +878,14 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
         
         // Log progress every 64KB
         if (total_written % (64 * 1024) == 0) {
-            ESP_LOGI(TAG, "OTA progress: %zu / %zu bytes (%.1f%%)", 
+            LOG_INFO(TAG, "OTA progress: %zu / %zu bytes (%.1f%%)", 
                      total_written, content_length, 
                      (float)total_written / content_length * 100.0);
         }
     }
     
     ret = ESP_OK;
-    ESP_LOGI(TAG, "OTA upload completed: %zu bytes", total_written);
+    LOG_INFO(TAG, "OTA upload completed: %zu bytes", total_written);
 
 cleanup:
     free(buffer);
@@ -977,7 +977,7 @@ esp_err_t root_handler(httpd_req_t *req)
     
     FILE *file = fopen(filepath, "r");
     if (!file) {
-        ESP_LOGE(TAG, "Failed to open file: %s", filepath);
+        LOG_ERROR(TAG, "Failed to open file: %s", filepath);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
         return ESP_FAIL;
     }
@@ -1016,7 +1016,7 @@ esp_err_t setup_handler(httpd_req_t *req)
     const char* filepath = "/littlefs/setup.html";
     FILE *file = fopen(filepath, "r");
     if (!file) {
-        ESP_LOGE(TAG, "Failed to open setup file: %s", filepath);
+        LOG_ERROR(TAG, "Failed to open setup file: %s", filepath);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Setup file not found");
         return ESP_FAIL;
     }
@@ -1035,7 +1035,7 @@ esp_err_t setup_handler(httpd_req_t *req)
 esp_err_t static_handler(httpd_req_t *req)
 {
     wifi_provisioning_state_t state = wifi_provisioning_get_state();
-    ESP_LOGD(TAG, "Static handler: URI=%s, WiFi state=%d", req->uri, state);
+    LOG_DEBUG(TAG, "Static handler: URI=%s, WiFi state=%d", req->uri, state);
     
     if (state == WIFI_PROV_STATE_AP_STARTED) {
         // In AP mode, redirect everything to setup page except API calls
@@ -1044,7 +1044,7 @@ esp_err_t static_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
             return ESP_FAIL;
         }
-        ESP_LOGI(TAG, "Serving setup page in AP mode for URI: %s", req->uri);
+        LOG_INFO(TAG, "Serving setup page in AP mode for URI: %s", req->uri);
         return setup_handler(req);
     }
 
@@ -1061,7 +1061,7 @@ esp_err_t static_handler(httpd_req_t *req)
             return setup_handler(req);
         }
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
-        ESP_LOGI(TAG, "Failed to open file: %s", filepath);
+        LOG_INFO(TAG, "Failed to open file: %s", filepath);
         return ESP_FAIL;
     }
 
@@ -1150,21 +1150,21 @@ static const size_t bridge_handlers_count = sizeof(bridge_handlers) / sizeof(bri
 static void wifi_state_change_callback(wifi_provisioning_state_t state, void* event_data)
 {
     if (!g_server) {
-        ESP_LOGW(TAG, "Web server not initialized, cannot change handlers");
+        LOG_WARN(TAG, "Web server not initialized, cannot change handlers");
         return;
     }
     
-    ESP_LOGI(TAG, "WiFi state changed to: %d", state);
+    LOG_INFO(TAG, "WiFi state changed to: %d", state);
     
     switch (state) {
         case WIFI_PROV_STATE_AP_STARTED:
-            ESP_LOGI(TAG, "Switching to captive portal mode");
+            LOG_INFO(TAG, "Switching to captive portal mode");
             unregister_bridge_handlers(g_server);
             register_captive_portal_handlers(g_server);
             break;
             
         case WIFI_PROV_STATE_STA_CONNECTED:
-            ESP_LOGI(TAG, "Switching to bridge operation mode");
+            LOG_INFO(TAG, "Switching to bridge operation mode");
             unregister_captive_portal_handlers(g_server);
             register_bridge_handlers(g_server);
             break;
@@ -1174,7 +1174,7 @@ static void wifi_state_change_callback(wifi_provisioning_state_t state, void* ev
         case WIFI_PROV_STATE_IDLE:
         default:
             // No handler changes needed for these states
-            ESP_LOGD(TAG, "No handler changes needed for state: %d", state);
+            LOG_DEBUG(TAG, "No handler changes needed for state: %d", state);
             break;
     }
 }
@@ -1199,7 +1199,7 @@ void start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK)
     {
         wifi_provisioning_state_t current_state = wifi_provisioning_get_state();
-        ESP_LOGI(TAG, "Starting web server in state: %d", current_state);
+        LOG_INFO(TAG, "Starting web server in state: %d", current_state);
         
         // Register handlers based on current state
         if (current_state == WIFI_PROV_STATE_AP_STARTED) {
@@ -1217,25 +1217,25 @@ void start_webserver(void)
         // Register callback for WiFi state changes to dynamically switch handlers
         esp_err_t callback_err = wifi_provisioning_set_event_callback(wifi_state_change_callback);
         if (callback_err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register WiFi state callback: %s", esp_err_to_name(callback_err));
+            LOG_WARN(TAG, "Failed to register WiFi state callback: %s", esp_err_to_name(callback_err));
         } else {
-            ESP_LOGI(TAG, "WiFi state change callback registered successfully");
+            LOG_INFO(TAG, "WiFi state change callback registered successfully");
         }
 
-        ESP_LOGI(TAG, "Web server started successfully");
+        LOG_INFO(TAG, "Web server started successfully");
     } else {
-        ESP_LOGE(TAG, "Failed to start web server");
+        LOG_ERROR(TAG, "Failed to start web server");
     }
 }
 
 void register_captive_portal_handlers(httpd_handle_t server)
 {
     if (!server) {
-        ESP_LOGE(TAG, "Server handle is NULL");
+        LOG_ERROR(TAG, "Server handle is NULL");
         return;
     }
     
-    ESP_LOGI(TAG, "Registering captive portal handlers");
+    LOG_INFO(TAG, "Registering captive portal handlers");
     wifi_provisioning_register_captive_portal_handlers(server);
     httpd_register_uri_handler(server, &setup_uri);
 }
@@ -1243,11 +1243,11 @@ void register_captive_portal_handlers(httpd_handle_t server)
 void unregister_captive_portal_handlers(httpd_handle_t server)
 {
     if (!server) {
-        ESP_LOGE(TAG, "Server handle is NULL");
+        LOG_ERROR(TAG, "Server handle is NULL");
         return;
     }
     
-    ESP_LOGI(TAG, "Unregistering captive portal handlers");
+    LOG_INFO(TAG, "Unregistering captive portal handlers");
     
     // Array of captive portal URIs that need to be unregistered (matching wifi_provisioning.cpp)
     struct {
@@ -1285,7 +1285,7 @@ void unregister_captive_portal_handlers(httpd_handle_t server)
     for (size_t i = 0; i < captive_uris_count; i++) {
         esp_err_t err = httpd_unregister_uri_handler(server, captive_uris[i].uri, captive_uris[i].method);
         if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "Failed to unregister captive handler %s: %s", 
+            LOG_WARN(TAG, "Failed to unregister captive handler %s: %s", 
                      captive_uris[i].uri, esp_err_to_name(err));
         }
     }
@@ -1297,17 +1297,17 @@ void unregister_captive_portal_handlers(httpd_handle_t server)
 void register_bridge_handlers(httpd_handle_t server)
 {
     if (!server) {
-        ESP_LOGE(TAG, "Server handle is NULL");
+        LOG_ERROR(TAG, "Server handle is NULL");
         return;
     }
     
-    ESP_LOGI(TAG, "Registering %zu bridge operation handlers", bridge_handlers_count);
+    LOG_INFO(TAG, "Registering %zu bridge operation handlers", bridge_handlers_count);
     
     // Register all bridge handlers from array
     for (size_t i = 0; i < bridge_handlers_count; i++) {
         esp_err_t err = httpd_register_uri_handler(server, &bridge_handlers[i]);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register handler %s: %s", 
+            LOG_WARN(TAG, "Failed to register handler %s: %s", 
                      bridge_handlers[i].uri, esp_err_to_name(err));
         }
     }
@@ -1320,17 +1320,17 @@ void register_bridge_handlers(httpd_handle_t server)
 void unregister_bridge_handlers(httpd_handle_t server)
 {
     if (!server) {
-        ESP_LOGE(TAG, "Server handle is NULL");
+        LOG_ERROR(TAG, "Server handle is NULL");
         return;
     }
     
-    ESP_LOGI(TAG, "Unregistering %zu bridge operation handlers", bridge_handlers_count);
+    LOG_INFO(TAG, "Unregistering %zu bridge operation handlers", bridge_handlers_count);
     
     // Unregister all bridge handlers from array
     for (size_t i = 0; i < bridge_handlers_count; i++) {
         esp_err_t err = httpd_unregister_uri_handler(server, bridge_handlers[i].uri, bridge_handlers[i].method);
         if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "Failed to unregister handler %s: %s", 
+            LOG_WARN(TAG, "Failed to unregister handler %s: %s", 
                      bridge_handlers[i].uri, esp_err_to_name(err));
         }
     }

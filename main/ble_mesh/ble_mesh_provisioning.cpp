@@ -12,14 +12,8 @@
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 
-#include "esp_log.h"
+#include "common/log_common.h"
 #include "nvs_flash.h"
-
-#include "esp_ble_mesh_defs.h"
-#include "esp_ble_mesh_common_api.h"
-#include "esp_ble_mesh_provisioning_api.h"
-#include "esp_ble_mesh_config_model_api.h"
-#include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
 #include "esp_console.h"
 #include "esp_mac.h"
@@ -59,31 +53,31 @@ void print_model_name(uint16_t model_id)
 {
     switch (model_id) {
     case ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV:
-        ESP_LOGI(TAG, "Model: Generic OnOff Server");
+        LOG_INFO(TAG, "Model: Generic OnOff Server");
         break;
     case ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI:
-        ESP_LOGI(TAG, "Model: Generic OnOff Client");
+        LOG_INFO(TAG, "Model: Generic OnOff Client");
         break;
     case ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV:
-        ESP_LOGI(TAG, "Model: Generic Level Server");
+        LOG_INFO(TAG, "Model: Generic Level Server");
         break;
     case ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI:
-        ESP_LOGI(TAG, "Model: Generic Level Client");
+        LOG_INFO(TAG, "Model: Generic Level Client");
         break;
     case ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV:
-        ESP_LOGI(TAG, "Model: Light Lightness Server");
+        LOG_INFO(TAG, "Model: Light Lightness Server");
         break;
     case ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI:
-        ESP_LOGI(TAG, "Model: Light Lightness Client");
+        LOG_INFO(TAG, "Model: Light Lightness Client");
         break;
     case ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_SRV:
-        ESP_LOGI(TAG, "Model: Light HSL Server");
+        LOG_INFO(TAG, "Model: Light HSL Server");
         break;
     case ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_CLI:
-        ESP_LOGI(TAG, "Model: Light HSL Client");
+        LOG_INFO(TAG, "Model: Light HSL Client");
         break;
     default:
-        ESP_LOGI(TAG, "Model: Unknown (0x%04X)", model_id);
+        LOG_INFO(TAG, "Model: Unknown (0x%04X)", model_id);
         break;
     }
 }
@@ -100,29 +94,29 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
     char name[11] = {0};
     int err;
 
-    ESP_LOGI(TAG, "node index: 0x%x, unicast address: 0x%02x, element num: %d, netkey index: 0x%02x",
+    LOG_INFO(TAG, "node index: 0x%x, unicast address: 0x%02x, element num: %d, netkey index: 0x%02x",
              node_idx, unicast, elem_num, net_idx);
-    ESP_LOGI(TAG, "device uuid: %s", bt_hex(uuid128.raw(), 16));
+    LOG_INFO(TAG, "device uuid: %s", bt_hex(uuid128.raw(), 16));
 
     sprintf(name, "%s%d", "NODE-", node_idx);
     err = esp_ble_mesh_provisioner_set_node_name(node_idx, name);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: Set node name failed", __func__);
+        LOG_ERROR(TAG, "Set node name failed");
         return ESP_FAIL;
     }
     
     err = node_manager().store_node_info(uuid128, unicast, elem_num, node_index);
     if (err)
     {
-        ESP_LOGE(TAG, "%s: Store node info failed", __func__);
+        LOG_ERROR(TAG, "Store node info failed");
         return ESP_FAIL;
     }
 
     node = node_manager().get_node(unicast);
     if (!node)
     {
-        ESP_LOGE(TAG, "%s: Get node info failed", __func__);
+        LOG_ERROR(TAG, "Get node info failed");
         return ESP_FAIL;
     }
 
@@ -132,13 +126,13 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
                                 {
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-                                    ESP_LOGW(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", __func__, node->unicast);
+                                    LOG_WARN(TAG, "Setting CTL for node 0x%04X", node->unicast);
                                     node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
                                     get_state.comp_data_get.page = COMP_DATA_PAGE_0;
                                     esp_err_t err = esp_ble_mesh_config_client_get_state(&common, &get_state);
                                     if (err)
                                     {
-                                        ESP_LOGE(TAG, "%s: Send config comp data get failed", __func__);
+                                        LOG_ERROR(TAG, "Send config comp data get failed");
                                     }
                                 },
                                 .opcode = ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET,
@@ -165,12 +159,12 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
 
 void prov_link_open(esp_ble_mesh_prov_bearer_t bearer)
 {
-    ESP_LOGI(TAG, "%s link open", bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT");
+    LOG_INFO(TAG, "%s link open", bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT");
 }
 
 void prov_link_close(esp_ble_mesh_prov_bearer_t bearer, uint8_t reason)
 {
-    ESP_LOGI(TAG, "%s link close, reason 0x%02x",
+    LOG_INFO(TAG, "%s link close, reason 0x%02x",
              bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT", reason);
 }
 
@@ -196,8 +190,8 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device& unprov_device)
 
     if (!already_registered)
     {
-        ESP_LOGI(TAG, "[%s] Received unprovisioned device: %s, address: %s, address type: %d, adv type: %d",
-                 __func__,bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
+        LOG_INFO(TAG, "Received unprovisioned device: %s, address: %s, address type: %d, adv type: %d",
+                 bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
                  unprov_device.addr_type, unprov_device.adv_type);
         unprovisioned_devices.emplace_back(unprov_device);
     }
@@ -235,9 +229,9 @@ void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
      * to the application layer.
      */
 
-    ESP_LOGI(TAG, "address: %s, address type: %d, adv type: %d", bt_hex(addr, BD_ADDR_LEN), addr_type, adv_type);
-    ESP_LOGI(TAG, "device uuid: %s", bt_hex(dev_uuid, 16));
-    ESP_LOGI(TAG, "oob info: %d, bearer: %s", oob_info, (bearer & ESP_BLE_MESH_PROV_ADV) ? "PB-ADV" : "PB-GATT");
+    LOG_INFO(TAG, "address: %s, address type: %d, adv type: %d", bt_hex(addr, BD_ADDR_LEN), addr_type, adv_type);
+    LOG_INFO(TAG, "device uuid: %s", bt_hex(dev_uuid, 16));
+    LOG_INFO(TAG, "oob info: %d, bearer: %s", oob_info, (bearer & ESP_BLE_MESH_PROV_ADV) ? "PB-ADV" : "PB-GATT");
 
     memcpy(add_dev.addr, addr, BD_ADDR_LEN);
     add_dev.addr_type = (esp_ble_mesh_addr_type_t)addr_type;
@@ -250,7 +244,7 @@ void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
                                                   (esp_ble_mesh_dev_add_flag_t)(ADD_DEV_RM_AFTER_PROV_FLAG | ADD_DEV_FLUSHABLE_DEV_FLAG));
     if (err)
     {
-        ESP_LOGE(TAG, "%s: Add unprovisioned device into queue failed", __func__);
+        LOG_ERROR(TAG, "Add unprovisioned device into queue failed");
     }
 
     return;
@@ -262,18 +256,18 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     switch (event)
     {
     case ESP_BLE_MESH_PROV_REGISTER_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROV_REGISTER_COMP_EVT, err_code %d", param->prov_register_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROV_REGISTER_COMP_EVT, err_code %d", param->prov_register_comp.err_code);
         //mesh_example_info_restore(); /* Restore proper mesh example info */
         break;
 
     case ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT, err_code %d", param->provisioner_prov_enable_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT, err_code %d", param->provisioner_prov_enable_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_PROV_DISABLE_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_DISABLE_COMP_EVT, err_code %d", param->provisioner_prov_disable_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_DISABLE_COMP_EVT, err_code %d", param->provisioner_prov_disable_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT:
-        //ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
+        //LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
         
         ble2mqtt_unprovisioned_device new_entry;
         memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
@@ -290,30 +284,30 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         prov_complete(param->provisioner_prov_complete);
         break;
     case ESP_BLE_MESH_PROVISIONER_ADD_UNPROV_DEV_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_ADD_UNPROV_DEV_COMP_EVT, err_code %d", param->provisioner_add_unprov_dev_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_ADD_UNPROV_DEV_COMP_EVT, err_code %d", param->provisioner_add_unprov_dev_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_SET_DEV_UUID_MATCH_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_SET_DEV_UUID_MATCH_COMP_EVT, err_code %d", param->provisioner_set_dev_uuid_match_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_SET_DEV_UUID_MATCH_COMP_EVT, err_code %d", param->provisioner_set_dev_uuid_match_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_SET_NODE_NAME_COMP_EVT:
     {
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_SET_NODE_NAME_COMP_EVT, err_code %d", param->provisioner_set_node_name_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_SET_NODE_NAME_COMP_EVT, err_code %d", param->provisioner_set_node_name_comp.err_code);
         if (param->provisioner_set_node_name_comp.err_code == ESP_OK)
         {
             const char *name = NULL;
             name = esp_ble_mesh_provisioner_get_node_name(param->provisioner_set_node_name_comp.node_index);
             if (!name)
             {
-                ESP_LOGE(TAG, "Get node name failed");
+                LOG_ERROR(TAG, "Get node name failed");
                 return;
             }
-            ESP_LOGI(TAG, "Node %d name is: %s", param->provisioner_set_node_name_comp.node_index, name);
+            LOG_INFO(TAG, "Node %d name is: %s", param->provisioner_set_node_name_comp.node_index, name);
         }
         break;
     }
     case ESP_BLE_MESH_PROVISIONER_ADD_LOCAL_APP_KEY_COMP_EVT:
     {
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_ADD_LOCAL_APP_KEY_COMP_EVT, err_code %d", param->provisioner_add_app_key_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_ADD_LOCAL_APP_KEY_COMP_EVT, err_code %d", param->provisioner_add_app_key_comp.err_code);
         if (param->provisioner_add_app_key_comp.err_code == ESP_OK)
         {
             esp_err_t err = 0;
@@ -324,7 +318,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
             if (err != ESP_OK)
             {
-                ESP_LOGE(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI] appkey failed");
+                LOG_ERROR(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI] appkey failed");
                 return;
             }
 
@@ -333,7 +327,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
             if (err != ESP_OK)
             {
-                ESP_LOGE(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI] appkey failed");
+                LOG_ERROR(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI] appkey failed");
                 return;
             }
           
@@ -343,7 +337,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
             if (err != ESP_OK)
             {
-                ESP_LOGE(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_LIGHT_HSL_CLI] appkey failed");
+                LOG_ERROR(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_LIGHT_HSL_CLI] appkey failed");
                 return;
             }
 
@@ -352,7 +346,7 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
             if (err != ESP_OK)
             {
-                ESP_LOGE(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI] appkey failed");
+                LOG_ERROR(TAG, "Provisioner bind local level model [ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI] appkey failed");
                 return;
             }
 
@@ -360,18 +354,18 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                                                                        ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI, ESP_BLE_MESH_CID_NVAL);
             if (err != ESP_OK)
             {
-                    ESP_LOGE(TAG, "Provisioner bind local on-off model [ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI] appkey failed");
+                    LOG_ERROR(TAG, "Provisioner bind local on-off model [ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI] appkey failed");
                 return;
             }
         }
         break;
     }
     case ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT:
-        ESP_LOGI(TAG, "ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT, err_code %d", param->provisioner_bind_app_key_to_model_comp.err_code);
+        LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT, err_code %d", param->provisioner_bind_app_key_to_model_comp.err_code);
         break;
     default:
 
-        // ESP_LOGI(TAG, "Other err_code %d", event);
+        // LOG_INFO(TAG, "Other err_code %d", event);
         break;
     }
 
@@ -393,17 +387,17 @@ void for_each_provisioned_node(std::function<void( const esp_ble_mesh_node_t *, 
 int list_provisioned_nodes_esp(int argc, char **argv)
 {
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
-    ESP_LOGI(TAG, "Provisioned nodes: %d", node_count);
+    LOG_INFO(TAG, "Provisioned nodes: %d", node_count);
 
     for_each_provisioned_node([](const esp_ble_mesh_node_t * node, int node_index)
     {
-            ESP_LOGI(TAG, "==device uuid: %s", bt_hex(node->dev_uuid, 16));
-            ESP_LOGI(TAG, "  device name: %s", node->name);
-            ESP_LOGI(TAG, "  node index(ESP): %d", node_index);
-            ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
-            ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
-            ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
-            ESP_LOGI(TAG, "  NetKey Index: %d", node->net_idx);
+            LOG_INFO(TAG, "==device uuid: %s", bt_hex(node->dev_uuid, 16));
+            LOG_INFO(TAG, "  device name: %s", node->name);
+            LOG_INFO(TAG, "  node index(ESP): %d", node_index);
+            LOG_INFO(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
+            LOG_INFO(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
+            LOG_INFO(TAG, "  Element Count: %d", node->element_num);
+            LOG_INFO(TAG, "  NetKey Index: %d", node->net_idx);
 
     });
 
@@ -418,7 +412,7 @@ void unprovision_device(const Uuid128& uuid)
                                 message_payload{
                                     .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
                                     {
-                                        ESP_LOGW(TAG, "unprovision_device for node 0x%04X", __func__, node_info->unicast);
+                                        LOG_WARN(TAG, "unprovision_device for node 0x%04X", node_info->unicast);
                                         esp_ble_mesh_client_common_param_t common = {0};
                                         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                         node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
@@ -426,7 +420,7 @@ void unprovision_device(const Uuid128& uuid)
                                         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                         if (err != ESP_OK)
                                         {
-                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid.raw(), 16));
+                                            LOG_ERROR(TAG, "Failed to delete node [err=%d] [Node=%s]", err, bt_hex(node_info->uuid.raw(), 16));
                                         }
                                     },
                                     .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
@@ -447,12 +441,12 @@ int unprovision_all_nodes(int argc, char **argv)
 
     for_each_provisioned_node([&](const esp_ble_mesh_node_t * node, int node_index)
     {
-            ESP_LOGI(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
-            ESP_LOGI(TAG, "  device name: %s", node->name);
-            ESP_LOGI(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
-            ESP_LOGI(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
-            ESP_LOGI(TAG, "  Element Count: %d", node->element_num);
-            ESP_LOGI(TAG, "  NetKey Index: %d", node->net_idx);
+            LOG_INFO(TAG, "  device uuid: %s", bt_hex(node->dev_uuid, 16));
+            LOG_INFO(TAG, "  device name: %s", node->name);
+            LOG_INFO(TAG, "  Primary Address: 0x%04X", node->unicast_addr);
+            LOG_INFO(TAG, "  Address: %s, address type: %d", bt_hex(node->addr, BD_ADDR_LEN), node->addr_type);
+            LOG_INFO(TAG, "  Element Count: %d", node->element_num);
+            LOG_INFO(TAG, "  NetKey Index: %d", node->net_idx);
 
             uuids_to_remove.emplace_back(Uuid128{node->dev_uuid});
    });
@@ -471,7 +465,7 @@ int unprovision_all_nodes(int argc, char **argv)
                                         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                         if (err != ESP_OK)
                                         {
-                                            ESP_LOGE(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid.raw(), 16));
+                                            LOG_ERROR(TAG, "Failed to delete node [err=%d] [Node=5s]", err, bt_hex(node_info->uuid.raw(), 16));
                                         }
                                    },
                                    .opcode = ESP_BLE_MESH_MODEL_OP_NODE_RESET,
@@ -508,7 +502,7 @@ int get_composition_data(int argc, char **argv)
         auto err = esp_ble_mesh_config_client_get_state(&common, &get_state);
         if (err)
         {
-            ESP_LOGE(TAG, "%s: Send config comp data get failed", __func__);
+            LOG_ERROR(TAG, "Send config comp data get failed");
             return ESP_FAIL;
         }
     }
@@ -527,7 +521,7 @@ int provision_device_index(int argc, char **argv)
 
     if (node_index_args.node_index->ival[0] < 0 || node_index_args.node_index->ival[0] >= unprovisioned_devices.size())
     {
-        ESP_LOGE(TAG, "Invalid node index: %d", node_index_args.node_index->ival[0]);
+        LOG_ERROR(TAG, "Invalid node index: %d", node_index_args.node_index->ival[0]);
         return 1;
     }
 
@@ -538,12 +532,12 @@ int provision_device_index(int argc, char **argv)
 }
 int list_unprovisionned_devices(int argc, char **argv)
 {
-    ESP_LOGI(TAG, "Unprovisionned devices: %d", unprovisioned_devices.size());
+    LOG_INFO(TAG, "Unprovisionned devices: %d", unprovisioned_devices.size());
 
     for_each_unprovisioned_node([](const ble2mqtt_unprovisioned_device& unprov_device)
     {
-        ESP_LOGI(TAG, "==device uuid: %s", bt_hex(unprov_device.dev_uuid, 16));
-        ESP_LOGI(TAG, "  address: %s, address type: %d, adv type: %d",
+        LOG_INFO(TAG, "==device uuid: %s", bt_hex(unprov_device.dev_uuid, 16));
+        LOG_INFO(TAG, "  address: %s, address type: %d, adv type: %d",
                  bt_hex(unprov_device.addr, BD_ADDR_LEN), unprov_device.addr_type, unprov_device.adv_type);
     });
 

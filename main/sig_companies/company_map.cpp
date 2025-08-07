@@ -1,8 +1,8 @@
 #include "company_map.h"
 #include <cstring>
 #include <memory>
-#include "esp_log.h"
 #include "esp_littlefs.h"
+#include "common/log_common.h"
 
 #define TAG "COMPANY_MAP_FS"
 #define COMPANY_MAP_FILE "/littlefs/company_map.bin"
@@ -41,7 +41,7 @@ static void init_cache() {
     
     memset(cache, 0, sizeof(cache));
     cache_initialized = true;
-    ESP_LOGI(TAG, "Company cache initialized with %d slots", CACHE_SIZE);
+    LOG_INFO(TAG, "Company cache initialized with %d slots", CACHE_SIZE);
 }
 
 // Open company file and read header
@@ -50,14 +50,14 @@ static bool open_company_file() {
     
     company_file = fopen(COMPANY_MAP_FILE, "rb");
     if (!company_file) {
-        ESP_LOGE(TAG, "Failed to open %s", COMPANY_MAP_FILE);
+        LOG_ERROR(TAG, "Failed to open %s", COMPANY_MAP_FILE);
         return false;
     }
     
     // Read header
     file_header_t header;
     if (fread(&header, sizeof(header), 1, company_file) != 1) {
-        ESP_LOGE(TAG, "Failed to read file header");
+        LOG_ERROR(TAG, "Failed to read file header");
         fclose(company_file);
         company_file = nullptr;
         return false;
@@ -65,7 +65,7 @@ static bool open_company_file() {
     
     total_companies = header.count;
     
-    ESP_LOGI(TAG, "Opened company file with %d entries", total_companies);
+    LOG_INFO(TAG, "Opened company file with %d entries", total_companies);
     return true;
 }
 
@@ -119,14 +119,14 @@ static const char* linear_search_file(uint16_t company_id) {
     
     // Seek to start of entries (after header)
     if (fseek(company_file, sizeof(file_header_t), SEEK_SET) != 0) {
-        ESP_LOGE(TAG, "Failed to seek to start of entries");
+        LOG_ERROR(TAG, "Failed to seek to start of entries");
         return nullptr;
     }
     
     // Use heap-allocated buffer to avoid static buffer issues
     char* name_buffer = (char*)malloc(512);
     if (!name_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate name buffer");
+        LOG_ERROR(TAG, "Failed to allocate name buffer");
         return nullptr;
     }
     
@@ -135,14 +135,14 @@ static const char* linear_search_file(uint16_t company_id) {
         data_entry_t entry;
         size_t bytes_read = fread(&entry, sizeof(entry), 1, company_file);
         if (bytes_read != 1) {
-            ESP_LOGE(TAG, "Failed to read entry header %d (got %zu bytes)", i, bytes_read);
+            LOG_ERROR(TAG, "Failed to read entry header %d (got %zu bytes)", i, bytes_read);
             free(name_buffer);
             return nullptr;
         }
         
         // Validate entry data
         if (entry.name_len == 0 || entry.name_len > 255) {
-            ESP_LOGE(TAG, "Invalid name_len %d for entry %d (CID: 0x%04X) at file pos %ld", 
+            LOG_ERROR(TAG, "Invalid name_len %d for entry %d (CID: 0x%04X) at file pos %ld", 
                      entry.name_len, i, entry.company_id, ftell(company_file));
             free(name_buffer);
             return nullptr;
@@ -152,7 +152,7 @@ static const char* linear_search_file(uint16_t company_id) {
         size_t bytes_to_read = (entry.name_len < 511) ? entry.name_len : 511;
         size_t name_bytes_read = fread(name_buffer, 1, bytes_to_read, company_file);
         if (name_bytes_read != bytes_to_read) {
-            ESP_LOGE(TAG, "Failed to read name for entry %d: expected %zu, got %zu", 
+            LOG_ERROR(TAG, "Failed to read name for entry %d: expected %zu, got %zu", 
                      i, bytes_to_read, name_bytes_read);
             free(name_buffer);
             return nullptr;
@@ -160,9 +160,9 @@ static const char* linear_search_file(uint16_t company_id) {
         
         // Skip remaining bytes if name was truncated
         if (bytes_to_read < entry.name_len) {
-            ESP_LOGW(TAG, "Truncating long company name from %d to %zu bytes", entry.name_len, bytes_to_read);
+            LOG_DEBUG(TAG, "Truncating long company name from %d to %zu bytes", entry.name_len, bytes_to_read);
             if (fseek(company_file, entry.name_len - bytes_to_read, SEEK_CUR) != 0) {
-                ESP_LOGE(TAG, "Failed to skip remaining %d bytes for entry %d", 
+                LOG_ERROR(TAG, "Failed to skip remaining %d bytes for entry %d", 
                          entry.name_len - (int)bytes_to_read, i);
                 free(name_buffer);
                 return nullptr;
@@ -231,13 +231,13 @@ void company_map_cleanup() {
         company_file = nullptr;
     }
     
-    ESP_LOGI(TAG, "Company map cleanup completed");
+    LOG_INFO(TAG, "Company map cleanup completed");
 }
 
 // Debug function to print cache statistics
 void company_map_print_stats() {
     if (!cache_initialized) {
-        ESP_LOGI(TAG, "Cache not initialized");
+        LOG_DEBUG(TAG, "Cache not initialized");
         return;
     }
     
@@ -248,6 +248,6 @@ void company_map_print_stats() {
         }
     }
     
-    ESP_LOGI(TAG, "Cache stats: %d/%d slots used, %lu total accesses", 
+    LOG_INFO(TAG, "Cache stats: %d/%d slots used, %lu total accesses", 
              used_slots, CACHE_SIZE, access_counter);
 }

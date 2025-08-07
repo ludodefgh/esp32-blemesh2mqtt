@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-
-#include "esp_log.h"
+#include "common/log_common.h"
 #include "nvs_flash.h"
 
 #include "esp_ble_mesh_defs.h"
@@ -18,24 +17,20 @@
 #include "ble_mesh/ble_mesh_node.h"
 #include "mqtt/mqtt_control.h"
 #include "web_server/web_server.h"
-#include "_config.h"
 #include "ble_mesh/ble_mesh_commands.h"
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
 #include "wifi/wifi_provisioning.h"
-#include "wifi/wifi_station.h"
 #include "wifi/wifi_commands.h"
 #include "security/credential_encryption.h"
 
-#define TAG "EXAMPLE"
+#define TAG "MAIN"
 
 extern bool init_done;
-
-
 static int heap_size(int argc, char **argv)
 {
     uint32_t heap_size = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
-    ESP_LOGI(TAG, "min heap size: %" PRIu32, heap_size);
+    LOG_INFO(TAG, "min heap size: %" PRIu32, heap_size);
     return 0;
 }
 
@@ -68,8 +63,6 @@ void RegisterDebugCommands()
 REGISTER_DEBUG_COMMAND(RegisterDebugCommands);
 #pragma endregion Debug
 
-
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Main
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -97,25 +90,25 @@ esp_err_t bluetooth_init(void)
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     err = esp_bt_controller_init(&bt_cfg);
     if (err) {
-        ESP_LOGE("BLUETOOTH", "Bluetooth controller init failed");
+        LOG_ERROR("BLUETOOTH", "Bluetooth controller init failed");
         return err;
     }
 
     err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (err) {
-        ESP_LOGE("BLUETOOTH", "Bluetooth controller enable failed");
+        LOG_ERROR("BLUETOOTH", "Bluetooth controller enable failed");
         return err;
     }
 
     err = esp_bluedroid_init();
     if (err) {
-        ESP_LOGE("BLUETOOTH", "Bluedroid init failed");
+        LOG_ERROR("BLUETOOTH", "Bluedroid init failed");
         return err;
     }
 
     err = esp_bluedroid_enable();
     if (err) {
-        ESP_LOGE("BLUETOOTH", "Bluedroid enable failed");
+        LOG_ERROR("BLUETOOTH", "Bluedroid enable failed");
         return err;
     }
 
@@ -140,13 +133,11 @@ void ble_mesh_get_dev_uuid(uint8_t *dev_uuid)
         dev_uuid[i] = 0x00;
     }
 }
-
-
 extern "C" void app_main()
 {
     esp_err_t err;
     
-    ESP_LOGI(TAG, "Initializing...");
+    LOG_INFO(TAG, "Initializing...");
 
     // Initialize NVS
     err = nvs_flash_init();
@@ -159,14 +150,14 @@ extern "C" void app_main()
     // Initialize credential encryption system
     err = CredentialEncryption::instance().initialize();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize credential encryption: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to initialize credential encryption: %s", esp_err_to_name(err));
         return;
     }
 
     err = bluetooth_init();
     if (err)
     {
-        ESP_LOGE(TAG, "esp32_bluetooth_init failed (err %d)", err);
+        LOG_ERROR(TAG, "esp32_bluetooth_init failed (err %d)", err);
         return;
     }
 
@@ -175,10 +166,10 @@ extern "C" void app_main()
     size_t total = 0, used = 0;
     err = esp_littlefs_info(conf.partition_label, &total, &used);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get LittleFS partition information (%s)", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to get LittleFS partition information (%s)", esp_err_to_name(err));
         esp_littlefs_format(conf.partition_label);
     } else {
-        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+        LOG_INFO(TAG, "Partition size: total: %d, used: %d", total, used);
     }
     register_wifi_commands();
     debug_command_registry::run_all();
@@ -187,7 +178,7 @@ extern "C" void app_main()
     err = ble_mesh_init();
     if (err)
     {
-        ESP_LOGE(TAG, "Bluetooth mesh init failed (err %d)", err);
+        LOG_ERROR(TAG, "Bluetooth mesh init failed (err %d)", err);
     }
 
     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL)
@@ -201,10 +192,10 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(wifi_provisioning_init());
 
     if (wifi_provisioning_should_start_captive_portal()) {
-        ESP_LOGI(TAG, "Starting captive portal for WiFi setup");
+        LOG_INFO(TAG, "Starting captive portal for WiFi setup");
         ESP_ERROR_CHECK(wifi_provisioning_start_captive_portal());
     } else {
-        ESP_LOGI(TAG, "WiFi already connected via provisioning");
+        LOG_INFO(TAG, "WiFi already connected via provisioning");
     }
 
 #if defined(DEBUG_USE_GPIO)
@@ -228,7 +219,7 @@ extern "C" void app_main()
         esp_log_level_set("transport", ESP_LOG_VERBOSE);
         esp_log_level_set("outbox", ESP_LOG_VERBOSE);
     } else {
-        ESP_LOGI(TAG, "WiFi not connected, skipping MQTT and BLE mesh initialization");
+        LOG_INFO(TAG, "WiFi not connected, skipping MQTT and BLE mesh initialization");
     }
 }
 #pragma endregion Main

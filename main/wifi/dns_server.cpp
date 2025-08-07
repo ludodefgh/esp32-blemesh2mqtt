@@ -1,11 +1,12 @@
 #include "dns_server.h"
-#include "esp_log.h"
+
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
 #include <sys/socket.h>
+#include "common/log_common.h"
 
 static const char* TAG = "dns_server";
 static TaskHandle_t dns_task_handle = NULL;
@@ -57,13 +58,13 @@ static esp_ip4_addr_t get_response_ip(const char* domain) {
     
     for (int i = 0; i < s_dns_config.num_of_entries; i++) {
         if (match_domain(domain, s_dns_config.item[i].name)) {
-            ESP_LOGD(TAG, "Matched domain '%s' to pattern '%s', responding with IP", 
+            LOG_DEBUG(TAG, "Matched domain '%s' to pattern '%s', responding with IP", 
                      domain, s_dns_config.item[i].name);
             return s_dns_config.item[i].ip;
         }
     }
     
-    ESP_LOGD(TAG, "No match for domain '%s', using default IP", domain);
+    LOG_DEBUG(TAG, "No match for domain '%s', using default IP", domain);
     return default_ip;
 }
 
@@ -76,7 +77,7 @@ static void dns_server_task(void *pvParameters)
     
     dns_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (dns_socket < 0) {
-        ESP_LOGE(TAG, "Failed to create DNS socket");
+        LOG_ERROR(TAG, "Failed to create DNS socket");
         dns_server_running = false;
         vTaskDelete(NULL);
         return;
@@ -87,7 +88,7 @@ static void dns_server_task(void *pvParameters)
     server_addr.sin_port = htons(DNS_PORT);
 
     if (bind(dns_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        ESP_LOGE(TAG, "Failed to bind DNS socket");
+        LOG_ERROR(TAG, "Failed to bind DNS socket");
         close(dns_socket);
         dns_socket = -1;
         dns_server_running = false;
@@ -95,7 +96,7 @@ static void dns_server_task(void *pvParameters)
         return;
     }
 
-    ESP_LOGI(TAG, "DNS server started on port %d", DNS_PORT);
+    LOG_INFO(TAG, "DNS server started on port %d", DNS_PORT);
 
     while (dns_server_running) {
         int len = recvfrom(dns_socket, rx_buffer, sizeof(rx_buffer), 0,
@@ -103,20 +104,20 @@ static void dns_server_task(void *pvParameters)
         
         if (len < 0) {
             if (dns_server_running) {
-                ESP_LOGE(TAG, "DNS recvfrom failed");
+                LOG_ERROR(TAG, "DNS recvfrom failed");
             }
             continue;
         }
 
         // Validate minimum packet size
         if (len < sizeof(dns_header_t)) {
-            ESP_LOGW(TAG, "Received DNS packet too short: %d bytes", len);
+            LOG_WARN(TAG, "Received DNS packet too short: %d bytes", len);
             continue;
         }
         
         // Validate maximum packet size
         if (len > sizeof(rx_buffer)) {
-            ESP_LOGW(TAG, "Received DNS packet too large: %d bytes", len);
+            LOG_WARN(TAG, "Received DNS packet too large: %d bytes", len);
             continue;
         }
 
@@ -130,13 +131,13 @@ static void dns_server_task(void *pvParameters)
         
         // Sanity check on counts
         if (question_count > 10 || answer_count > 10 || authority_count > 10 || additional_count > 10) {
-            ESP_LOGW(TAG, "DNS packet has suspicious record counts (Q:%d A:%d NS:%d AR:%d)", 
+            LOG_WARN(TAG, "DNS packet has suspicious record counts (Q:%d A:%d NS:%d AR:%d)", 
                      question_count, answer_count, authority_count, additional_count);
             continue;
         }
         if (question_count == 0) {
             // Send a proper DNS response even for queries with no questions
-            ESP_LOGD(TAG, "DNS query with no questions, sending minimal response");
+            LOG_DEBUG(TAG, "DNS query with no questions, sending minimal response");
             
             memset(tx_buffer, 0, sizeof(tx_buffer));
             dns_header_t* response_header = (dns_header_t*)tx_buffer;
@@ -153,7 +154,7 @@ static void dns_server_task(void *pvParameters)
         }
         
         if (question_count > 1) {
-            ESP_LOGD(TAG, "DNS query with %d questions, handling first one", question_count);
+            LOG_DEBUG(TAG, "DNS query with %d questions, handling first one", question_count);
         }
         
         // Safely parse the first domain name with bounds checking
@@ -164,7 +165,7 @@ static void dns_server_task(void *pvParameters)
         
         // Bounds check: ensure we have at least one byte for domain parsing
         if ((domain_ptr - rx_buffer) >= len) {
-            ESP_LOGW(TAG, "DNS packet truncated, no domain data");
+            LOG_WARN(TAG, "DNS packet truncated, no domain data");
             continue;
         }
         
@@ -174,12 +175,12 @@ static void dns_server_task(void *pvParameters)
             if ((*domain_ptr & 0xC0) == 0xC0) {
                 // Compressed name - validate pointer
                 if ((domain_ptr - rx_buffer) >= len - 1) {
-                    ESP_LOGW(TAG, "DNS compression pointer out of bounds");
+                    LOG_WARN(TAG, "DNS compression pointer out of bounds");
                     break;
                 }
                 uint16_t offset = ((*domain_ptr & 0x3F) << 8) | *(domain_ptr + 1);
                 if (offset >= len) {
-                    ESP_LOGW(TAG, "DNS compression points beyond packet");
+                    LOG_WARN(TAG, "DNS compression points beyond packet");
                     break;
                 }
                 compression_follows++;
@@ -188,13 +189,13 @@ static void dns_server_task(void *pvParameters)
             } else {
                 uint8_t label_len = *domain_ptr++;
                 if (label_len > 63) {
-                    ESP_LOGW(TAG, "DNS label too long: %d", label_len);
+                    LOG_WARN(TAG, "DNS label too long: %d", label_len);
                     break;
                 }
                 
                 // Check if we have enough bytes for the label
                 if ((domain_ptr - rx_buffer) + label_len > len) {
-                    ESP_LOGW(TAG, "DNS label extends beyond packet");
+                    LOG_WARN(TAG, "DNS label extends beyond packet");
                     break;
                 }
                 
@@ -208,7 +209,7 @@ static void dns_server_task(void *pvParameters)
                     if (c >= 32 && c <= 126) {
                         domain_name[domain_pos++] = c;
                     } else {
-                        ESP_LOGW(TAG, "DNS domain contains non-printable character: 0x%02x", c);
+                        LOG_WARN(TAG, "DNS domain contains non-printable character: 0x%02x", c);
                         domain_name[domain_pos++] = '?';
                     }
                 }
@@ -217,7 +218,7 @@ static void dns_server_task(void *pvParameters)
         
         domain_name[domain_pos] = '\0';  // Ensure null termination
         
-        ESP_LOGD(TAG, "DNS query for: %s", domain_name);
+        LOG_DEBUG(TAG, "DNS query for: %s", domain_name);
 
         memset(tx_buffer, 0, sizeof(tx_buffer));
         dns_header_t* response_header = (dns_header_t*)tx_buffer;
@@ -243,7 +244,7 @@ static void dns_server_task(void *pvParameters)
                 if ((*ptr & 0xC0) == 0xC0) {
                     // Compressed name - skip 2 bytes if we have them
                     if ((ptr - rx_buffer) >= len - 1) {
-                        ESP_LOGW(TAG, "DNS question compression pointer truncated");
+                        LOG_WARN(TAG, "DNS question compression pointer truncated");
                         goto parse_error;
                     }
                     ptr += 2;
@@ -252,11 +253,11 @@ static void dns_server_task(void *pvParameters)
                     // Regular label - validate length
                     uint8_t label_len = *ptr;
                     if (label_len > 63) {
-                        ESP_LOGW(TAG, "DNS question label too long: %d", label_len);
+                        LOG_WARN(TAG, "DNS question label too long: %d", label_len);
                         goto parse_error;
                     }
                     if ((ptr - rx_buffer) + label_len >= len) {
-                        ESP_LOGW(TAG, "DNS question label extends beyond packet");
+                        LOG_WARN(TAG, "DNS question label extends beyond packet");
                         goto parse_error;
                     }
                     ptr += label_len + 1;
@@ -269,7 +270,7 @@ static void dns_server_task(void *pvParameters)
             
             // Ensure we have space for qtype and qclass
             if ((ptr - rx_buffer) + sizeof(dns_question_t) > len) {
-                ESP_LOGW(TAG, "DNS question type/class truncated");
+                LOG_WARN(TAG, "DNS question type/class truncated");
                 goto parse_error;
             }
             ptr += sizeof(dns_question_t);  // Skip qtype and qclass
@@ -282,12 +283,12 @@ static void dns_server_task(void *pvParameters)
         
         // Validate calculated length
         if (all_questions_len < 0 || all_questions_len > len - sizeof(dns_header_t)) {
-            ESP_LOGW(TAG, "Invalid questions length calculation: %d", all_questions_len);
+            LOG_WARN(TAG, "Invalid questions length calculation: %d", all_questions_len);
             continue;
         }
         
         if (response_len + all_questions_len + sizeof(dns_answer_t) > sizeof(tx_buffer)) {
-            ESP_LOGW(TAG, "DNS response would be too large: %d bytes", 
+            LOG_WARN(TAG, "DNS response would be too large: %d bytes", 
                      response_len + all_questions_len + sizeof(dns_answer_t));
             continue;
         }
@@ -295,7 +296,7 @@ static void dns_server_task(void *pvParameters)
         goto parse_success;
         
         parse_error:
-        ESP_LOGW(TAG, "DNS packet parsing failed, dropping packet");
+        LOG_WARN(TAG, "DNS packet parsing failed, dropping packet");
         continue;
         
         parse_success:
@@ -320,7 +321,7 @@ static void dns_server_task(void *pvParameters)
         sendto(dns_socket, tx_buffer, response_len, 0,
                (struct sockaddr*)&client_addr, client_addr_len);
         
-        ESP_LOGD(TAG, "DNS query redirected to captive portal");
+        LOG_DEBUG(TAG, "DNS query redirected to captive portal");
     }
 
     if (dns_socket >= 0) {
@@ -328,21 +329,21 @@ static void dns_server_task(void *pvParameters)
         dns_socket = -1;
     }
     
-    ESP_LOGI(TAG, "DNS server stopped");
+    LOG_INFO(TAG, "DNS server stopped");
     vTaskDelete(NULL);
 }
 
 esp_err_t dns_server_start(void)
 {
     if (dns_server_running) {
-        ESP_LOGW(TAG, "DNS server already running");
+        LOG_WARN(TAG, "DNS server already running");
         return ESP_OK;
     }
 
     dns_server_running = true;
     
     if (xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &dns_task_handle) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create DNS server task");
+        LOG_ERROR(TAG, "Failed to create DNS server task");
         dns_server_running = false;
         return ESP_FAIL;
     }
@@ -353,7 +354,7 @@ esp_err_t dns_server_start(void)
 esp_err_t dns_server_stop(void)
 {
     if (!dns_server_running) {
-        ESP_LOGW(TAG, "DNS server not running");
+        LOG_WARN(TAG, "DNS server not running");
         return ESP_OK;
     }
 
@@ -369,19 +370,19 @@ esp_err_t dns_server_stop(void)
         dns_task_handle = NULL;
     }
 
-    ESP_LOGI(TAG, "DNS server stop requested");
+    LOG_INFO(TAG, "DNS server stop requested");
     return ESP_OK;
 }
 
 esp_err_t dns_server_start_with_config(const dns_server_config_t *config)
 {
     if (!config) {
-        ESP_LOGE(TAG, "DNS server config cannot be NULL");
+        LOG_ERROR(TAG, "DNS server config cannot be NULL");
         return ESP_ERR_INVALID_ARG;
     }
     
     if (config->num_of_entries > DNS_SERVER_MAX_ITEMS) {
-        ESP_LOGE(TAG, "Too many DNS entries: %d (max: %d)", config->num_of_entries, DNS_SERVER_MAX_ITEMS);
+        LOG_ERROR(TAG, "Too many DNS entries: %d (max: %d)", config->num_of_entries, DNS_SERVER_MAX_ITEMS);
         return ESP_ERR_INVALID_ARG;
     }
     
@@ -389,9 +390,9 @@ esp_err_t dns_server_start_with_config(const dns_server_config_t *config)
     memcpy(&s_dns_config, config, sizeof(dns_server_config_t));
     s_config_set = true;
     
-    ESP_LOGI(TAG, "DNS server configured with %d entries:", config->num_of_entries);
+    LOG_INFO(TAG, "DNS server configured with %d entries:", config->num_of_entries);
     for (int i = 0; i < config->num_of_entries; i++) {
-        ESP_LOGI(TAG, "  [%d] %s -> " IPSTR, i, config->item[i].name, 
+        LOG_INFO(TAG, "  [%d] %s -> " IPSTR, i, config->item[i].name, 
                  IP2STR(&config->item[i].ip));
     }
     

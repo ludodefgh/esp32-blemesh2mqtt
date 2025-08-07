@@ -1,13 +1,14 @@
 #include "message_queue.h"
-#include "esp_log.h"
+
 #include <map>
 #include <esp_console.h>
 #include "debug/debug_commands_registry.h"
 #include "debug/console_cmd.h"
 #include <esp_timer.h>
 #include <esp_ble_mesh_defs.h>
+#include "common/log_common.h"
 
-static const char *TAG = "MessageQueue";
+static const char *TAG = "MESS_QUEUE";
 
 message_queue_manager &message_queue()
 {
@@ -53,12 +54,12 @@ void message_queue::try_send_next()
         try_send_next();
     }
 
-    ESP_LOGI(TAG, "[%s] Sent message with opcode 0x%08X, retries left: %u", __func__, msg.opcode, msg.retries_left);
+    LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u",msg.opcode, msg.retries_left);
 }
 
 void message_queue::handle_ack(uint32_t opcode)
 {
-    ESP_LOGW(TAG, "[%s] Ack received for opcode 0x%08X", __func__, opcode);
+    LOG_WARN(TAG, "Ack received for opcode 0x%08X", opcode);
     if (!queue.empty() && queue.front().opcode == opcode)
     {
         esp_timer_stop(failsafe_timer);
@@ -68,10 +69,13 @@ void message_queue::handle_ack(uint32_t opcode)
     }
     else if (!queue.empty())
     {
-        ESP_LOGW(TAG, " [%s]  Opcode 0x%08X not found in the front [0x%08X] of the queue, waiting for next message", __func__, opcode, queue.front().opcode);
+        LOG_WARN(TAG, "Opcode 0x%08X not found in the front [0x%08X] of the queue, waiting for next message", opcode, queue.front().opcode);
     }
 
-    ESP_LOGW(TAG, "[%s] Current queue size: %zu", __func__, queue.size());
+    if (queue.size() > 0)
+    {
+        LOG_WARN(TAG, "Current queue size: %zu", queue.size());
+    }
 }
 
 void message_queue::handle_timeout(uint32_t opcode)
@@ -84,13 +88,13 @@ void message_queue::handle_timeout(uint32_t opcode)
     {
         if (msg.retries_left > 0 && --msg.retries_left > 0)
         {
-            ESP_LOGW(TAG, "Retrying opcode 0x%08X", opcode);
+            LOG_WARN(TAG, "Retrying opcode 0x%08X", opcode);
             waiting = false;
             try_send_next();
         }
         else
         {
-            ESP_LOGE(TAG, "Message dropped: opcode 0x%08X", opcode);
+            LOG_ERROR(TAG, "Message dropped: opcode 0x%08X", opcode);
             esp_timer_stop(failsafe_timer);
             queue.pop();
             waiting = false;
@@ -98,8 +102,8 @@ void message_queue::handle_timeout(uint32_t opcode)
         }
     }
 
-    ESP_LOGW(TAG, "[%s] Timeout for opcode 0x%08X", __func__, opcode);
-    ESP_LOGW(TAG, "[%s] Current queue size: %zu", __func__, queue.size());
+    LOG_WARN(TAG, "Timeout for opcode 0x%08X", opcode);
+    LOG_WARN(TAG, "Current queue size: %zu", queue.size());
 }
 
 void message_queue::ensure_failsafe_timer()
@@ -128,7 +132,7 @@ void message_queue::on_failsafe_trigger()
 {
     if (!queue.empty())
     {
-        ESP_LOGE(TAG, "Failsafe timeout for opcode 0x%08X", queue.front().opcode);
+        LOG_ERROR(TAG, "Failsafe timeout for opcode 0x%08X", queue.front().opcode);
         handle_timeout(queue.front().opcode); // acts like timeout handler
     }
 }
@@ -136,7 +140,7 @@ void message_queue_manager::enqueue(std::shared_ptr<bm2mqtt_node_info> node, con
 {
     if (!node) return;
     
-    ESP_LOGD(TAG, "[%s] Enqueueing message for node 0x%04X, opcode 0x%08X", __func__, node->unicast, msg.opcode);
+    LOG_DEBUG(TAG, "Enqueueing message for node 0x%04X, opcode 0x%08X", node->unicast, msg.opcode);
     auto it = node_queues.find(node);
     if (it == node_queues.end())
     {
@@ -156,7 +160,7 @@ void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, 
 {
     if (!node) return;
     
-    ESP_LOGI(TAG, "[%s] Ack for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
+    LOG_INFO(TAG, "Ack for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
     {
@@ -164,13 +168,13 @@ void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, 
     }
     else
     {
-        ESP_LOGE(TAG, "No message queue found for node 0x%04X", node->unicast);
+        LOG_ERROR(TAG, "No message queue found for node 0x%04X", node->unicast);
     }
 
     if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
     {
         // Special handling for node reset
-        ESP_LOGW(TAG, "[%s] Node reset opcode 0x%08X received, removing node queue", __func__, opcode);
+        LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
         node_queues.erase(node);
     }
 }
@@ -179,7 +183,7 @@ void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> no
 {
     if (!node) return;
     
-    ESP_LOGW(TAG, "[%s] Timeout for opcode 0x%08X on node 0x%04X", __func__, opcode, node->unicast);
+    LOG_WARN(TAG, "Timeout for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
     {
@@ -187,13 +191,13 @@ void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> no
     }
     else
     {
-        ESP_LOGE(TAG, "No message queue found for node 0x%04X", node->unicast);
+        LOG_ERROR(TAG, "No message queue found for node 0x%04X", node->unicast);
     }
 
     if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
     {
         // Special handling for node reset
-        ESP_LOGW(TAG, "[%s] Node reset opcode 0x%08X received, removing node queue", __func__, opcode);
+        LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
         node_queues.erase(node);
     }
 }
@@ -207,21 +211,21 @@ void message_queue_manager::clear_queue(std::shared_ptr<bm2mqtt_node_info> node)
 
 void message_queue_manager::print_debug() const
 {
-    ESP_LOGI(TAG, "=== Message Queue Status ===");
+    LOG_INFO(TAG, "=== Message Queue Status ===");
     for (const auto &entry : node_queues)
     {
         const auto &queue = entry.second;
         size_t queue_size = queue.size();
         bool waiting = queue.is_waiting();
 
-        ESP_LOGI(TAG, "Node 0x%04X: %zu message(s), waiting: %s",
+        LOG_INFO(TAG, "Node 0x%04X: %zu message(s), waiting: %s",
                  entry.first->unicast, queue_size, waiting ? "yes" : "no");
 
         // List opcodes in the queue
         if (queue_size > 0)
         {
             const auto &internal_queue = queue.get_queue();
-            ESP_LOGI(TAG, "    opcode: 0x%08X (retries left: %u)",
+            LOG_INFO(TAG, "    opcode: 0x%08X (retries left: %u)",
                      internal_queue.front().opcode, internal_queue.front().retries_left);
         }
     }

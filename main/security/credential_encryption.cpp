@@ -1,5 +1,5 @@
 #include "credential_encryption.h"
-#include "esp_log.h"
+
 #include "esp_system.h"
 #include "esp_mac.h"
 #include "esp_random.h"
@@ -7,6 +7,7 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
 #include <cstring>
+#include "common/log_common.h"
 
 static const char* TAG = "CRED_ENCRYPT";
 
@@ -25,16 +26,16 @@ esp_err_t CredentialEncryption::initialize() {
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Initializing credential encryption system");
+    LOG_INFO(TAG, "Initializing credential encryption system");
     
     esp_err_t err = setup_encryption_key();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to setup encryption key: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to setup encryption key: %s", esp_err_to_name(err));
         return err;
     }
     
     initialized_ = true;
-    ESP_LOGI(TAG, "Credential encryption system initialized successfully");
+    LOG_INFO(TAG, "Credential encryption system initialized successfully");
     
     // Quick self-test
     std::string test_plaintext = "TEST123";
@@ -44,13 +45,13 @@ esp_err_t CredentialEncryption::initialize() {
     if (test_err == ESP_OK) {
         test_err = decrypt_string(test_encrypted, test_decrypted);
         if (test_err == ESP_OK && test_decrypted == test_plaintext) {
-            ESP_LOGI(TAG, "Encryption self-test PASSED");
+            LOG_INFO(TAG, "Encryption self-test PASSED");
         } else {
-            ESP_LOGE(TAG, "Encryption self-test FAILED: decrypt error=%s, expected='%s', got='%s'", 
+            LOG_ERROR(TAG, "Encryption self-test FAILED: decrypt error=%s, expected='%s', got='%s'", 
                      esp_err_to_name(test_err), test_plaintext.c_str(), test_decrypted.c_str());
         }
     } else {
-        ESP_LOGE(TAG, "Encryption self-test FAILED: encrypt error=%s", esp_err_to_name(test_err));
+        LOG_ERROR(TAG, "Encryption self-test FAILED: encrypt error=%s", esp_err_to_name(test_err));
     }
     
     return ESP_OK;
@@ -61,7 +62,7 @@ esp_err_t CredentialEncryption::setup_encryption_key() {
     uint8_t base_mac[6];
     esp_err_t err = esp_read_mac(base_mac, ESP_MAC_WIFI_STA);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read MAC address");
+        LOG_ERROR(TAG, "Failed to read MAC address");
         return err;
     }
     
@@ -90,11 +91,11 @@ esp_err_t CredentialEncryption::setup_encryption_key() {
     memset(seed, 0, sizeof(seed));
     
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to generate encryption key");
+        LOG_ERROR(TAG, "Failed to generate encryption key");
         return ESP_FAIL;
     }
     
-    ESP_LOGI(TAG, "Generated device-specific encryption key from MAC: %02X:%02X:%02X:%02X:%02X:%02X", 
+    LOG_INFO(TAG, "Generated device-specific encryption key from MAC: %02X:%02X:%02X:%02X:%02X:%02X", 
              base_mac[0], base_mac[1], base_mac[2], base_mac[3], base_mac[4], base_mac[5]);
     return ESP_OK;
 }
@@ -105,7 +106,7 @@ void CredentialEncryption::generate_iv(uint8_t* iv, size_t length) {
 
 esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std::string& ciphertext) {
     if (!initialized_) {
-        ESP_LOGE(TAG, "Encryption not initialized");
+        LOG_ERROR(TAG, "Encryption not initialized");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -114,7 +115,7 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Encrypting data (length: %zu)", plaintext.length());
+    LOG_INFO(TAG, "Encrypting data (length: %zu)", plaintext.length());
     
     // Generate random IV
     uint8_t iv[AES_BLOCK_SIZE];
@@ -141,7 +142,7 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
     int ret = mbedtls_aes_setkey_enc(&aes_ctx, encryption_key_, AES_KEY_SIZE * 8);
     if (ret != 0) {
         mbedtls_aes_free(&aes_ctx);
-        ESP_LOGE(TAG, "Failed to set AES key: %d", ret);
+        LOG_ERROR(TAG, "Failed to set AES key: %d", ret);
         return ESP_FAIL;
     }
     
@@ -155,7 +156,7 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
     mbedtls_aes_free(&aes_ctx);
     
     if (ret != 0) {
-        ESP_LOGE(TAG, "AES encryption failed: %d", ret);
+        LOG_ERROR(TAG, "AES encryption failed: %d", ret);
         return ESP_FAIL;
     }
     
@@ -168,7 +169,7 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
     size_t encoded_len;
     ret = mbedtls_base64_encode(nullptr, 0, &encoded_len, final_data.data(), final_data.size());
     if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-        ESP_LOGE(TAG, "Base64 length calculation failed");
+        LOG_ERROR(TAG, "Base64 length calculation failed");
         return ESP_FAIL;
     }
     
@@ -176,13 +177,13 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
     ret = mbedtls_base64_encode(encoded_data.data(), encoded_len, &encoded_len,
                                 final_data.data(), final_data.size());
     if (ret != 0) {
-        ESP_LOGE(TAG, "Base64 encoding failed: %d", ret);
+        LOG_ERROR(TAG, "Base64 encoding failed: %d", ret);
         return ESP_FAIL;
     }
     
     ciphertext = std::string(reinterpret_cast<char*>(encoded_data.data()), encoded_len);
     
-    ESP_LOGI(TAG, "Encryption successful, ciphertext: '%s' (length: %zu)", ciphertext.c_str(), ciphertext.length());
+    LOG_INFO(TAG, "Encryption successful, ciphertext: '%s' (length: %zu)", ciphertext.c_str(), ciphertext.length());
     
     // Clear sensitive data
     memset(padded_data.data(), 0, padded_data.size());
@@ -193,7 +194,7 @@ esp_err_t CredentialEncryption::encrypt_string(const std::string& plaintext, std
 
 esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, std::string& plaintext) {
     if (!initialized_) {
-        ESP_LOGE(TAG, "Encryption not initialized");
+        LOG_ERROR(TAG, "Encryption not initialized");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -202,8 +203,8 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Decrypting data of length: %zu", ciphertext.length());
-    ESP_LOGI(TAG, "Input ciphertext: %s", ciphertext.c_str());
+    LOG_DEBUG(TAG, "Decrypting data of length: %zu", ciphertext.length());
+    LOG_DEBUG(TAG, "Input ciphertext: %s", ciphertext.c_str());
     
     // Base64 decode
     size_t decoded_len;
@@ -211,12 +212,12 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
                                     reinterpret_cast<const uint8_t*>(ciphertext.c_str()),
                                     ciphertext.length());
     if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-        ESP_LOGE(TAG, "Base64 decode length calculation failed: %d", ret);
+        LOG_ERROR(TAG, "Base64 decode length calculation failed: %d", ret);
         return ESP_FAIL;
     }
     
     if (decoded_len < AES_BLOCK_SIZE + AES_BLOCK_SIZE) { // IV + at least one block
-        ESP_LOGE(TAG, "Decoded data too short: %zu bytes", decoded_len);
+        LOG_ERROR(TAG, "Decoded data too short: %zu bytes", decoded_len);
         return ESP_FAIL;
     }
     
@@ -225,7 +226,7 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
                                 reinterpret_cast<const uint8_t*>(ciphertext.c_str()),
                                 ciphertext.length());
     if (ret != 0) {
-        ESP_LOGE(TAG, "Base64 decoding failed: %d", ret);
+        LOG_ERROR(TAG, "Base64 decoding failed: %d", ret);
         return ESP_FAIL;
     }
     
@@ -235,7 +236,7 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
     
     size_t encrypted_len = decoded_len - AES_BLOCK_SIZE;
     if (encrypted_len % AES_BLOCK_SIZE != 0) {
-        ESP_LOGE(TAG, "Invalid encrypted data length: %zu", encrypted_len);
+        LOG_ERROR(TAG, "Invalid encrypted data length: %zu", encrypted_len);
         return ESP_FAIL;
     }
     
@@ -246,7 +247,7 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
     ret = mbedtls_aes_setkey_dec(&aes_ctx, encryption_key_, AES_KEY_SIZE * 8);
     if (ret != 0) {
         mbedtls_aes_free(&aes_ctx);
-        ESP_LOGE(TAG, "Failed to set AES key: %d", ret);
+        LOG_ERROR(TAG, "Failed to set AES key: %d", ret);
         return ESP_FAIL;
     }
     
@@ -257,26 +258,26 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
     mbedtls_aes_free(&aes_ctx);
     
     if (ret != 0) {
-        ESP_LOGE(TAG, "AES decryption failed: %d", ret);
+        LOG_ERROR(TAG, "AES decryption failed: %d", ret);
         return ESP_FAIL;
     }
     
     // Remove PKCS#7 padding
     if (decrypted_data.empty()) {
-        ESP_LOGE(TAG, "Decrypted data is empty");
+        LOG_ERROR(TAG, "Decrypted data is empty");
         return ESP_FAIL;
     }
     
     uint8_t padding = decrypted_data.back();
     if (padding == 0 || padding > AES_BLOCK_SIZE || padding > decrypted_data.size()) {
-        ESP_LOGE(TAG, "Invalid padding: %d", padding);
+        LOG_ERROR(TAG, "Invalid padding: %d", padding);
         return ESP_FAIL;
     }
     
     // Verify padding
     for (size_t i = decrypted_data.size() - padding; i < decrypted_data.size(); i++) {
         if (decrypted_data[i] != padding) {
-            ESP_LOGE(TAG, "Padding verification failed");
+            LOG_ERROR(TAG, "Padding verification failed");
             return ESP_FAIL;
         }
     }
@@ -284,7 +285,7 @@ esp_err_t CredentialEncryption::decrypt_string(const std::string& ciphertext, st
     size_t plaintext_len = decrypted_data.size() - padding;
     plaintext = std::string(reinterpret_cast<char*>(decrypted_data.data()), plaintext_len);
     
-    ESP_LOGI(TAG, "Decryption successful (length: %zu)", plaintext.length());
+    LOG_DEBUG(TAG, "Decryption successful (length: %zu)", plaintext.length());
     
     // Clear sensitive data
     memset(decrypted_data.data(), 0, decrypted_data.size());

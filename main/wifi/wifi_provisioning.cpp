@@ -1,6 +1,7 @@
 #include "wifi_provisioning.h"
 #include "dns_server.h"
-#include "esp_log.h"
+
+#include "common/log_common.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_http_server.h"
@@ -27,7 +28,6 @@ static wifi_ap_record_extended_t* s_scan_results = NULL;
 static uint16_t s_scan_count = 0;
 static EventGroupHandle_t s_wifi_event_group;
 static bool s_scan_in_progress = false;
-static bool s_mode_switched_for_scan = false;
 
 static char ip_address[16] = {0};
 
@@ -44,7 +44,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_AP_START:
-                ESP_LOGI(TAG, "WiFi AP started");
+                LOG_INFO(TAG, "WiFi AP started");
                 s_provisioning_state = WIFI_PROV_STATE_AP_STARTED;
                 if (s_event_callback) {
                     s_event_callback(s_provisioning_state, NULL);
@@ -52,30 +52,30 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 break;
                 
             case WIFI_EVENT_AP_STOP:
-                ESP_LOGI(TAG, "WiFi AP stopped");
+                LOG_INFO(TAG, "WiFi AP stopped");
                 break;
                 
             case WIFI_EVENT_AP_STACONNECTED:
                 {
                     wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-                    ESP_LOGI(TAG, "Station connected: MAC=" MACSTR ", waiting for DHCP IP assignment", MAC2STR(event->mac));
+                    LOG_INFO(TAG, "Station connected: MAC=" MACSTR ", waiting for DHCP IP assignment", MAC2STR(event->mac));
                 }
                 break;
                 
             case WIFI_EVENT_AP_STADISCONNECTED:
                 {
                     wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-                    ESP_LOGI(TAG, "Station disconnected: MAC=" MACSTR, MAC2STR(event->mac));
+                    LOG_INFO(TAG, "Station disconnected: MAC=" MACSTR, MAC2STR(event->mac));
                 }
                 break;
                 
             case WIFI_EVENT_STA_START:
-                ESP_LOGI(TAG, "WiFi STA started");
+                LOG_INFO(TAG, "WiFi STA started");
                 esp_wifi_connect();
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED:
-                ESP_LOGI(TAG, "WiFi STA connected");
+                LOG_INFO(TAG, "WiFi STA connected");
                 s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTING;
                 if (s_event_callback) {
                     s_event_callback(s_provisioning_state, event_data);
@@ -83,7 +83,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 break;
                 
             case WIFI_EVENT_STA_DISCONNECTED:
-                ESP_LOGI(TAG, "WiFi STA disconnected");
+                LOG_INFO(TAG, "WiFi STA disconnected");
                 s_provisioning_state = WIFI_PROV_STATE_STA_FAILED;
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
                 if (s_event_callback) {
@@ -93,7 +93,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 
             case WIFI_EVENT_SCAN_DONE:
                 {
-                    ESP_LOGI(TAG, "WiFi scan completed");
+                    LOG_INFO(TAG, "WiFi scan completed");
                     s_scan_in_progress = false;
                     
                     // Process scan results asynchronously
@@ -115,17 +115,17 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                                     s_scan_results[i].rssi = ap_records[i].rssi;
                                     s_scan_results[i].authmode = ap_records[i].authmode;
                                 }
-                                ESP_LOGI(TAG, "Processed %d WiFi networks from scan", s_scan_count);
+                                LOG_INFO(TAG, "Processed %d WiFi networks from scan", s_scan_count);
                             } else {
-                                ESP_LOGE(TAG, "Failed to allocate memory for scan results");
+                                LOG_ERROR(TAG, "Failed to allocate memory for scan results");
                                 s_scan_count = 0;
                             }
                         } else {
-                            ESP_LOGE(TAG, "Failed to get scan results: %s", esp_err_to_name(err));
+                            LOG_ERROR(TAG, "Failed to get scan results: %s", esp_err_to_name(err));
                         }
                         free(ap_records);
                     } else {
-                        ESP_LOGE(TAG, "Failed to allocate memory for AP records");
+                        LOG_ERROR(TAG, "Failed to allocate memory for AP records");
                     }
                 }
                 break;
@@ -138,7 +138,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
             case IP_EVENT_STA_GOT_IP:
                 {
                     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-                    ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
+                    LOG_INFO(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
                     snprintf(ip_address, sizeof(ip_address), "%d.%d.%d.%d", IP2STR(&event->ip_info.ip));
 
                     s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
@@ -152,22 +152,22 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
             case IP_EVENT_AP_STAIPASSIGNED:
                 {
                     ip_event_ap_staipassigned_t* event = (ip_event_ap_staipassigned_t*) event_data;
-                    ESP_LOGI(TAG, "DHCP assigned IP " IPSTR " to station MAC=" MACSTR, 
+                    LOG_INFO(TAG, "DHCP assigned IP " IPSTR " to station MAC=" MACSTR, 
                              IP2STR(&event->ip), MAC2STR(event->mac));
                     
                     // Now it's safe to switch to APSTA mode - client has IP and can use WiFi scanning
                     wifi_mode_t current_mode;
                     esp_err_t err = esp_wifi_get_mode(&current_mode);
                     if (err == ESP_OK && current_mode == WIFI_MODE_AP) {
-                        ESP_LOGI(TAG, "Switching to APSTA mode now that client has IP address");
+                        LOG_INFO(TAG, "Switching to APSTA mode now that client has IP address");
                         err = esp_wifi_set_mode(WIFI_MODE_APSTA);
                         if (err != ESP_OK) {
-                            ESP_LOGW(TAG, "Failed to switch to APSTA mode: %s", esp_err_to_name(err));
+                            LOG_WARN(TAG, "Failed to switch to APSTA mode: %s", esp_err_to_name(err));
                         } else {
-                            ESP_LOGI(TAG, "Successfully switched to APSTA mode - WiFi scanning now available");
+                            LOG_INFO(TAG, "Successfully switched to APSTA mode - WiFi scanning now available");
                             
                             // Start a background WiFi scan to populate the list
-                            ESP_LOGI(TAG, "Starting background WiFi scan to populate network list");
+                            LOG_INFO(TAG, "Starting background WiFi scan to populate network list");
                             vTaskDelay(pdMS_TO_TICKS(500)); // Give mode switch time to complete
                             wifi_provisioning_scan_start();
                         }
@@ -185,18 +185,18 @@ esp_err_t wifi_provisioning_init(void)
 {
     s_wifi_event_group = xEventGroupCreate();
     if (s_wifi_event_group == NULL) {
-        ESP_LOGE(TAG, "Failed to create event group");
+        LOG_ERROR(TAG, "Failed to create event group");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "WiFi provisioning initialized");
+    LOG_INFO(TAG, "WiFi provisioning initialized");
     return ESP_OK;
 }
 
 esp_err_t wifi_provisioning_start_captive_portal(void)
 {
     if (s_provisioning_state == WIFI_PROV_STATE_AP_STARTED) {
-        ESP_LOGW(TAG, "Captive portal already started");
+        LOG_WARN(TAG, "Captive portal already started");
         return ESP_OK;
     }
 
@@ -241,14 +241,14 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.gw);
     
     // Force clean DHCP server state
-    ESP_LOGI(TAG, "Stopping any existing DHCP server...");
+    LOG_INFO(TAG, "Stopping any existing DHCP server...");
     esp_err_t stop_err = esp_netif_dhcps_stop(s_ap_netif);
     if (stop_err == ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED) {
-        ESP_LOGW(TAG, "DHCP server was not running");
+        LOG_WARN(TAG, "DHCP server was not running");
     } else if (stop_err != ESP_OK) {
-        ESP_LOGW(TAG, "DHCP stop failed: %s", esp_err_to_name(stop_err));
+        LOG_WARN(TAG, "DHCP stop failed: %s", esp_err_to_name(stop_err));
     } else {
-        ESP_LOGI(TAG, "DHCP server stopped successfully");
+        LOG_INFO(TAG, "DHCP server stopped successfully");
     }
     
     // Small delay to ensure clean state
@@ -257,7 +257,7 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
     
     // Keep DHCP configuration simple - let ESP-IDF handle defaults
-    ESP_LOGI(TAG, "Using default DHCP server configuration for maximum compatibility");
+    LOG_INFO(TAG, "Using default DHCP server configuration for maximum compatibility");
     
     // Set DHCP Option 114 for modern captive portal detection (RFC 8910)
     char captive_portal_uri[] = "http://192.168.4.1/setup";
@@ -266,58 +266,56 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
                                                    captive_portal_uri, 
                                                    strlen(captive_portal_uri));
     if (dhcp_opt_err == ESP_OK) {
-        ESP_LOGI(TAG, "DHCP Option 114 (Captive Portal URI) set successfully");
+        LOG_INFO(TAG, "DHCP Option 114 (Captive Portal URI) set successfully");
     } else {
-        ESP_LOGW(TAG, "Failed to set DHCP Option 114: %s", esp_err_to_name(dhcp_opt_err));
-        ESP_LOGW(TAG, "Fallback to DNS-based captive portal detection");
+        LOG_WARN(TAG, "Failed to set DHCP Option 114: %s", esp_err_to_name(dhcp_opt_err));
+        LOG_WARN(TAG, "Fallback to DNS-based captive portal detection");
     }
     
 
     // Start in AP-only mode for faster client connections
-    ESP_LOGI(TAG, "Starting in AP mode for faster client connections");
+    LOG_INFO(TAG, "Starting in AP mode for faster client connections");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     
     // Wait for WiFi AP to be fully started before configuring DHCP
-    ESP_LOGI(TAG, "Waiting for WiFi AP to fully start...");
+    LOG_INFO(TAG, "Waiting for WiFi AP to fully start...");
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // Debug network interface state before starting DHCP
     esp_netif_ip_info_t current_ip;
     esp_netif_get_ip_info(s_ap_netif, &current_ip);
-    ESP_LOGI(TAG, "AP interface IP: " IPSTR ", Gateway: " IPSTR ", Netmask: " IPSTR, 
+    LOG_INFO(TAG, "AP interface IP: " IPSTR ", Gateway: " IPSTR ", Netmask: " IPSTR, 
              IP2STR(&current_ip.ip), IP2STR(&current_ip.gw), IP2STR(&current_ip.netmask));
     
     // Check if DHCP server is already running
     esp_netif_dhcp_status_t dhcp_status;
     esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
-    ESP_LOGI(TAG, "DHCP server status before start: %s", 
+    LOG_INFO(TAG, "DHCP server status before start: %s", 
              dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : 
              dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED" : "UNKNOWN");
     
-    ESP_LOGI(TAG, "Starting DHCP server with IP range: 192.168.4.2-192.168.4.254");
-    ESP_LOGI(TAG, "Gateway: 192.168.4.1, DNS: 192.168.4.1");
+    LOG_INFO(TAG, "Starting DHCP server with IP range: 192.168.4.2-192.168.4.254");
+    LOG_INFO(TAG, "Gateway: 192.168.4.1, DNS: 192.168.4.1");
     
     esp_err_t dhcps_start_err = esp_netif_dhcps_start(s_ap_netif);
     if (dhcps_start_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
+        LOG_ERROR(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
         return dhcps_start_err;
     } else {
-        ESP_LOGI(TAG, "DHCP server started successfully");
+        LOG_INFO(TAG, "DHCP server started successfully");
         
         // Verify DHCP server is actually running
         esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
-        ESP_LOGI(TAG, "DHCP server status after start: %s", 
+        LOG_INFO(TAG, "DHCP server status after start: %s", 
                  dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : 
                  dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED" : "UNKNOWN");
     }
     
     // Add delay to ensure DHCP server fully initializes
-    ESP_LOGI(TAG, "Waiting 2 seconds for DHCP server to fully initialize...");
+    LOG_INFO(TAG, "Waiting 2 seconds for DHCP server to fully initialize...");
     vTaskDelay(pdMS_TO_TICKS(2000));
-
-
     // Re-enable DNS server now that DHCP is working reliably
     esp_ip4_addr_t captive_ip;
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &captive_ip);
@@ -332,31 +330,31 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     
     esp_err_t dns_start_err = dns_server_start_with_config(&dns_config);
     if (dns_start_err != ESP_OK) {
-        ESP_LOGW(TAG, "DNS server failed to start: %s", esp_err_to_name(dns_start_err));
+        LOG_WARN(TAG, "DNS server failed to start: %s", esp_err_to_name(dns_start_err));
     } else {
-        ESP_LOGI(TAG, "DNS server started successfully for captive portal detection");
+        LOG_INFO(TAG, "DNS server started successfully for captive portal detection");
     }
 
-    ESP_LOGI(TAG, "Captive portal started with SSID: %s", ap_ssid);
+    LOG_INFO(TAG, "Captive portal started with SSID: %s", ap_ssid);
     return ESP_OK;
 }
 
 esp_err_t wifi_provisioning_stop_captive_portal(void)
 {
     if (s_provisioning_state != WIFI_PROV_STATE_AP_STARTED) {
-        ESP_LOGW(TAG, "Captive portal not running");
+        LOG_WARN(TAG, "Captive portal not running");
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Stopping captive portal...");
+    LOG_INFO(TAG, "Stopping captive portal...");
     
     // Stop DHCP server first
-    ESP_LOGI(TAG, "Stopping DHCP server...");
+    LOG_INFO(TAG, "Stopping DHCP server...");
     esp_err_t dhcp_stop_err = esp_netif_dhcps_stop(s_ap_netif);
     if (dhcp_stop_err != ESP_OK && dhcp_stop_err != ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED) {
-        ESP_LOGW(TAG, "DHCP server stop failed: %s", esp_err_to_name(dhcp_stop_err));
+        LOG_WARN(TAG, "DHCP server stop failed: %s", esp_err_to_name(dhcp_stop_err));
     } else {
-        ESP_LOGI(TAG, "DHCP server stopped");
+        LOG_INFO(TAG, "DHCP server stopped");
     }
     
     // Stop DNS server
@@ -368,18 +366,18 @@ esp_err_t wifi_provisioning_stop_captive_portal(void)
     // Stop WiFi to ensure clean state
     esp_err_t err = esp_wifi_stop();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WiFi stop failed: %s", esp_err_to_name(err));
+        LOG_WARN(TAG, "WiFi stop failed: %s", esp_err_to_name(err));
     }
     
     // Set to STA mode for next boot
     err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WiFi mode set failed: %s", esp_err_to_name(err));
+        LOG_WARN(TAG, "WiFi mode set failed: %s", esp_err_to_name(err));
     }
     
     s_provisioning_state = WIFI_PROV_STATE_IDLE;
     
-    ESP_LOGI(TAG, "Captive portal stopped");
+    LOG_INFO(TAG, "Captive portal stopped");
     return ESP_OK;
 }
 
@@ -388,7 +386,7 @@ static bool is_valid_ssid(const char* ssid) {
     
     size_t len = strlen(ssid);
     if (len == 0 || len > 32) {
-        ESP_LOGW(TAG, "SSID length invalid: %zu (must be 1-32)", len);
+        LOG_WARN(TAG, "SSID length invalid: %zu (must be 1-32)", len);
         return false;
     }
     
@@ -397,7 +395,7 @@ static bool is_valid_ssid(const char* ssid) {
         unsigned char c = ssid[i];
         // Allow printable ASCII and common UTF-8 characters
         if (c < 32 || c == 127) {
-            ESP_LOGW(TAG, "SSID contains invalid character at position %zu: 0x%02x", i, c);
+            LOG_WARN(TAG, "SSID contains invalid character at position %zu: 0x%02x", i, c);
             return false;
         }
     }
@@ -410,19 +408,19 @@ static bool is_valid_password(const char* password) {
     
     size_t len = strlen(password);
     if (len > 64) {
-        ESP_LOGW(TAG, "Password too long: %zu (max 64)", len);
+        LOG_WARN(TAG, "Password too long: %zu (max 64)", len);
         return false;
     }
     
     // Password can be empty for open networks
     if (len == 0) {
-        ESP_LOGD(TAG, "Empty password - assuming open network");
+        LOG_DEBUG(TAG, "Empty password - assuming open network");
         return true;
     }
     
     // For WPA/WPA2, minimum length is 8
     if (len < 8) {
-        ESP_LOGW(TAG, "Password too short for WPA: %zu (min 8)", len);
+        LOG_WARN(TAG, "Password too short for WPA: %zu (min 8)", len);
         return false;
     }
     
@@ -430,7 +428,7 @@ static bool is_valid_password(const char* password) {
     for (size_t i = 0; i < len; i++) {
         unsigned char c = password[i];
         if (c < 32 || c == 127) {
-            ESP_LOGW(TAG, "Password contains invalid character at position %zu: 0x%02x", i, c);
+            LOG_WARN(TAG, "Password contains invalid character at position %zu: 0x%02x", i, c);
             return false;
         }
     }
@@ -441,24 +439,24 @@ static bool is_valid_password(const char* password) {
 esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* password)
 {
     if (!ssid || !password) {
-        ESP_LOGE(TAG, "SSID or password is NULL");
+        LOG_ERROR(TAG, "SSID or password is NULL");
         return ESP_ERR_INVALID_ARG;
     }
     
     if (!is_valid_ssid(ssid)) {
-        ESP_LOGE(TAG, "Invalid SSID format");
+        LOG_ERROR(TAG, "Invalid SSID format");
         return ESP_ERR_INVALID_ARG;
     }
     
     if (!is_valid_password(password)) {
-        ESP_LOGE(TAG, "Invalid password format");
+        LOG_ERROR(TAG, "Invalid password format");
         return ESP_ERR_INVALID_ARG;
     }
 
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(WIFI_CREDENTIALS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -467,13 +465,13 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
     if (CredentialEncryption::instance().is_initialized()) {
         esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(ssid, encrypted_ssid);
         if (encrypt_err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to encrypt SSID, storing as plain text");
+            LOG_WARN(TAG, "Failed to encrypt SSID, storing as plain text");
             encrypted_ssid = ssid;
         } else {
-            ESP_LOGI(TAG, "SSID encrypted successfully");
+            LOG_INFO(TAG, "SSID encrypted successfully");
         }
     } else {
-        ESP_LOGW(TAG, "Encryption not initialized, storing SSID as plain text");
+        LOG_WARN(TAG, "Encryption not initialized, storing SSID as plain text");
         encrypted_ssid = ssid;
     }
     
@@ -488,13 +486,13 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
     if (CredentialEncryption::instance().is_initialized()) {
         esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(password, encrypted_password);
         if (encrypt_err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to encrypt password, storing as plain text");
+            LOG_WARN(TAG, "Failed to encrypt password, storing as plain text");
             encrypted_password = password;
         } else {
-            ESP_LOGI(TAG, "Password encrypted successfully");
+            LOG_INFO(TAG, "Password encrypted successfully");
         }
     } else {
-        ESP_LOGW(TAG, "Encryption not initialized, storing password as plain text");
+        LOG_WARN(TAG, "Encryption not initialized, storing password as plain text");
         encrypted_password = password;
     }
     
@@ -513,7 +511,7 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
 
     err = nvs_commit(nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to commit WiFi credentials to NVS: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to commit WiFi credentials to NVS: %s", esp_err_to_name(err));
         nvs_close(nvs_handle);
         return err;
     }
@@ -523,23 +521,23 @@ esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* passwo
     // Add a small delay to ensure NVS operations complete
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    ESP_LOGI(TAG, "WiFi credentials saved and committed: SSID=%s", ssid);
+    LOG_INFO(TAG, "WiFi credentials saved and committed: SSID=%s", ssid);
     return ESP_OK;
 }
 
 esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t ssid_len, size_t password_len)
 {
     if (!ssid || !password) {
-        ESP_LOGE(TAG, "Invalid parameters: ssid=%p, password=%p", ssid, password);
+        LOG_ERROR(TAG, "Invalid parameters: ssid=%p, password=%p", ssid, password);
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGI(TAG, "Loading WiFi credentials from NVS namespace: %s", WIFI_CREDENTIALS_NAMESPACE);
+    LOG_INFO(TAG, "Loading WiFi credentials from NVS namespace: %s", WIFI_CREDENTIALS_NAMESPACE);
 
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(WIFI_CREDENTIALS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS namespace '%s': %s", WIFI_CREDENTIALS_NAMESPACE, esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS namespace '%s': %s", WIFI_CREDENTIALS_NAMESPACE, esp_err_to_name(err));
         return err;
     }
 
@@ -547,44 +545,44 @@ esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t s
     size_t required_size = 0;
     err = nvs_get_str(nvs_handle, WIFI_SSID_KEY, nullptr, &required_size);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get SSID size from NVS key '%s': %s", WIFI_SSID_KEY, esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to get SSID size from NVS key '%s': %s", WIFI_SSID_KEY, esp_err_to_name(err));
         nvs_close(nvs_handle);
         return err;
     }
-    ESP_LOGI(TAG, "Found SSID in NVS, size: %zu bytes", required_size);
+    LOG_INFO(TAG, "Found SSID in NVS, size: %zu bytes", required_size);
     
     char* encrypted_ssid_buf = new char[required_size];
     err = nvs_get_str(nvs_handle, WIFI_SSID_KEY, encrypted_ssid_buf, &required_size);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read SSID from NVS: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to read SSID from NVS: %s", esp_err_to_name(err));
         delete[] encrypted_ssid_buf;
         nvs_close(nvs_handle);
         return err;
     }
-    ESP_LOGI(TAG, "Read SSID from NVS: %zu bytes", required_size);
+    LOG_INFO(TAG, "Read SSID from NVS: %zu bytes", required_size);
     
     // Decrypt SSID
     std::string decrypted_ssid;
     if (!CredentialEncryption::instance().is_initialized()) {
-        ESP_LOGE(TAG, "Encryption not initialized");
+        LOG_ERROR(TAG, "Encryption not initialized");
         delete[] encrypted_ssid_buf;
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Attempting to decrypt SSID...");
+    LOG_INFO(TAG, "Attempting to decrypt SSID...");
     esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_ssid_buf, decrypted_ssid);
     if (decrypt_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to decrypt SSID: %s", esp_err_to_name(decrypt_err));
+        LOG_ERROR(TAG, "Failed to decrypt SSID: %s", esp_err_to_name(decrypt_err));
         delete[] encrypted_ssid_buf;
         nvs_close(nvs_handle);
         return decrypt_err;
     }
     
-    ESP_LOGI(TAG, "SSID decrypted successfully: '%s'", decrypted_ssid.c_str());
+    LOG_INFO(TAG, "SSID decrypted successfully: '%s'", decrypted_ssid.c_str());
     
     if (decrypted_ssid.length() >= ssid_len) {
-        ESP_LOGE(TAG, "SSID too long: %zu bytes, buffer size: %zu", decrypted_ssid.length(), ssid_len);
+        LOG_ERROR(TAG, "SSID too long: %zu bytes, buffer size: %zu", decrypted_ssid.length(), ssid_len);
         delete[] encrypted_ssid_buf;
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_SIZE;
@@ -612,16 +610,16 @@ esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t s
     std::string decrypted_password;
     esp_err_t password_decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_password_buf, decrypted_password);
     if (password_decrypt_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to decrypt password: %s", esp_err_to_name(password_decrypt_err));
+        LOG_ERROR(TAG, "Failed to decrypt password: %s", esp_err_to_name(password_decrypt_err));
         delete[] encrypted_password_buf;
         nvs_close(nvs_handle);
         return password_decrypt_err;
     }
     
-    ESP_LOGI(TAG, "Password decrypted successfully");
+    LOG_INFO(TAG, "Password decrypted successfully");
     
     if (decrypted_password.length() >= password_len) {
-        ESP_LOGE(TAG, "Password too long: %zu bytes, buffer size: %zu", decrypted_password.length(), password_len);
+        LOG_ERROR(TAG, "Password too long: %zu bytes, buffer size: %zu", decrypted_password.length(), password_len);
         delete[] encrypted_password_buf;
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_SIZE;
@@ -638,12 +636,12 @@ esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t s
 
 bool wifi_provisioning_is_configured(void)
 {
-    ESP_LOGI(TAG, "Checking if WiFi is configured...");
+    LOG_INFO(TAG, "Checking if WiFi is configured...");
     
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(WIFI_CREDENTIALS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGI(TAG, "WiFi not configured: failed to open NVS namespace: %s", esp_err_to_name(err));
+        LOG_INFO(TAG, "WiFi not configured: failed to open NVS namespace: %s", esp_err_to_name(err));
         return false;
     }
 
@@ -652,7 +650,7 @@ bool wifi_provisioning_is_configured(void)
     nvs_close(nvs_handle);
 
     bool is_configured = (err == ESP_OK && configured == 1);
-    ESP_LOGI(TAG, "WiFi configured check: %s (configured flag: %d, error: %s)", 
+    LOG_INFO(TAG, "WiFi configured check: %s (configured flag: %d, error: %s)", 
              is_configured ? "YES" : "NO", configured, esp_err_to_name(err));
     
     return is_configured;
@@ -673,7 +671,7 @@ esp_err_t wifi_provisioning_clear_credentials(void)
     err = nvs_commit(nvs_handle);
     nvs_close(nvs_handle);
 
-    ESP_LOGI(TAG, "WiFi credentials cleared");
+    LOG_INFO(TAG, "WiFi credentials cleared");
     return err;
 }
 
@@ -684,14 +682,14 @@ esp_err_t wifi_provisioning_scan_start(void)
     
     // Only scan if more than 10 seconds have passed since last scan (reduced for better UX)
     if (s_scan_results && (current_time - last_scan_time) < 10000) {
-        ESP_LOGI(TAG, "Using cached scan results (%d networks) - last scan was %d ms ago", 
+        LOG_INFO(TAG, "Using cached scan results (%d networks) - last scan was %d ms ago", 
                 s_scan_count, (int)(current_time - last_scan_time));
         return ESP_OK;
     }
     
     // Check if scan is already in progress
     if (s_scan_in_progress) {
-        ESP_LOGD(TAG, "WiFi scan already in progress");
+        LOG_DEBUG(TAG, "WiFi scan already in progress");
         return ESP_OK;
     }
 
@@ -699,17 +697,17 @@ esp_err_t wifi_provisioning_scan_start(void)
     wifi_mode_t current_mode;
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get WiFi mode: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to get WiFi mode: %s", esp_err_to_name(err));
         return err;
     }
     
     if (current_mode != WIFI_MODE_APSTA) {
-        ESP_LOGW(TAG, "WiFi scan requested but not in APSTA mode (mode=%d). Scan may not work.", current_mode);
-        ESP_LOGW(TAG, "This usually means client hasn't connected yet to trigger mode switch");
+        LOG_WARN(TAG, "WiFi scan requested but not in APSTA mode (mode=%d). Scan may not work.", current_mode);
+        LOG_WARN(TAG, "This usually means client hasn't connected yet to trigger mode switch");
         // Don't switch modes during active connections as it can disrupt the AP
         return ESP_ERR_INVALID_STATE;
     } else {
-        ESP_LOGI(TAG, "WiFi scanning in APSTA mode");
+        LOG_INFO(TAG, "WiFi scanning in APSTA mode");
     }
 
     wifi_scan_config_t scan_config = {
@@ -730,17 +728,17 @@ esp_err_t wifi_provisioning_scan_start(void)
     vTaskDelay(pdMS_TO_TICKS(100));
     
     // Start non-blocking scan with minimal disruption
-    ESP_LOGI(TAG, "Starting gentle non-blocking WiFi scan...");
+    LOG_INFO(TAG, "Starting gentle non-blocking WiFi scan...");
     s_scan_in_progress = true;
     err = esp_wifi_scan_start(&scan_config, false);  // false = non-blocking
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
         s_scan_in_progress = false;
         return err;
     }
     
     last_scan_time = current_time;
-    ESP_LOGI(TAG, "Non-blocking WiFi scan started successfully");
+    LOG_INFO(TAG, "Non-blocking WiFi scan started successfully");
     return ESP_OK;
 }
 
@@ -768,18 +766,18 @@ esp_err_t wifi_provisioning_set_event_callback(wifi_provisioning_event_cb_t call
 
 esp_err_t wifi_provisioning_try_connect_sta(void)
 {
-    ESP_LOGI(TAG, "Attempting to connect to WiFi using stored credentials...");
+    LOG_INFO(TAG, "Attempting to connect to WiFi using stored credentials...");
     
     char ssid[32] = {0};
     char password[64] = {0};
     
     esp_err_t err = wifi_provisioning_get_credentials(ssid, password, sizeof(ssid), sizeof(password));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get WiFi credentials: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to get WiFi credentials: %s", esp_err_to_name(err));
         return err;
     }
     
-    ESP_LOGI(TAG, "Retrieved credentials for SSID: %s", ssid);
+    LOG_INFO(TAG, "Retrieved credentials for SSID: %s", ssid);
 
     // Initialize WiFi if not already done
     static bool wifi_initialized = false;
@@ -821,31 +819,31 @@ esp_err_t wifi_provisioning_try_connect_sta(void)
                                           pdMS_TO_TICKS(10000));
 
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to WiFi network: %s", ssid);
+        LOG_INFO(TAG, "Connected to WiFi network: %s", ssid);
         return ESP_OK;
     } else {
-        ESP_LOGE(TAG, "Failed to connect to WiFi network: %s", ssid);
+        LOG_ERROR(TAG, "Failed to connect to WiFi network: %s", ssid);
         return ESP_FAIL;
     }
 }
 
 bool wifi_provisioning_should_start_captive_portal(void)
 {
-    ESP_LOGI(TAG, "Determining if captive portal should start...");
+    LOG_INFO(TAG, "Determining if captive portal should start...");
     
     if (!wifi_provisioning_is_configured()) {
-        ESP_LOGI(TAG, "No WiFi credentials configured, starting captive portal");
+        LOG_INFO(TAG, "No WiFi credentials configured, starting captive portal");
         return true;
     }
 
-    ESP_LOGI(TAG, "WiFi credentials found, attempting to connect...");
+    LOG_INFO(TAG, "WiFi credentials found, attempting to connect...");
     esp_err_t connect_result = wifi_provisioning_try_connect_sta();
     if (connect_result != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect with stored credentials: %s, starting captive portal", esp_err_to_name(connect_result));
+        LOG_ERROR(TAG, "Failed to connect with stored credentials: %s, starting captive portal", esp_err_to_name(connect_result));
         return true;
     }
 
-    ESP_LOGI(TAG, "Successfully connected with stored credentials, no need for captive portal");
+    LOG_INFO(TAG, "Successfully connected with stored credentials, no need for captive portal");
     return false;
 }
 
@@ -859,7 +857,7 @@ static esp_err_t captive_redirect_handler(httpd_req_t *req)
 
 static esp_err_t captive_android_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Android captive portal detection: %s", req->uri);
+    LOG_INFO(TAG, "Android captive portal detection: %s", req->uri);
     
     // Modern Android captive portal detection optimization
     // Return 200 with captive portal content for faster detection
@@ -882,7 +880,7 @@ static esp_err_t captive_android_handler(httpd_req_t *req)
 
 static esp_err_t captive_ios_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "iOS captive portal detection: %s", req->uri);
+    LOG_INFO(TAG, "iOS captive portal detection: %s", req->uri);
     // iOS expects specific content for hotspot-detect.html
     // Return different content to trigger captive portal
     httpd_resp_set_status(req, "302 Found");
@@ -921,7 +919,7 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     
     esp_err_t err = wifi_provisioning_scan_start();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to start WiFi scan: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Scan failed");
         return ESP_FAIL;
     }
@@ -999,13 +997,13 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid SSID or password format");
         return ESP_FAIL;
     } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
         return ESP_FAIL;
     }
 
     // Give extra time for NVS operations to complete and verify the write
-    ESP_LOGI(TAG, "Verifying credentials were saved correctly...");
+    LOG_INFO(TAG, "Verifying credentials were saved correctly...");
     vTaskDelay(pdMS_TO_TICKS(500)); // Allow NVS operations to complete
     
     // Verify the credentials were actually saved by reading them back
@@ -1013,9 +1011,9 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     char verify_password[64] = {0};
     esp_err_t verify_err = wifi_provisioning_get_credentials(verify_ssid, verify_password, sizeof(verify_ssid), sizeof(verify_password));
     if (verify_err == ESP_OK && strcmp(verify_ssid, ssid) == 0 && strcmp(verify_password, password) == 0) {
-        ESP_LOGI(TAG, "Credentials verified successfully in NVS");
+        LOG_INFO(TAG, "Credentials verified successfully in NVS");
     } else {
-        ESP_LOGW(TAG, "Credential verification failed: %s", esp_err_to_name(verify_err));
+        LOG_WARN(TAG, "Credential verification failed: %s", esp_err_to_name(verify_err));
         // Clear sensitive verification data
         memset(verify_ssid, 0, sizeof(verify_ssid));
         memset(verify_password, 0, sizeof(verify_password));
@@ -1044,10 +1042,10 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     vTaskDelay(pdMS_TO_TICKS(1000));
     
     // Additional delay to ensure all NVS operations are fully completed
-    ESP_LOGI(TAG, "Final synchronization before restart...");
+    LOG_INFO(TAG, "Final synchronization before restart...");
     vTaskDelay(pdMS_TO_TICKS(500));
     
-    ESP_LOGI(TAG, "Restarting ESP32 to connect with new credentials...");
+    LOG_INFO(TAG, "Restarting ESP32 to connect with new credentials...");
     esp_restart();
 
     return ESP_OK;
