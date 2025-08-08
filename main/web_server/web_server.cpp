@@ -4,6 +4,9 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
+#include "esp_netif.h"
 #include <esp_ble_mesh_networking_api.h>
 
 // Third-party libraries
@@ -351,11 +354,62 @@ esp_err_t system_info_handler(httpd_req_t *req)
     uint32_t free_heap = esp_get_free_heap_size();
     uint32_t min_heap = esp_get_minimum_free_heap_size();
     uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    int64_t uptime_us = esp_timer_get_time();
 
-    char buf[256];
+    char buf[384];
     snprintf(buf, sizeof(buf),
-             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu } }",
-             free_heap, min_heap, total_heap, total_heap - free_heap);
+             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld }",
+             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us);
+
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t wifi_info_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+
+    wifi_ap_record_t ap_info;
+    wifi_config_t wifi_config;
+    esp_netif_ip_info_t ip_info;
+    uint8_t mac[6];
+    char ssid[33] = "--";
+    char ip_str[16] = "--";
+    char netmask_str[16] = "--";
+    char gateway_str[16] = "--";
+    char mac_str[18] = "--";
+    const char* status = "disconnected";
+
+    // Get WiFi status
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        strncpy(ssid, (char*)ap_info.ssid, sizeof(ssid) - 1);
+        ssid[sizeof(ssid) - 1] = '\0';
+        status = "connected";
+        
+        // Get IP information
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            esp_ip4addr_ntoa(&ip_info.ip, ip_str, sizeof(ip_str));
+            esp_ip4addr_ntoa(&ip_info.netmask, netmask_str, sizeof(netmask_str));
+            esp_ip4addr_ntoa(&ip_info.gw, gateway_str, sizeof(gateway_str));
+        }
+    } else if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK && 
+               strlen((char*)wifi_config.sta.ssid) > 0) {
+        strncpy(ssid, (char*)wifi_config.sta.ssid, sizeof(ssid) - 1);
+        ssid[sizeof(ssid) - 1] = '\0';
+        status = "configured";
+    }
+
+    // Get MAC address
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+        snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "{ \"status\": \"%s\", \"ssid\": \"%s\", \"ip\": \"%s\", \"netmask\": \"%s\", \"gateway\": \"%s\", \"mac\": \"%s\" }",
+             status, ssid, ip_str, netmask_str, gateway_str, mac_str);
 
     httpd_resp_send(req, buf, -1);
     return ESP_OK;
@@ -367,6 +421,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     if (strstr(req->uri, "/api/system_info"))
     {
         return system_info_handler(req);
+    }
+    else if (strstr(req->uri, "/api/wifi_info"))
+    {
+        return wifi_info_handler(req);
     }
     else if (strstr(req->uri, "/api/console_commands"))
     {
