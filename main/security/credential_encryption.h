@@ -1,8 +1,9 @@
 #pragma once
 
-#include "esp_err.h"
 #include <string>
 #include <vector>
+
+#include "esp_err.h"
 
 /**
  * Simple AES-256-CBC encryption for WiFi and MQTT credentials

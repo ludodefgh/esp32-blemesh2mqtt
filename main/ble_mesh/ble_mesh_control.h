@@ -1,7 +1,8 @@
 #pragma once
+#include <memory>
+
 #include "esp_err.h"
 #include "ble_mesh_node.h"
-#include <memory>
 
 typedef enum
 {

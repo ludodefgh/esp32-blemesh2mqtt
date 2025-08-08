@@ -1,8 +1,10 @@
 #pragma once
 #include <functional>
-#include "esp_ble_mesh_provisioning_api.h"
-#include "ble_mesh_node.h"
+
 #include "esp_ble_mesh_defs.h"
+#include "esp_ble_mesh_provisioning_api.h"
+
+#include "ble_mesh_node.h"
 
 #define PROV_OWN_ADDR 0x0001
 #define COMP_DATA_PAGE_0 0x00

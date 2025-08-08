@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+
 #include "esp_err.h"
 
 enum class mqtt_connection_state_t : uint8_t
@@ -40,10 +41,10 @@ struct mqtt_credentials_t
     }
 };
 
-class MqttCredentialManager
+class mqtt_credentials_manager
 {
 public:
-    static MqttCredentialManager &instance();
+    static mqtt_credentials_manager &instance();
 
     // Credential management
     esp_err_t load_credentials();
@@ -68,12 +69,12 @@ public:
     void clear_sensitive_memory();
 
 private:
-    MqttCredentialManager() = default;
-    ~MqttCredentialManager() { clear_sensitive_memory(); }
+    mqtt_credentials_manager() = default;
+    ~mqtt_credentials_manager() { clear_sensitive_memory(); }
 
     // Non-copyable
-    MqttCredentialManager(const MqttCredentialManager &) = delete;
-    MqttCredentialManager &operator=(const MqttCredentialManager &) = delete;
+    mqtt_credentials_manager(const mqtt_credentials_manager &) = delete;
+    mqtt_credentials_manager &operator=(const mqtt_credentials_manager &) = delete;
 
     esp_err_t encrypt_and_store(const std::string &key, const std::string &value);
     esp_err_t decrypt_and_load(const std::string &key, std::string &value);
@@ -91,7 +92,7 @@ private:
 };
 
 // Convenience function
-inline MqttCredentialManager &mqtt_credentials()
+inline mqtt_credentials_manager &mqtt_credentials()
 {
-    return MqttCredentialManager::instance();
+    return mqtt_credentials_manager::instance();
 }

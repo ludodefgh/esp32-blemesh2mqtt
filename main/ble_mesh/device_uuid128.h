@@ -2,9 +2,9 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <string>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 
 class device_uuid128
 {

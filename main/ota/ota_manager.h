@@ -1,9 +1,10 @@
 #pragma once
 
-#include "esp_err.h"
-#include "esp_ota_ops.h"
 #include <cstddef>
 #include <functional>
+
+#include "esp_err.h"
+#include "esp_ota_ops.h"
 
 struct ota_progress_info_t
 {
