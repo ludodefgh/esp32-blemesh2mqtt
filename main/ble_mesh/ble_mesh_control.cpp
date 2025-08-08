@@ -1071,7 +1071,7 @@ int print_registered_nodes(int argc, char **argv)
     return 0;
 }
 
-void RegisterBleMeshDebugCommands()
+void register_blemesh_commands()
 {
     /* Register commands */
 
@@ -1097,4 +1097,4 @@ void RegisterBleMeshDebugCommands()
     ESP_ERROR_CHECK(register_console_command(&print_nodes_cmd));
 }
 
-REGISTER_DEBUG_COMMAND(RegisterBleMeshDebugCommands);
+REGISTER_DEBUG_COMMAND(register_blemesh_commands);

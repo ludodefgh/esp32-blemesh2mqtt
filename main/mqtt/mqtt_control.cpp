@@ -829,7 +829,7 @@ int mqtt_send_status(int argc, char **argv)
 
 #pragma endregion MQttMessages
 
-void RegisterMQTTDebugCommands()
+void register_mqtt_commands()
 {
     node_index_args.node_index = arg_int1("n", "node", "<node_index>", "Node index as reported by prov_list_nodes command");
     node_index_args.end = arg_end(2);
@@ -862,4 +862,4 @@ void RegisterMQTTDebugCommands()
     ESP_ERROR_CHECK(register_console_command(&mqtt_status_cmd));
 }
 
-REGISTER_DEBUG_COMMAND(RegisterMQTTDebugCommands);
+REGISTER_DEBUG_COMMAND(register_mqtt_commands);

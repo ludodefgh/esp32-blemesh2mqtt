@@ -245,7 +245,7 @@ int print_debug_cmd(int argc, char **argv)
     return 0;
 }
 
-void RegisterMessageQueueDebugCommands()
+void register_mess_queue_commands()
 {
     /* Register commands */
 
@@ -258,4 +258,4 @@ void RegisterMessageQueueDebugCommands()
     ESP_ERROR_CHECK(register_console_command(&message_queue_print_debug_cmd));
 }
 
-REGISTER_DEBUG_COMMAND(RegisterMessageQueueDebugCommands);
+REGISTER_DEBUG_COMMAND(register_mess_queue_commands);

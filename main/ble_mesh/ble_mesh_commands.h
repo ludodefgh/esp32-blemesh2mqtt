@@ -1,7 +1,7 @@
 #pragma once
 #include "ble_mesh_node.h"
 
-void RegisterBleMeshCommandsDebugCommands();
+void register_blemesh_action_commands();
 
 void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info);
 

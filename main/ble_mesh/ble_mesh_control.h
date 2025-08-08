@@ -17,7 +17,7 @@ esp_err_t ble_mesh_init(void);
 void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::shared_ptr<bm2mqtt_node_info> node);
 void refresh_all_nodes();
 void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node);
-void RegisterBleMeshDebugCommands();
+void register_blemesh_commands();
 
 void ble_mesh_set_provisioning_enabled(bool enabled_value);
 
