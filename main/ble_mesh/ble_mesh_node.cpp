@@ -58,7 +58,7 @@ ble2mqtt_node_manager &node_manager()
 
 extern struct mesh_network_info_store store;
 
-void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func)
+void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>&)> func)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
     for (auto &node : tracked_nodes)
@@ -161,7 +161,7 @@ void ble2mqtt_node_manager::remove_node(const device_uuid128 &uuid)
 }
 
 esp_err_t ble2mqtt_node_manager::ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                                                 std::shared_ptr<bm2mqtt_node_info> node,
+                                                                 const std::shared_ptr<bm2mqtt_node_info>& node,
                                                                  esp_ble_mesh_model_t *model, uint32_t opcode)
 {
     if (!common || !node || !model)

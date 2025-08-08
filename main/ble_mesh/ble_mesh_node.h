@@ -211,7 +211,7 @@ public:
     std::shared_ptr<bm2mqtt_node_info> get_or_create(const uint8_t uuid[16]);
     std::shared_ptr<bm2mqtt_node_info> get_or_create(const device_uuid128 &uuid);
 
-    void for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func);
+    void for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>&)> func);
 
     esp_err_t store_node_info(const device_uuid128 &uuid, uint16_t unicast,
                               uint8_t elem_num, uint16_t node_index);
@@ -219,7 +219,7 @@ public:
     void remove_node(const device_uuid128 &uuid);
 
     esp_err_t ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
-                                              std::shared_ptr<bm2mqtt_node_info> node,
+                                              const std::shared_ptr<bm2mqtt_node_info>& node,
                                               esp_ble_mesh_model_t *model, uint32_t opcode);
 
     void print_registered_nodes();

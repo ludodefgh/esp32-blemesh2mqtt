@@ -66,7 +66,7 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
     .disconnect_reason = 0,
 };
 
-static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+static std::string get_node_base_topic(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
     {
@@ -83,24 +83,24 @@ static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_i
     return {};
 }
 
-std::string mqtt_get_node_root_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_root_topic(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     return get_node_base_topic(node_info);
 }
 
-std::string mqtt_get_node_set_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_set_topic(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     const std::string base = get_node_base_topic(node_info);
     return base.empty() ? std::string{} : base + "/set";
 }
 
-std::string mqtt_get_node_state_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_state_topic(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     const std::string base = get_node_base_topic(node_info);
     return base.empty() ? std::string{} : base + "/state";
 }
 
-std::string mqtt_get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::string mqtt_get_node_discovery_id(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
         return {};
@@ -119,11 +119,11 @@ std::string mqtt_get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_i
 
 void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client)
 {
-    node_manager().for_each_node([&client](std::shared_ptr<bm2mqtt_node_info> node_info)
+    node_manager().for_each_node([&client](std::shared_ptr<bm2mqtt_node_info>& node_info)
                                  { mqtt_subscribe_node(client, node_info); });
 }
 
-void mqtt_subscribe_node(esp_mqtt_client_handle_t client, std::shared_ptr<bm2mqtt_node_info> node_info)
+void mqtt_subscribe_node(esp_mqtt_client_handle_t client, const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     int msg_id = esp_mqtt_client_subscribe(client, mqtt_get_node_set_topic(node_info).c_str(), 0);
     LOG_INFO(TAG, "sent subscribe successful, msg_id=%d", msg_id);
@@ -436,7 +436,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
     return std::unique_ptr<cJSON>{root};
 }
 
-std::unique_ptr<cJSON> make_status_message(std::shared_ptr<bm2mqtt_node_info> node_info)
+std::unique_ptr<cJSON> make_status_message(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
         return nullptr;
@@ -738,7 +738,7 @@ int delete_entity(int argc, char **argv)
     return 0;
 }
 
-void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
+void mqtt_node_send_status(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
     {
@@ -775,7 +775,7 @@ void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
     cJSON_free(json_data);
 }
 
-void mqtt_send_discovery(std::shared_ptr<bm2mqtt_node_info> node_info)
+void mqtt_send_discovery(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     std::unique_ptr<cJSON> discovery_message = make_node_discovery_message(node_info);
     char *json_data = cJSON_PrintUnformatted(discovery_message.get());
@@ -786,7 +786,7 @@ void mqtt_send_discovery(std::shared_ptr<bm2mqtt_node_info> node_info)
     cJSON_free(json_data);
 }
 
-void mqtt_remove_node(std::shared_ptr<bm2mqtt_node_info> node_info)
+void mqtt_remove_node(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
     {
