@@ -6,24 +6,24 @@
 #include <sstream>
 #include <iomanip>
 
-class Uuid128
+class device_uuid128
 {
 public:
     std::array<uint8_t, 16> data{};
 
-    Uuid128() = default;
+    device_uuid128() = default;
 
-    explicit Uuid128(const uint8_t *bytes)
+    explicit device_uuid128(const uint8_t *bytes)
     {
         std::memcpy(data.data(), bytes, 16);
     }
 
-    bool operator==(const Uuid128 &other) const
+    bool operator==(const device_uuid128 &other) const
     {
         return data == other.data;
     }
 
-    bool operator<(const Uuid128 &other) const
+    bool operator<(const device_uuid128 &other) const
     {
         return data < other.data; // for use in std::map
     }

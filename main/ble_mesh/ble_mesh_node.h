@@ -22,10 +22,8 @@
 
 #include "esp_ble_mesh_defs.h"
 #include <esp_timer.h>
-#include "Uui128.h"
+#include "device_uuid128.h"
 
-#define LED_OFF 0x0
-#define LED_ON 0x1
 #define MSG_SEND_TTL 3
 #define MSG_TIMEOUT 4000
 
@@ -38,11 +36,11 @@ enum class color_mode_t : uint8_t
 
 const char *get_color_mode_string(color_mode_t mode);
 
-uint16_t get_node_index(Uuid128 uuid);
+uint16_t get_node_index(device_uuid128 uuid);
 
 typedef struct
 {
-    Uuid128 uuid;
+    device_uuid128 uuid;
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
@@ -68,7 +66,7 @@ typedef struct
 
 typedef struct
 {
-    Uuid128 uuid;
+    device_uuid128 uuid;
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
@@ -119,20 +117,13 @@ typedef struct
     void convert_from_previous(const bm2mqtt_node_info_v1 &v1)
     {
         *this = v1; // Use the assignment operator to copy data
-
-        // node_index = get_node_index(uuid);
-        // if (node_index == std::numeric_limits<uint16_t>::max())
-        // {
-        //     ESP_LOGW("bm2mqtt_node_info_v2", "Node with UUID %s not found in provisioning table",
-        //              uuid.to_string().c_str());
-        // }
     }
 
 } bm2mqtt_node_info_v2;
 
 typedef struct
 {
-    Uuid128 uuid;
+    device_uuid128 uuid;
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
@@ -197,9 +188,9 @@ using bm2mqtt_node_info = bm2mqtt_node_info_v3;
 namespace std
 {
     template <>
-    struct hash<Uuid128>
+    struct hash<device_uuid128>
     {
-        std::size_t operator()(const Uuid128 &uuid) const
+        std::size_t operator()(const device_uuid128 &uuid) const
         {
             return std::hash<std::string>{}(
                 std::string(reinterpret_cast<const char *>(uuid.raw()), 16));
@@ -214,20 +205,20 @@ public:
     ~ble2mqtt_node_manager() = default;
 
     std::shared_ptr<bm2mqtt_node_info> get_node(int nodeIndex);
-    std::shared_ptr<bm2mqtt_node_info> get_node(const Uuid128 &uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_node(const device_uuid128 &uuid);
     std::shared_ptr<bm2mqtt_node_info> get_node(const std::string &mac);
     std::shared_ptr<bm2mqtt_node_info> get_node(uint16_t unicast);
     std::shared_ptr<bm2mqtt_node_info> get_or_create(const uint8_t uuid[16]);
-    std::shared_ptr<bm2mqtt_node_info> get_or_create(const Uuid128 &uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_or_create(const device_uuid128 &uuid);
 
     void for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func);
 
-    esp_err_t store_node_info(const Uuid128 &uuid, uint16_t unicast,
+    esp_err_t store_node_info(const device_uuid128 &uuid, uint16_t unicast,
                               uint8_t elem_num, uint16_t node_index);
 
-    void remove_node(const Uuid128 &uuid);
+    void remove_node(const device_uuid128 &uuid);
 
-    esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
+    esp_err_t ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
                                               std::shared_ptr<bm2mqtt_node_info> node,
                                               esp_ble_mesh_model_t *model, uint32_t opcode);
 
@@ -236,7 +227,7 @@ public:
     void initialize();
     void mark_node_info_dirty();
 
-    void set_node_name(const Uuid128 &uuid, const char *name);
+    void set_node_name(const device_uuid128 &uuid, const char *name);
 
 private:
     // Disable copy and move constructors and assignment operators
@@ -254,7 +245,7 @@ private:
     esp_err_t load_node_info_vector();
 
     std::vector<std::shared_ptr<bm2mqtt_node_info>> tracked_nodes{};
-    std::unordered_map<Uuid128, std::shared_ptr<bm2mqtt_node_info>> uuid_index{};
+    std::unordered_map<device_uuid128, std::shared_ptr<bm2mqtt_node_info>> uuid_index{};
 
     esp_timer_handle_t save_timer;
     bool node_info_dirty = false;

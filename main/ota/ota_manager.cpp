@@ -13,13 +13,13 @@
 
 static const char *TAG = "OTA_MANAGER";
 
-OTAManager &OTAManager::instance()
+ota_manager &ota_manager::instance()
 {
-    static OTAManager instance;
+    static ota_manager instance;
     return instance;
 }
 
-esp_err_t OTAManager::begin_ota_update(size_t firmware_size)
+esp_err_t ota_manager::begin_ota_update(size_t firmware_size)
 {
     if (ota_in_progress_)
     {
@@ -62,7 +62,7 @@ esp_err_t OTAManager::begin_ota_update(size_t firmware_size)
     return ESP_OK;
 }
 
-esp_err_t OTAManager::write_ota_data(const uint8_t *data, size_t size)
+esp_err_t ota_manager::write_ota_data(const uint8_t *data, size_t size)
 {
     if (!ota_in_progress_)
     {
@@ -116,7 +116,7 @@ esp_err_t OTAManager::write_ota_data(const uint8_t *data, size_t size)
     return ESP_OK;
 }
 
-esp_err_t OTAManager::end_ota_update()
+esp_err_t ota_manager::end_ota_update()
 {
     if (!ota_in_progress_)
     {
@@ -162,7 +162,7 @@ esp_err_t OTAManager::end_ota_update()
     return ESP_OK;
 }
 
-esp_err_t OTAManager::abort_ota_update()
+esp_err_t ota_manager::abort_ota_update()
 {
     if (!ota_in_progress_)
     {
@@ -182,28 +182,28 @@ esp_err_t OTAManager::abort_ota_update()
     return ESP_OK;
 }
 
-void OTAManager::set_progress_callback(ota_progress_callback_t callback)
+void ota_manager::set_progress_callback(ota_progress_callback_t callback)
 {
     progress_callback_ = callback;
 }
 
-bool OTAManager::is_ota_in_progress() const
+bool ota_manager::is_ota_in_progress() const
 {
     return ota_in_progress_;
 }
 
-const ota_progress_info_t &OTAManager::get_progress_info() const
+const ota_progress_info_t &ota_manager::get_progress_info() const
 {
     return progress_info_;
 }
 
-esp_err_t OTAManager::mark_app_valid()
+esp_err_t ota_manager::mark_app_valid()
 {
     LOG_INFO(TAG, "Marking current app as valid");
     return esp_ota_mark_app_valid_cancel_rollback();
 }
 
-esp_err_t OTAManager::rollback_if_possible()
+esp_err_t ota_manager::rollback_if_possible()
 {
     const esp_partition_t *last_invalid_app = esp_ota_get_last_invalid_partition();
     const esp_partition_t *currently_running = esp_ota_get_running_partition();
@@ -223,7 +223,7 @@ esp_err_t OTAManager::rollback_if_possible()
     return ESP_ERR_NOT_FOUND;
 }
 
-bool OTAManager::validate_firmware_header(const uint8_t *data, size_t size)
+bool ota_manager::validate_firmware_header(const uint8_t *data, size_t size)
 {
     if (size < sizeof(esp_image_header_t))
     {
@@ -251,12 +251,12 @@ bool OTAManager::validate_firmware_header(const uint8_t *data, size_t size)
     return true;
 }
 
-const char *OTAManager::get_last_error() const
+const char *ota_manager::get_last_error() const
 {
     return last_error_;
 }
 
-void OTAManager::update_progress(const char *message)
+void ota_manager::update_progress(const char *message)
 {
     progress_info_.status_message = message;
     if (progress_callback_)
@@ -265,7 +265,7 @@ void OTAManager::update_progress(const char *message)
     }
 }
 
-void OTAManager::set_error(const char *error)
+void ota_manager::set_error(const char *error)
 {
     strncpy(last_error_, error, sizeof(last_error_) - 1);
     last_error_[sizeof(last_error_) - 1] = '\0';
@@ -277,41 +277,41 @@ extern "C"
 {
     esp_err_t ota_manager_begin(size_t firmware_size)
     {
-        return OTAManager::instance().begin_ota_update(firmware_size);
+        return ota_manager::instance().begin_ota_update(firmware_size);
     }
 
     esp_err_t ota_manager_write(const uint8_t *data, size_t size)
     {
-        return OTAManager::instance().write_ota_data(data, size);
+        return ota_manager::instance().write_ota_data(data, size);
     }
 
     esp_err_t ota_manager_end()
     {
-        return OTAManager::instance().end_ota_update();
+        return ota_manager::instance().end_ota_update();
     }
 
     esp_err_t ota_manager_abort()
     {
-        return OTAManager::instance().abort_ota_update();
+        return ota_manager::instance().abort_ota_update();
     }
 
     bool ota_manager_is_in_progress()
     {
-        return OTAManager::instance().is_ota_in_progress();
+        return ota_manager::instance().is_ota_in_progress();
     }
 
     const ota_progress_info_t *ota_manager_get_progress()
     {
-        return &OTAManager::instance().get_progress_info();
+        return &ota_manager::instance().get_progress_info();
     }
 
     void ota_manager_set_progress_callback(ota_progress_callback_t callback)
     {
-        OTAManager::instance().set_progress_callback(callback);
+        ota_manager::instance().set_progress_callback(callback);
     }
 
     esp_err_t ota_manager_mark_app_valid()
     {
-        return OTAManager::instance().mark_app_valid();
+        return ota_manager::instance().mark_app_valid();
     }
 }

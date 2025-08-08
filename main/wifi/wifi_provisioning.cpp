@@ -535,9 +535,9 @@ esp_err_t wifi_provisioning_set_credentials(const char *ssid, const char *passwo
 
     // Encrypt and store SSID
     std::string encrypted_ssid;
-    if (CredentialEncryption::instance().is_initialized())
+    if (credential_encryption::instance().is_initialized())
     {
-        esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(ssid, encrypted_ssid);
+        esp_err_t encrypt_err = credential_encryption::instance().encrypt_string(ssid, encrypted_ssid);
         if (encrypt_err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to encrypt SSID, storing as plain text");
@@ -563,9 +563,9 @@ esp_err_t wifi_provisioning_set_credentials(const char *ssid, const char *passwo
 
     // Encrypt and store password
     std::string encrypted_password;
-    if (CredentialEncryption::instance().is_initialized())
+    if (credential_encryption::instance().is_initialized())
     {
-        esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(password, encrypted_password);
+        esp_err_t encrypt_err = credential_encryption::instance().encrypt_string(password, encrypted_password);
         if (encrypt_err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to encrypt password, storing as plain text");
@@ -656,7 +656,7 @@ esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t s
 
     // Decrypt SSID
     std::string decrypted_ssid;
-    if (!CredentialEncryption::instance().is_initialized())
+    if (!credential_encryption::instance().is_initialized())
     {
         LOG_ERROR(TAG, "Encryption not initialized");
         delete[] encrypted_ssid_buf;
@@ -665,7 +665,7 @@ esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t s
     }
 
     LOG_INFO(TAG, "Attempting to decrypt SSID...");
-    esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_ssid_buf, decrypted_ssid);
+    esp_err_t decrypt_err = credential_encryption::instance().decrypt_string(encrypted_ssid_buf, decrypted_ssid);
     if (decrypt_err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to decrypt SSID: %s", esp_err_to_name(decrypt_err));
@@ -706,7 +706,7 @@ esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t s
 
     // Decrypt password
     std::string decrypted_password;
-    esp_err_t password_decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_password_buf, decrypted_password);
+    esp_err_t password_decrypt_err = credential_encryption::instance().decrypt_string(encrypted_password_buf, decrypted_password);
     if (password_decrypt_err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to decrypt password: %s", esp_err_to_name(password_decrypt_err));

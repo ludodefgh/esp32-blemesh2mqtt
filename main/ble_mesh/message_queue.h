@@ -21,7 +21,7 @@ struct message_payload
     message_type_t type = message_type_t::ble_mesh_message;
 };
 
-class message_queue
+class node_message_queue
 {
 public:
     void enqueue(const message_payload &msg);
@@ -57,7 +57,7 @@ public:
     void clear_queue(std::shared_ptr<bm2mqtt_node_info> node);
 
 private:
-    std::map<std::shared_ptr<bm2mqtt_node_info>, message_queue> node_queues;
+    std::map<std::shared_ptr<bm2mqtt_node_info>, node_message_queue> node_queues;
 };
 
 message_queue_manager &message_queue();

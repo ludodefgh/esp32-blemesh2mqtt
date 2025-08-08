@@ -21,7 +21,7 @@ message_queue_manager &message_queue()
     return instance;
 }
 
-void message_queue::enqueue(const message_payload &msg)
+void node_message_queue::enqueue(const message_payload &msg)
 {
     queue.push(msg);
     if (!waiting)
@@ -29,7 +29,7 @@ void message_queue::enqueue(const message_payload &msg)
         try_send_next();
     }
 }
-void message_queue::set_node(std::shared_ptr<bm2mqtt_node_info> &in_node)
+void node_message_queue::set_node(std::shared_ptr<bm2mqtt_node_info> &in_node)
 {
     if (node == nullptr)
     {
@@ -37,7 +37,7 @@ void message_queue::set_node(std::shared_ptr<bm2mqtt_node_info> &in_node)
     }
 }
 
-void message_queue::try_send_next()
+void node_message_queue::try_send_next()
 {
     if (queue.empty())
         return;
@@ -62,7 +62,7 @@ void message_queue::try_send_next()
     LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u", msg.opcode, msg.retries_left);
 }
 
-void message_queue::handle_ack(uint32_t opcode)
+void node_message_queue::handle_ack(uint32_t opcode)
 {
     LOG_WARN(TAG, "Ack received for opcode 0x%08X", opcode);
     if (!queue.empty() && queue.front().opcode == opcode)
@@ -83,7 +83,7 @@ void message_queue::handle_ack(uint32_t opcode)
     }
 }
 
-void message_queue::handle_timeout(uint32_t opcode)
+void node_message_queue::handle_timeout(uint32_t opcode)
 {
     if (queue.empty())
         return;
@@ -111,12 +111,12 @@ void message_queue::handle_timeout(uint32_t opcode)
     LOG_WARN(TAG, "Current queue size: %zu", queue.size());
 }
 
-void message_queue::ensure_failsafe_timer()
+void node_message_queue::ensure_failsafe_timer()
 {
     if (!failsafe_timer)
     {
         esp_timer_create_args_t args = {
-            .callback = &message_queue::failsafe_callback,
+            .callback = &node_message_queue::failsafe_callback,
             .arg = this,
             .name = "msgqueue_failsafe"};
         esp_timer_create(&args, &failsafe_timer);
@@ -127,13 +127,13 @@ void message_queue::ensure_failsafe_timer()
     }
 }
 
-void message_queue::failsafe_callback(void *arg)
+void node_message_queue::failsafe_callback(void *arg)
 {
-    auto *self = static_cast<message_queue *>(arg);
+    auto *self = static_cast<node_message_queue *>(arg);
     self->on_failsafe_trigger();
 }
 
-void message_queue::on_failsafe_trigger()
+void node_message_queue::on_failsafe_trigger()
 {
     if (!queue.empty())
     {

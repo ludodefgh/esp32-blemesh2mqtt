@@ -15,10 +15,10 @@ struct ota_progress_info_t
 
 typedef std::function<void(const ota_progress_info_t &)> ota_progress_callback_t;
 
-class OTAManager
+class ota_manager
 {
 public:
-    static OTAManager &instance();
+    static ota_manager &instance();
 
     esp_err_t begin_ota_update(size_t firmware_size);
     esp_err_t write_ota_data(const uint8_t *data, size_t size);
@@ -38,10 +38,10 @@ public:
     const char *get_last_error() const;
 
 private:
-    OTAManager() = default;
-    ~OTAManager() = default;
-    OTAManager(const OTAManager &) = delete;
-    OTAManager &operator=(const OTAManager &) = delete;
+    ota_manager() = default;
+    ~ota_manager() = default;
+    ota_manager(const ota_manager &) = delete;
+    ota_manager &operator=(const ota_manager &) = delete;
 
     void update_progress(const char *message);
     void set_error(const char *error);
