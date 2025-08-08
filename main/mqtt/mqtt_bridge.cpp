@@ -74,7 +74,8 @@ static cJSON *create_bridge_device_object()
     cJSON_AddItemToObject(device, "identifiers", identifiers);
     cJSON_AddStringToObject(device, "manufacturer", "YourName");
     cJSON_AddStringToObject(device, "model", "BLEMesh2MQTT Bridge");
-    cJSON_AddStringToObject(device, "name", "BLE Mesh Bridge");
+    std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
+    cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", "0.1.0");
 
     return device;
@@ -102,7 +103,7 @@ CJsonPtr create_provisioning_json()
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
     // Top-level fields
-    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Provisioning");
+    cJSON_AddStringToObject(root.get(), "name", "Enable node discovery");
     std::string unique_id = get_bridge_mac_identifier();
     unique_id += "_provisioning";
     cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
@@ -165,7 +166,7 @@ CJsonPtr create_uptime_json()
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
     // Top-level fields
-    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Bridge Uptime");
+    cJSON_AddStringToObject(root.get(), "name", "Bridge Uptime");
     std::string unique_id = get_bridge_mac_identifier();
     unique_id += "_uptime";
     cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
@@ -173,6 +174,7 @@ CJsonPtr create_uptime_json()
     cJSON_AddStringToObject(root.get(), "unit_of_measurement", "s");
     cJSON_AddStringToObject(root.get(), "value_template", "{{ value_json.uptime }}");
     cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
+    cJSON_AddStringToObject(root.get(), "device_class", "duration");
     cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
     cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
@@ -190,7 +192,7 @@ CJsonPtr create_mem_json()
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
     // Top-level fields
-    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Bridge Memory");
+    cJSON_AddStringToObject(root.get(), "name", "Bridge Memory");
     std::string unique_id = get_bridge_mac_identifier();
     unique_id += "_memory";
     cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
@@ -214,7 +216,7 @@ CJsonPtr create_ip_json()
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
     // Top-level fields
-    cJSON_AddStringToObject(root.get(), "name", "BLE Mesh Bridge IP Address");
+    cJSON_AddStringToObject(root.get(), "name", "Bridge IP Address");
     std::string unique_id = get_bridge_mac_identifier();
     unique_id += "_ip_address";
     cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
