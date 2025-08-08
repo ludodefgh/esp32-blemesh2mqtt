@@ -290,6 +290,103 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
     nvs_close(handle);
     return err;
 }
+template<int StructVers>
+struct node_info_version_type
+{
+};
+
+template<>
+struct node_info_version_type<NODE_INFO_SCHEMA_VERSION>
+{
+    using type = bm2mqtt_node_info;
+};
+
+template<>
+struct node_info_version_type<1>
+{
+    using type = bm2mqtt_node_info_v1;
+};
+template<>
+struct node_info_version_type<2>
+{
+    using type = bm2mqtt_node_info_v2;
+};
+
+template <uint32_t Start>
+auto Converter_worker( std::vector<typename node_info_version_type<Start>::type>&& from)
+{
+        LOG_INFO(TAG, "Detected old node info schema version %d", Start);
+        using node_info_version_to = node_info_version_type<Start+1>::type;
+
+        std::vector<node_info_version_to> tracked_nodes_to;
+        tracked_nodes_to.resize(from.size());
+        
+        for (size_t i = 0; i < from.size(); i++)
+        {
+            tracked_nodes_to[i].convert_from_previous(from[i]);
+            LOG_INFO(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
+                     i, from[i].uuid.to_string().c_str(),
+                     from[i].unicast, from[i].elem_num);
+        }
+        
+        if constexpr(std::is_same_v<typename node_info_version_type<NODE_INFO_SCHEMA_VERSION>::type, node_info_version_to>)
+        {
+            // If we reached the end of the conversion chain, return the final vector
+            return tracked_nodes_to;
+        }
+        else
+        {
+            // Otherwise, continue converting to the next version
+            return Converter_worker<Start + 1>(std::move(tracked_nodes_to));
+        }
+}
+
+template <uint32_t Start>
+auto Converter( nvs_handle_t& handle, size_t& size)
+{
+    LOG_INFO(TAG, "Loading node info schema version %d. Current version %d", Start, NODE_INFO_SCHEMA_VERSION);
+    using node_info_version_from = node_info_version_type<Start>::type;
+    using current_node_info_type_t = typename node_info_version_type<NODE_INFO_SCHEMA_VERSION>::type;
+
+    std::vector<std::shared_ptr<current_node_info_type_t>> loaded_nodes;
+
+    size_t count = size / sizeof(node_info_version_from);
+    if (count == 0 || size % sizeof(node_info_version_from) != 0)
+    {
+        LOG_ERROR(TAG, "Invalid data size for version %d: %zu bytes", Start, size);
+        return loaded_nodes;// Return empty vector on error
+    }
+
+    std::vector<node_info_version_from> tracked_nodes_from(count);
+    auto err = nvs_get_blob(handle, "nodes", tracked_nodes_from.data(), &size);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
+        return loaded_nodes; // Return empty vector on error
+    }
+    else
+    {
+        LOG_INFO(TAG, "Loaded %zu nodes from NVS", tracked_nodes_from.size());
+    }
+
+    std::vector<current_node_info_type_t> raw_nodes;
+    if constexpr(std::is_same_v<current_node_info_type_t, node_info_version_from>)
+    {
+        raw_nodes = tracked_nodes_from;
+    }
+    else
+    {
+        raw_nodes = Converter_worker<Start>(std::move(tracked_nodes_from));
+    }
+    
+    loaded_nodes.reserve(raw_nodes.size());
+    for (const auto &raw_node : raw_nodes)
+    {
+        auto node = std::make_shared<bm2mqtt_node_info>(raw_node);
+        loaded_nodes.push_back(node);
+    }
+    return loaded_nodes;
+}
 
 esp_err_t ble2mqtt_node_manager::load_node_info_vector()
 {
@@ -319,68 +416,45 @@ esp_err_t ble2mqtt_node_manager::load_node_info_vector()
         LOG_ERROR(TAG, "Failed to load node info vector to NVS: %s", esp_err_to_name(err));
         return err;
     }
+    if (version < 1 || version > NODE_INFO_SCHEMA_VERSION)
+    {
+        nvs_close(handle);
+        LOG_ERROR(TAG, "Unsupported schema version: %u", version);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    std::vector<std::shared_ptr<bm2mqtt_node_info>> loaded_nodes{};
     if (version == 1)
     {
-        LOG_WARN(TAG, "Detected old node info schema version 1, converting to version 2");
-
-        size_t count = size / sizeof(bm2mqtt_node_info_v1);
-        
-        std::vector<bm2mqtt_node_info_v1> tracked_nodes_v1(count);
-        tracked_nodes_v1.resize(count);
-        err = nvs_get_blob(handle, "nodes", tracked_nodes_v1.data(), &size);
-        if (err != ESP_OK)
-        {
-            LOG_ERROR(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
-        }
-        else
-        {
-            LOG_INFO(TAG, "Loaded %zu nodes from NVS", tracked_nodes_v1.size());
-        }
-
-        std::lock_guard<std::mutex> lock(tn_mutex);
-        tracked_nodes.clear();
-        uuid_index.clear();
-        
-        for (size_t i = 0; i < count; i++)
-        {
-            auto node = std::make_shared<bm2mqtt_node_info>();
-            node->convert_from_v1(tracked_nodes_v1[i]);
-            
-            tracked_nodes.push_back(node);
-            uuid_index[node->uuid] = node;
-            
-            LOG_INFO(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
-                     i, node->uuid.to_string().c_str(),
-                     node->unicast, node->elem_num);
-        }
+        loaded_nodes = Converter<1>(handle, size);
         mark_node_info_dirty();
-    } 
+    }
+    else if (version == 2)
+    {
+        loaded_nodes = Converter<2>(handle, size);
+        mark_node_info_dirty();
+    }
     else if (version == NODE_INFO_SCHEMA_VERSION)
     {
-        size_t count = size / sizeof(bm2mqtt_node_info);
-        
-        // Load raw data first
-        std::vector<bm2mqtt_node_info> raw_nodes(count);
-        err = nvs_get_blob(handle, "nodes", raw_nodes.data(), &size);
-        if (err != ESP_OK)
+        loaded_nodes = Converter<NODE_INFO_SCHEMA_VERSION>(handle, size);
+    }
+
+    if (loaded_nodes.empty() && size > 0)
+    {
+        nvs_close(handle);
+        LOG_ERROR(TAG, "Failed to convert nodes.");
+        return ESP_FAIL;
+    }
+
+    if (!loaded_nodes.empty())
+    {
+        std::lock_guard<std::mutex> lock(tn_mutex);
+        tracked_nodes = std::move(loaded_nodes);
+        uuid_index.clear();
+
+        for (const auto &node : tracked_nodes)
         {
-            LOG_ERROR(TAG, "Failed to read node info vector from NVS: %s", esp_err_to_name(err));
-        }
-        else
-        {
-            // Convert raw data to shared_ptr vector
-            std::lock_guard<std::mutex> lock(tn_mutex);
-            tracked_nodes.clear();
-            uuid_index.clear();
-            
-            for (const auto& raw_node : raw_nodes)
-            {
-                auto node = std::make_shared<bm2mqtt_node_info>(raw_node);
-                tracked_nodes.push_back(node);
-                uuid_index[node->uuid] = node;
-            }
-            
-            LOG_INFO(TAG, "Loaded %zu nodes from NVS", tracked_nodes.size());
+            uuid_index[node->uuid] = node;
         }
     }
 

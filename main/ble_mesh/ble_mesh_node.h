@@ -86,7 +86,6 @@ typedef struct
     uint16_t features{0};
     uint16_t features_to_bind{0};
     uint16_t node_index{0}; // Node index in the provisioning table
-    uint16_t company_id{0}; // Company ID (CID) from composition data
     uint8_t elem_num{0};
     uint8_t onoff{0};
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
@@ -115,10 +114,9 @@ typedef struct
         onoff = other.onoff;
         light_ctl_temp_offset = other.light_ctl_temp_offset;
         color_mode = other.color_mode;
-        company_id = 0; // Initialize company_id for v1 -> v2 conversion
     }
 
-    void convert_from_v1(const bm2mqtt_node_info_v1& v1)
+    void convert_from_previous(const bm2mqtt_node_info_v1& v1)
     {
         *this = v1; // Use the assignment operator to copy data
 
@@ -132,10 +130,69 @@ typedef struct
 
 } bm2mqtt_node_info_v2;
 
+typedef struct
+{
+    Uuid128 uuid;
+    uint16_t unicast{0};
+    uint16_t hsl_h{0};
+    uint16_t min_hue{0};
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
+    uint16_t hsl_s{0};
+    uint16_t min_saturation{0};
+    uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
+    uint16_t hsl_l{0};
+    uint16_t min_lightness{0};
+    uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
+    uint16_t curr_temp{0};
+    uint16_t min_temp{0};
+    uint16_t max_temp{std::numeric_limits<uint16_t>::max()};
+    int16_t level{0};
+    uint16_t features{0};
+    uint16_t features_to_bind{0};
+    uint16_t node_index{0}; // Node index in the provisioning table
+    uint16_t company_id{0}; // Company ID (CID) from composition data
+    uint8_t elem_num{0};
+    uint8_t onoff{0};
+    uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
+    color_mode_t color_mode = color_mode_t::brightness;
 
-constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 2;
+    void operator=(const bm2mqtt_node_info_v2& other)
+    {
+        uuid = other.uuid;
+        unicast = other.unicast;
+        hsl_h = other.hsl_h;
+        min_hue = other.min_hue;
+        max_hue = other.max_hue;
+        hsl_s = other.hsl_s;
+        min_saturation = other.min_saturation;
+        max_saturation = other.max_saturation;
+        hsl_l = other.hsl_l;
+        min_lightness = other.min_lightness;
+        max_lightness = other.max_lightness;
+        curr_temp = other.curr_temp;
+        min_temp = other.min_temp;
+        max_temp = other.max_temp;
+        level = other.level;
+        features = other.features;
+        features_to_bind = other.features_to_bind;
+        elem_num = other.elem_num;
+        onoff = other.onoff;
+        light_ctl_temp_offset = other.light_ctl_temp_offset;
+        color_mode = other.color_mode;
+        company_id = 0; // Initialize company_id for v2 -> v3 conversion
+    }
 
-using bm2mqtt_node_info = bm2mqtt_node_info_v2;
+    void convert_from_previous(const bm2mqtt_node_info_v2& rhs)
+    {
+        *this = rhs; // Use the assignment operator to copy data
+    }
+
+} bm2mqtt_node_info_v3;
+
+
+constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 3;
+
+using bm2mqtt_node_info = bm2mqtt_node_info_v3;
 
 // Hash specialization for Uuid128 to use in unordered_map
 namespace std {
