@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
+
 #include "mqtt_client.h"
+
 #include "ble_mesh/ble_mesh_node.h"
 
 esp_mqtt_client_handle_t mqtt_get_client();

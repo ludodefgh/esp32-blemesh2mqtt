@@ -1,10 +1,12 @@
 #pragma once
-#include <queue>
-#include <functional>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
+#include <queue>
+
 #include <esp_timer.h>
+
 #include "ble_mesh_node.h"
 
 enum class message_type_t : uint8_t

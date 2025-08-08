@@ -3,6 +3,7 @@
 // Standard C/C++ libraries
 #include <cctype>
 #include <cstring>
+#include <limits>
 
 // ESP-IDF includes
 #include "nvs.h"
@@ -14,13 +15,13 @@
 
 static const char *TAG = "MQTT_CREDS";
 
-MqttCredentialManager &MqttCredentialManager::instance()
+mqtt_credentials_manager &mqtt_credentials_manager::instance()
 {
-    static MqttCredentialManager instance;
+    static mqtt_credentials_manager instance;
     return instance;
 }
 
-std::string MqttCredentialManager::get_connection_state_string() const
+std::string mqtt_credentials_manager::get_connection_state_string() const
 {
     switch (connection_state_)
     {
@@ -45,7 +46,7 @@ std::string MqttCredentialManager::get_connection_state_string() const
     }
 }
 
-void MqttCredentialManager::set_connection_state(mqtt_connection_state_t state)
+void mqtt_credentials_manager::set_connection_state(mqtt_connection_state_t state)
 {
     if (connection_state_ != state)
     {
@@ -57,7 +58,7 @@ void MqttCredentialManager::set_connection_state(mqtt_connection_state_t state)
     }
 }
 
-void MqttCredentialManager::set_last_error(const std::string &error)
+void mqtt_credentials_manager::set_last_error(const std::string &error)
 {
     last_error_ = error;
     LOG_WARN(TAG, "MQTT Error: %s", error.c_str());
@@ -119,7 +120,7 @@ static bool is_valid_hostname(const std::string &hostname)
     return true;
 }
 
-bool MqttCredentialManager::validate_credentials(const mqtt_credentials_t &creds, std::string &error_msg) const
+bool mqtt_credentials_manager::validate_credentials(const mqtt_credentials_t &creds, std::string &error_msg) const
 {
     // Validate broker host
     if (creds.broker_host.empty())
@@ -136,7 +137,7 @@ bool MqttCredentialManager::validate_credentials(const mqtt_credentials_t &creds
     }
 
     // Validate port
-    if (creds.broker_port == 0 || creds.broker_port > 65535)
+    if (creds.broker_port == 0)
     {
         error_msg = "Invalid broker port (1-65535)";
         return false;
@@ -171,13 +172,13 @@ bool MqttCredentialManager::validate_credentials(const mqtt_credentials_t &creds
     return true;
 }
 
-bool MqttCredentialManager::has_valid_credentials() const
+bool mqtt_credentials_manager::has_valid_credentials() const
 {
     std::string error_msg;
     return validate_credentials(credentials_, error_msg);
 }
 
-esp_err_t MqttCredentialManager::encrypt_and_store(const std::string &key, const std::string &value)
+esp_err_t mqtt_credentials_manager::encrypt_and_store(const std::string &key, const std::string &value)
 {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
@@ -224,7 +225,7 @@ esp_err_t MqttCredentialManager::encrypt_and_store(const std::string &key, const
     return err;
 }
 
-esp_err_t MqttCredentialManager::decrypt_and_load(const std::string &key, std::string &value)
+esp_err_t mqtt_credentials_manager::decrypt_and_load(const std::string &key, std::string &value)
 {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
@@ -283,7 +284,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string &key, std::s
     return ESP_OK;
 }
 
-esp_err_t MqttCredentialManager::load_credentials()
+esp_err_t mqtt_credentials_manager::load_credentials()
 {
     LOG_INFO(TAG, "Loading MQTT credentials from NVS");
 
@@ -371,7 +372,7 @@ esp_err_t MqttCredentialManager::load_credentials()
     return ESP_OK;
 }
 
-esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t &creds)
+esp_err_t mqtt_credentials_manager::save_credentials(const mqtt_credentials_t &creds)
 {
     LOG_INFO(TAG, "Saving MQTT credentials to NVS");
 
@@ -450,7 +451,7 @@ esp_err_t MqttCredentialManager::save_credentials(const mqtt_credentials_t &cred
     return ESP_OK;
 }
 
-esp_err_t MqttCredentialManager::clear_credentials()
+esp_err_t mqtt_credentials_manager::clear_credentials()
 {
     LOG_INFO(TAG, "Clearing MQTT credentials from NVS");
 
@@ -481,7 +482,7 @@ esp_err_t MqttCredentialManager::clear_credentials()
     return err;
 }
 
-void MqttCredentialManager::clear_sensitive_memory()
+void mqtt_credentials_manager::clear_sensitive_memory()
 {
     // Overwrite sensitive data in memory
     if (!credentials_.password.empty())

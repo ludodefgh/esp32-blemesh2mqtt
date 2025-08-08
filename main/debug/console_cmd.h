@@ -1,9 +1,9 @@
 #pragma once
-#include <esp_err.h>
-#include <esp_console.h>
-
 #include <string>
 #include <vector>
+
+#include <esp_console.h>
+#include <esp_err.h>
 
 struct console_command_info
 {

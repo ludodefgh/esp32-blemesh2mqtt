@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+
 #include "cJSON.h"
 #include "mqtt_client.h"
 
