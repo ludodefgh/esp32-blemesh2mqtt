@@ -9,11 +9,11 @@ using CJsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 // Bridge identifier and topic functions
 std::string get_bridge_mac_identifier();
 std::string get_bridge_base_topic();
-const char* get_bridge_availability_topic();
-const char* get_bridge_state_topic();
-const char* get_bridge_provisioning_set_topic();
-const char* get_bridge_provisioning_state_topic();
-const char* get_bridge_restart_set_topic();
+const char *get_bridge_availability_topic();
+const char *get_bridge_state_topic();
+const char *get_bridge_provisioning_set_topic();
+const char *get_bridge_provisioning_state_topic();
+const char *get_bridge_restart_set_topic();
 
 CJsonPtr create_provisioning_json();
 CJsonPtr create_restart_json();

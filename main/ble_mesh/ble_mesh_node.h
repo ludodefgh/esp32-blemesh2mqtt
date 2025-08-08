@@ -36,7 +36,7 @@ enum class color_mode_t : uint8_t
     color_temp,
 };
 
-const char* get_color_mode_string(color_mode_t mode);
+const char *get_color_mode_string(color_mode_t mode);
 
 uint16_t get_node_index(Uuid128 uuid);
 
@@ -46,7 +46,7 @@ typedef struct
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
-    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};
     uint16_t hsl_s{0};
     uint16_t min_saturation{0};
     uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
@@ -72,7 +72,7 @@ typedef struct
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
-    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};
     uint16_t hsl_s{0};
     uint16_t min_saturation{0};
     uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
@@ -91,7 +91,7 @@ typedef struct
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
     color_mode_t color_mode = color_mode_t::brightness;
 
-    void operator=(const bm2mqtt_node_info_v1& other)
+    void operator=(const bm2mqtt_node_info_v1 &other)
     {
         uuid = other.uuid;
         unicast = other.unicast;
@@ -116,7 +116,7 @@ typedef struct
         color_mode = other.color_mode;
     }
 
-    void convert_from_previous(const bm2mqtt_node_info_v1& v1)
+    void convert_from_previous(const bm2mqtt_node_info_v1 &v1)
     {
         *this = v1; // Use the assignment operator to copy data
 
@@ -136,7 +136,7 @@ typedef struct
     uint16_t unicast{0};
     uint16_t hsl_h{0};
     uint16_t min_hue{0};
-    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};  
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};
     uint16_t hsl_s{0};
     uint16_t min_saturation{0};
     uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
@@ -156,7 +156,7 @@ typedef struct
     uint8_t light_ctl_temp_offset{0}; // Element index for Light CTL Temperature
     color_mode_t color_mode = color_mode_t::brightness;
 
-    void operator=(const bm2mqtt_node_info_v2& other)
+    void operator=(const bm2mqtt_node_info_v2 &other)
     {
         uuid = other.uuid;
         unicast = other.unicast;
@@ -182,26 +182,27 @@ typedef struct
         company_id = 0; // Initialize company_id for v2 -> v3 conversion
     }
 
-    void convert_from_previous(const bm2mqtt_node_info_v2& rhs)
+    void convert_from_previous(const bm2mqtt_node_info_v2 &rhs)
     {
         *this = rhs; // Use the assignment operator to copy data
     }
 
 } bm2mqtt_node_info_v3;
 
-
 constexpr uint32_t NODE_INFO_SCHEMA_VERSION = 3;
 
 using bm2mqtt_node_info = bm2mqtt_node_info_v3;
 
 // Hash specialization for Uuid128 to use in unordered_map
-namespace std {
-    template<>
-    struct hash<Uuid128> {
-        std::size_t operator()(const Uuid128& uuid) const {
+namespace std
+{
+    template <>
+    struct hash<Uuid128>
+    {
+        std::size_t operator()(const Uuid128 &uuid) const
+        {
             return std::hash<std::string>{}(
-                std::string(reinterpret_cast<const char*>(uuid.raw()), 16)
-            );
+                std::string(reinterpret_cast<const char *>(uuid.raw()), 16));
         }
     };
 }
@@ -213,19 +214,18 @@ public:
     ~ble2mqtt_node_manager() = default;
 
     std::shared_ptr<bm2mqtt_node_info> get_node(int nodeIndex);
-    std::shared_ptr<bm2mqtt_node_info> get_node(const Uuid128& uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_node(const Uuid128 &uuid);
     std::shared_ptr<bm2mqtt_node_info> get_node(const std::string &mac);
     std::shared_ptr<bm2mqtt_node_info> get_node(uint16_t unicast);
     std::shared_ptr<bm2mqtt_node_info> get_or_create(const uint8_t uuid[16]);
-    std::shared_ptr<bm2mqtt_node_info> get_or_create(const Uuid128& uuid);
+    std::shared_ptr<bm2mqtt_node_info> get_or_create(const Uuid128 &uuid);
 
-    
     void for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func);
 
-    esp_err_t store_node_info(const Uuid128& uuid, uint16_t unicast,
-                                               uint8_t elem_num, uint16_t node_index);
+    esp_err_t store_node_info(const Uuid128 &uuid, uint16_t unicast,
+                              uint8_t elem_num, uint16_t node_index);
 
-    void remove_node(const Uuid128& uuid);
+    void remove_node(const Uuid128 &uuid);
 
     esp_err_t example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
                                               std::shared_ptr<bm2mqtt_node_info> node,
@@ -236,7 +236,8 @@ public:
     void initialize();
     void mark_node_info_dirty();
 
-    void set_node_name(const Uuid128& uuid, const char* name);
+    void set_node_name(const Uuid128 &uuid, const char *name);
+
 private:
     // Disable copy and move constructors and assignment operators
     ble2mqtt_node_manager(const ble2mqtt_node_manager &) = delete;
@@ -244,9 +245,9 @@ private:
     ble2mqtt_node_manager(ble2mqtt_node_manager &&) = delete;
     ble2mqtt_node_manager &operator=(ble2mqtt_node_manager &&) = delete;
 
-    static void save_timer_callback(void* arg);
+    static void save_timer_callback(void *arg);
     void on_timer_callback();
-    
+
     void init_node_save_timer();
 
     esp_err_t save_node_info_vector();
@@ -259,4 +260,4 @@ private:
     bool node_info_dirty = false;
 };
 
-ble2mqtt_node_manager& node_manager();
+ble2mqtt_node_manager &node_manager();

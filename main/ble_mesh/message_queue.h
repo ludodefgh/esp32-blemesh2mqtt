@@ -13,14 +13,16 @@ enum class message_type_t : uint8_t
     mqtt_message,
 };
 
-struct message_payload {
-    std::function<void(std::shared_ptr<bm2mqtt_node_info>& node)> send;
+struct message_payload
+{
+    std::function<void(std::shared_ptr<bm2mqtt_node_info> &node)> send;
     uint32_t opcode;
     uint8_t retries_left = 3;
     message_type_t type = message_type_t::ble_mesh_message;
 };
 
-class message_queue {
+class message_queue
+{
 public:
     void enqueue(const message_payload &msg);
     void handle_ack(uint32_t opcode);
@@ -29,11 +31,12 @@ public:
     size_t size() const { return queue.size(); }
     bool is_waiting() const { return waiting; }
     const std::queue<message_payload> &get_queue() const { return queue; }
-    void set_node(std::shared_ptr<bm2mqtt_node_info>& in_node);
+    void set_node(std::shared_ptr<bm2mqtt_node_info> &in_node);
+
 private:
     void try_send_next();
 
-     void ensure_failsafe_timer();
+    void ensure_failsafe_timer();
     static void failsafe_callback(void *arg);
     void on_failsafe_trigger();
 
@@ -43,7 +46,8 @@ private:
     bool waiting = false;
 };
 
-class message_queue_manager {
+class message_queue_manager
+{
 public:
     void enqueue(std::shared_ptr<bm2mqtt_node_info> node, const message_payload &msg);
     void handle_ack(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode);
@@ -56,6 +60,4 @@ private:
     std::map<std::shared_ptr<bm2mqtt_node_info>, message_queue> node_queues;
 };
 
-
-message_queue_manager& message_queue();
-
+message_queue_manager &message_queue();

@@ -70,12 +70,12 @@ REGISTER_DEBUG_COMMAND(RegisterDebugCommands);
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma region Main
 
-    esp_vfs_littlefs_conf_t conf = {
-        .base_path = "/littlefs",
-        .partition_label = "storage",
-        .format_if_mount_failed = true,
-        .dont_mount = false,
-    };
+esp_vfs_littlefs_conf_t conf = {
+    .base_path = "/littlefs",
+    .partition_label = "storage",
+    .format_if_mount_failed = true,
+    .dont_mount = false,
+};
 
 void mount_littlefs(void)
 {
@@ -91,25 +91,29 @@ esp_err_t bluetooth_init(void)
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     err = esp_bt_controller_init(&bt_cfg);
-    if (err) {
+    if (err)
+    {
         LOG_ERROR("BLUETOOTH", "Bluetooth controller init failed");
         return err;
     }
 
     err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-    if (err) {
+    if (err)
+    {
         LOG_ERROR("BLUETOOTH", "Bluetooth controller enable failed");
         return err;
     }
 
     err = esp_bluedroid_init();
-    if (err) {
+    if (err)
+    {
         LOG_ERROR("BLUETOOTH", "Bluedroid init failed");
         return err;
     }
 
     err = esp_bluedroid_enable();
-    if (err) {
+    if (err)
+    {
         LOG_ERROR("BLUETOOTH", "Bluedroid enable failed");
         return err;
     }
@@ -119,7 +123,8 @@ esp_err_t bluetooth_init(void)
 
 void ble_mesh_get_dev_uuid(uint8_t *dev_uuid)
 {
-    if (dev_uuid == NULL) {
+    if (dev_uuid == NULL)
+    {
         return;
     }
 
@@ -131,19 +136,21 @@ void ble_mesh_get_dev_uuid(uint8_t *dev_uuid)
     /* The remaining 10 bytes are filled with static values */
     dev_uuid[6] = 0xdd;
     dev_uuid[7] = 0xdd;
-    for (int i = 8; i < 16; i++) {
+    for (int i = 8; i < 16; i++)
+    {
         dev_uuid[i] = 0x00;
     }
 }
 extern "C" void app_main()
 {
     esp_err_t err;
-    
+
     LOG_INFO(TAG, "Initializing...");
 
     // Initialize NVS
     err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
@@ -151,7 +158,8 @@ extern "C" void app_main()
 
     // Initialize credential encryption system
     err = CredentialEncryption::instance().initialize();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         LOG_ERROR(TAG, "Failed to initialize credential encryption: %s", esp_err_to_name(err));
         return;
     }
@@ -167,10 +175,13 @@ extern "C" void app_main()
 
     size_t total = 0, used = 0;
     err = esp_littlefs_info(conf.partition_label, &total, &used);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         LOG_ERROR(TAG, "Failed to get LittleFS partition information (%s)", esp_err_to_name(err));
         esp_littlefs_format(conf.partition_label);
-    } else {
+    }
+    else
+    {
         LOG_INFO(TAG, "Partition size: total: %d, used: %d", total, used);
     }
     register_wifi_commands();
@@ -190,13 +201,16 @@ extern "C" void app_main()
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    
+
     ESP_ERROR_CHECK(wifi_provisioning_init());
 
-    if (wifi_provisioning_should_start_captive_portal()) {
+    if (wifi_provisioning_should_start_captive_portal())
+    {
         LOG_INFO(TAG, "Starting captive portal for WiFi setup");
         ESP_ERROR_CHECK(wifi_provisioning_start_captive_portal());
-    } else {
+    }
+    else
+    {
         LOG_INFO(TAG, "WiFi already connected via provisioning");
     }
 
@@ -207,8 +221,9 @@ extern "C" void app_main()
     start_webserver();
 
     if (wifi_provisioning_get_state() == WIFI_PROV_STATE_STA_CONNECTED ||
-        wifi_provisioning_get_state() == WIFI_PROV_STATE_IDLE) {
-        
+        wifi_provisioning_get_state() == WIFI_PROV_STATE_IDLE)
+    {
+
         node_manager().initialize();
         mqtt5_app_start();
         refresh_all_nodes();
@@ -220,7 +235,9 @@ extern "C" void app_main()
         esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
         esp_log_level_set("transport", ESP_LOG_VERBOSE);
         esp_log_level_set("outbox", ESP_LOG_VERBOSE);
-    } else {
+    }
+    else
+    {
         LOG_INFO(TAG, "WiFi not connected, skipping MQTT and BLE mesh initialization");
     }
 }

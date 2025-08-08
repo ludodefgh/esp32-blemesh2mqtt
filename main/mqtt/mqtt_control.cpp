@@ -68,14 +68,15 @@ static esp_mqtt5_disconnect_property_config_t disconnect_property = {
 
 static std::string get_node_base_topic(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
-    if (!node_info) {
+    if (!node_info)
+    {
         LOG_WARN(TAG, "Failed to get node base topic - node_info is null");
         return {};
     }
-    
+
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
-        std::string node_addr {bt_hex(mesh_node->addr, BD_ADDR_LEN)};
+        std::string node_addr{bt_hex(mesh_node->addr, BD_ADDR_LEN)};
         return get_bridge_base_topic() + "/node_" + node_addr;
     }
     LOG_WARN(TAG, "Failed to get node base topic - node not found");
@@ -101,8 +102,9 @@ std::string mqtt_get_node_state_topic(std::shared_ptr<bm2mqtt_node_info> node_in
 
 std::string mqtt_get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
-    if (!node_info) return {};
-    
+    if (!node_info)
+        return {};
+
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
@@ -118,9 +120,7 @@ std::string mqtt_get_node_discovery_id(std::shared_ptr<bm2mqtt_node_info> node_i
 void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client)
 {
     node_manager().for_each_node([&client](std::shared_ptr<bm2mqtt_node_info> node_info)
-    {
-        mqtt_subscribe_node(client, node_info);
-    });
+                                 { mqtt_subscribe_node(client, node_info); });
 }
 
 void mqtt_subscribe_node(esp_mqtt_client_handle_t client, std::shared_ptr<bm2mqtt_node_info> node_info)
@@ -153,7 +153,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::CONNECTED);
         esp_mqtt5_client_set_publish_property(client, &publish_property);
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
-       
+
         mqtt_subscribe_all_nodes(client);
         mqtt_bridge_subscribe(client);
 
@@ -170,7 +170,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         LOG_INFO(TAG, "MQTT_EVENT_DISCONNECTED");
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
     }
-        break;
+    break;
     case MQTT_EVENT_SUBSCRIBED:
         LOG_DEBUG(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
         break;
@@ -193,19 +193,24 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
     case MQTT_EVENT_ERROR:
         LOG_INFO(TAG, "MQTT_EVENT_ERROR");
         LOG_INFO(TAG, "MQTT5 return code is %d", event->error_handle->connect_return_code);
-        
+
         // Set appropriate error state based on the error type
-        if (event->error_handle->connect_return_code == 4 || event->error_handle->connect_return_code == 5) {
+        if (event->error_handle->connect_return_code == 4 || event->error_handle->connect_return_code == 5)
+        {
             mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_AUTH);
             mqtt_credentials().set_last_error("Authentication failed");
-        } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        }
+        else if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+        {
             mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_NETWORK);
             mqtt_credentials().set_last_error("Network connection failed");
             log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
             log_error_if_nonzero("captured as transport's socket errno", event->error_handle->esp_transport_sock_errno);
             LOG_INFO(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
-        } else {
+        }
+        else
+        {
             mqtt_credentials().set_connection_state(mqtt_connection_state_t::ERROR_TIMEOUT);
             mqtt_credentials().set_last_error("Connection timeout or unknown error");
         }
@@ -231,17 +236,19 @@ bool mqtt5_app_start(void)
     LOG_DEBUG(TAG, "mqtt5_app_start");
 
     // Load credentials from NVS
-    if (mqtt_credentials().load_credentials() != ESP_OK) {
+    if (mqtt_credentials().load_credentials() != ESP_OK)
+    {
         LOG_WARN(TAG, "No valid MQTT credentials found. MQTT will not start.");
         return false;
     }
 
-    if (!mqtt_credentials().has_valid_credentials()) {
+    if (!mqtt_credentials().has_valid_credentials())
+    {
         LOG_ERROR(TAG, "Invalid MQTT credentials. MQTT will not start.");
         return false;
     }
 
-    const auto& creds = mqtt_credentials().get_credentials();
+    const auto &creds = mqtt_credentials().get_credentials();
     mqtt_credentials().set_connection_state(mqtt_connection_state_t::CONNECTING);
 
     esp_mqtt5_connection_property_config_t connect_property = {
@@ -261,14 +268,12 @@ bool mqtt5_app_start(void)
 
     esp_mqtt_client_config_t mqtt5_cfg{}; // = {
 
-    host  = creds.broker_host;
-    port  = creds.broker_port;
-    user  = creds.username;
-    pass  = creds.password;
+    host = creds.broker_host;
+    port = creds.broker_port;
+    user = creds.username;
+    pass = creds.password;
     mqtt5_cfg.broker.address.hostname = host.c_str();
-    mqtt5_cfg.broker.address.transport = creds.use_ssl ? 
-        esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_SSL : 
-        esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_TCP;
+    mqtt5_cfg.broker.address.transport = creds.use_ssl ? esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_SSL : esp_mqtt_transport_t::MQTT_TRANSPORT_OVER_TCP;
     mqtt5_cfg.broker.address.port = port;
     mqtt5_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;
     mqtt5_cfg.network.disable_auto_reconnect = false;
@@ -289,8 +294,7 @@ bool mqtt5_app_start(void)
     esp_mqtt_client_register_event(mqtt_client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID), mqtt5_event_handler, NULL);
     esp_mqtt_client_start(mqtt_client);
 
-    
-    LOG_INFO(TAG, "MQTT client started successfully with broker: %s:%d", 
+    LOG_INFO(TAG, "MQTT client started successfully with broker: %s:%d",
              creds.broker_host.c_str(), creds.broker_port);
     return true;
 }
@@ -298,14 +302,17 @@ bool mqtt5_app_start(void)
 void mqtt5_app_stop(void)
 {
     LOG_INFO(TAG, "Stopping MQTT client");
-    
-    if (mqtt_client) {
+
+    if (mqtt_client)
+    {
         mqtt_credentials().set_connection_state(mqtt_connection_state_t::DISCONNECTED);
         esp_mqtt_client_stop(mqtt_client);
         esp_mqtt_client_destroy(mqtt_client);
         mqtt_client = nullptr;
         LOG_INFO(TAG, "MQTT client stopped and destroyed");
-    } else {
+    }
+    else
+    {
         LOG_WARN(TAG, "MQTT client was not running");
     }
 }
@@ -313,10 +320,10 @@ void mqtt5_app_stop(void)
 void mqtt5_app_restart(void)
 {
     LOG_INFO(TAG, "Restarting MQTT client");
-    
+
     // Stop existing client if running
     mqtt5_app_stop();
-    
+
     // Start with new credentials
     mqtt5_app_start();
 }
@@ -345,8 +352,9 @@ To remove the component, publish an empty string to the discovery topic. This wi
 */
 std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_info> node)
 {
-    if (!node) return nullptr;
-    
+    if (!node)
+        return nullptr;
+
     cJSON *root = cJSON_CreateObject();
 
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid.raw()))
@@ -361,15 +369,16 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             if (dev != nullptr)
             {
                 uint16_t node_index = get_node_index(node->uuid);
-                const char* node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
+                const char *node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
                 cJSON_AddItemToObject(dev, "name", cJSON_CreateString(node_name ? node_name : "light"));
                 cJSON_AddItemToObject(dev, "ids", cJSON_CreateString(buf));
                 std::string identifier = get_bridge_mac_identifier();
                 cJSON_AddItemToObject(dev, "via_device", cJSON_CreateString(identifier.c_str()));
-                
+
                 // Add company information if available
-                if (node->company_id != 0) {
-                    const char* company_name = lookup_company_name(node->company_id);
+                if (node->company_id != 0)
+                {
+                    const char *company_name = lookup_company_name(node->company_id);
                     cJSON_AddItemToObject(dev, "mf", cJSON_CreateString(company_name ? company_name : "Unknown"));
                 }
             }
@@ -386,7 +395,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             }
         }
 
-        //const std::string root_publish = "blemesh2mqtt/" + std::string{buf};
+        // const std::string root_publish = "blemesh2mqtt/" + std::string{buf};
         const std::string root_publish = mqtt_get_node_root_topic(node);
 
         cJSON_AddItemToObject(root, "~", cJSON_CreateString(root_publish.c_str()));
@@ -429,15 +438,16 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
 
 std::unique_ptr<cJSON> make_status_message(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
-    if (!node_info) return nullptr;
-    
+    if (!node_info)
+        return nullptr;
+
     cJSON *root, *color;
     root = cJSON_CreateObject();
 
     if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
         cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
-        
+
         if (node_info->color_mode == color_mode_t::brightness)
         {
             cJSON_AddStringToObject(root, "color_mode", "brightness");
@@ -453,7 +463,7 @@ std::unique_ptr<cJSON> make_status_message(std::shared_ptr<bm2mqtt_node_info> no
             cJSON_AddStringToObject(root, "color_mode", "hs");
             cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
             cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, node_info->min_hue, node_info->max_hue, 0, 360));
-            cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));    
+            cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));
         }
     }
 
@@ -498,29 +508,35 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
         if (strncmp(event->data, "online", event->data_len) == 0)
         {
             LOG_INFO(TAG, "Home Assistant is online - scheduling discovery republish");
-        
+
             // Stop existing timer if running
-            if (home_assistant_restart_timer) {
+            if (home_assistant_restart_timer)
+            {
                 esp_timer_stop(home_assistant_restart_timer);
                 esp_timer_delete(home_assistant_restart_timer);
                 home_assistant_restart_timer = nullptr;
             }
-            
+
             esp_timer_create_args_t args = {
                 .callback = &on_home_assistant_restart_timer,
                 .arg = nullptr,
-                .name = "ha_restart_timer"
-            };
+                .name = "ha_restart_timer"};
             esp_err_t err = esp_timer_create(&args, &home_assistant_restart_timer);
-            if (err == ESP_OK) {
+            if (err == ESP_OK)
+            {
                 err = esp_timer_start_periodic(home_assistant_restart_timer, 60 * 1000 * 1000); // 60 second intervals
-                if (err == ESP_OK) {
+                if (err == ESP_OK)
+                {
                     num_try = 3;
                     LOG_INFO(TAG, "Started Home Assistant restart timer (60s intervals, 3 retries)");
-                } else {
+                }
+                else
+                {
                     LOG_ERROR(TAG, "Failed to start Home Assistant restart timer: %s", esp_err_to_name(err));
                 }
-            } else {
+            }
+            else
+            {
                 LOG_ERROR(TAG, "Failed to create Home Assistant restart timer: %s", esp_err_to_name(err));
             }
         }
@@ -532,9 +548,9 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
     if (strncmp(event->topic, get_bridge_provisioning_set_topic(), event->topic_len) == 0)
     {
-        LOG_INFO(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data  );
-        ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON",event->data_len) == 0);
-   
+        LOG_INFO(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data);
+        ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON", event->data_len) == 0);
+
         return;
     }
 
@@ -545,12 +561,12 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
         if (strncmp(event->data, "RESTART", event->data_len) == 0)
         {
             LOG_WARN(TAG, "Bridge restart requested via MQTT - restarting in 2 seconds...");
-            
+
             // Give time for MQTT response to be sent before restarting
             vTaskDelay(pdMS_TO_TICKS(2000));
             esp_restart();
         }
-        
+
         return;
     }
 
@@ -585,7 +601,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
                     bool light_value_changed = false;
                     color_mode_t current_mode = node_info->color_mode;
-                  
+
                     if ((node_info->features & FEATURE_LIGHT_LIGHTNESS) || (node_info->features & FEATURE_LIGHT_HSL))
                     {
                         LOG_WARN(TAG, "[mqtt_parse_event_data] Light Lightness feature supported");
@@ -662,14 +678,14 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                     }
 
                     message_queue().enqueue(node_info, message_payload{
-                                           .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
-                                           {
-                                               mqtt_node_send_status(node_info);
-                                           },
-                                           .opcode = 0x0000, // No specific opcode, just a marker
-                                           .retries_left = 0,
-                                           .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
-                                       });
+                                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                                           {
+                                                               mqtt_node_send_status(node_info);
+                                                           },
+                                                           .opcode = 0x0000, // No specific opcode, just a marker
+                                                           .retries_left = 0,
+                                                           .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
+                                                       });
                 }
                 // cJSON automatically deleted by smart pointer
             }
@@ -679,9 +695,10 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
 int send_discovery(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+    int nerrors = arg_parse(argc, argv, (void **)&node_index_args);
 
-    if (nerrors != 0) {
+    if (nerrors != 0)
+    {
         arg_print_errors(stderr, node_index_args.end, argv[0]);
         return 1;
     }
@@ -693,7 +710,7 @@ int send_discovery(int argc, char **argv)
         int msg_id = 0;
         msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
         LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
-    
+
         cJSON_free(json_data);
     }
 
@@ -702,9 +719,10 @@ int send_discovery(int argc, char **argv)
 
 int delete_entity(int argc, char **argv)
 {
-    int nerrors = arg_parse(argc, argv, (void **) &node_index_args);
+    int nerrors = arg_parse(argc, argv, (void **)&node_index_args);
 
-    if (nerrors != 0) {
+    if (nerrors != 0)
+    {
         arg_print_errors(stderr, node_index_args.end, argv[0]);
         return 1;
     }
@@ -722,25 +740,29 @@ int delete_entity(int argc, char **argv)
 
 void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
-    if (!node_info) {
+    if (!node_info)
+    {
         LOG_ERROR(TAG, "mqtt_node_send_status: node_info is null");
         return;
     }
 
     const std::string root_publish = mqtt_get_node_state_topic(node_info);
-    if (root_publish.empty()) {
+    if (root_publish.empty())
+    {
         LOG_ERROR(TAG, "mqtt_node_send_status: failed to get state topic for node");
         return;
     }
 
     std::unique_ptr<cJSON> status_message = make_status_message(node_info);
-    if (!status_message) {
+    if (!status_message)
+    {
         LOG_ERROR(TAG, "mqtt_node_send_status: failed to create status message");
         return;
     }
 
     char *json_data = cJSON_PrintUnformatted(status_message.get());
-    if (!json_data) {
+    if (!json_data)
+    {
         LOG_ERROR(TAG, "mqtt_node_send_status: failed to format JSON");
         return;
     }
@@ -756,12 +778,12 @@ void mqtt_node_send_status(std::shared_ptr<bm2mqtt_node_info> node_info)
 void mqtt_send_discovery(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     std::unique_ptr<cJSON> discovery_message = make_node_discovery_message(node_info);
-        char *json_data = cJSON_PrintUnformatted(discovery_message.get());
-        int msg_id = 0;
-        msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
-        LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
+    char *json_data = cJSON_PrintUnformatted(discovery_message.get());
+    int msg_id = 0;
+    msg_id = esp_mqtt_client_publish(mqtt_client, mqtt_get_node_discovery_id(node_info).c_str(), json_data, 0, 0, 0);
+    LOG_INFO(TAG, "sent discovery publish successful, msg_id=%d", msg_id);
 
-        cJSON_free(json_data);
+    cJSON_free(json_data);
 }
 
 void mqtt_remove_node(std::shared_ptr<bm2mqtt_node_info> node_info)

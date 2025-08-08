@@ -24,12 +24,12 @@ static std::string get_wifi_mac_string()
     // Get WiFi MAC address
     uint8_t mac[6];
     esp_wifi_get_mac(WIFI_IF_STA, mac);
-    
+
     // Format MAC address as hex string
     char mac_str[13];
-    snprintf(mac_str, sizeof(mac_str), "%02x%02x%02x%02x%02x%02x", 
+    snprintf(mac_str, sizeof(mac_str), "%02x%02x%02x%02x%02x%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    
+
     return std::string(mac_str);
 }
 
@@ -38,7 +38,7 @@ std::string get_bridge_mac_identifier()
     // Create identifier with MAC address
     char identifier[40];
     snprintf(identifier, sizeof(identifier), "blemesh2mqtt_bridge_%s", get_wifi_mac_string().c_str());
-    
+
     return std::string(identifier);
 }
 
@@ -47,27 +47,27 @@ std::string get_bridge_base_topic()
     // Create base topic with MAC address
     char topic[32];
     snprintf(topic, sizeof(topic), "blemesh2mqtt_%s", get_wifi_mac_string().c_str());
-    
+
     return std::string(topic);
 }
 
-const char* get_bridge_availability_topic()
+const char *get_bridge_availability_topic()
 {
     static const std::string topic{get_bridge_base_topic() + "/bridge/state"};
     return topic.c_str();
 }
 
-const char* get_bridge_state_topic()
+const char *get_bridge_state_topic()
 {
     static const std::string topic{get_bridge_base_topic() + "/bridge/info"};
     return topic.c_str();
 }
 
-static cJSON* create_bridge_device_object()
+static cJSON *create_bridge_device_object()
 {
     cJSON *device = cJSON_CreateObject();
     cJSON *identifiers = cJSON_CreateArray();
-    
+
     std::string identifier = get_bridge_mac_identifier();
     cJSON_AddItemToArray(identifiers, cJSON_CreateString(identifier.c_str()));
 
@@ -76,24 +76,24 @@ static cJSON* create_bridge_device_object()
     cJSON_AddStringToObject(device, "model", "BLEMesh2MQTT Bridge");
     cJSON_AddStringToObject(device, "name", "BLE Mesh Bridge");
     cJSON_AddStringToObject(device, "sw_version", "0.1.0");
-    
+
     return device;
 }
-const char* get_bridge_provisioning_state_topic()
+const char *get_bridge_provisioning_state_topic()
 {
-    static const std::string topic {get_bridge_base_topic() + "/bridge/provisioning/state"};
+    static const std::string topic{get_bridge_base_topic() + "/bridge/provisioning/state"};
     return topic.c_str();
 }
 
-const char* get_bridge_provisioning_set_topic()
+const char *get_bridge_provisioning_set_topic()
 {
-    static const std::string topic {get_bridge_base_topic() + "/bridge/provisioning/set"};
+    static const std::string topic{get_bridge_base_topic() + "/bridge/provisioning/set"};
     return topic.c_str();
 }
 
-const char* get_bridge_restart_set_topic()
+const char *get_bridge_restart_set_topic()
 {
-    static const std::string topic {get_bridge_base_topic() + "/bridge/restart/set"};
+    static const std::string topic{get_bridge_base_topic() + "/bridge/restart/set"};
     return topic.c_str();
 }
 
@@ -177,7 +177,6 @@ CJsonPtr create_uptime_json()
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
     cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
     cJSON_AddStringToObject(root.get(), "platform", "sensor");
-    
 
     // Device object
     cJSON *device = create_bridge_device_object();
@@ -202,7 +201,6 @@ CJsonPtr create_mem_json()
     cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
     cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
-       
 
     // Device object
     cJSON *device = create_bridge_device_object();
@@ -244,12 +242,12 @@ CJsonPtr create_bridge_info_json(const char *version)
     int uptime_sec = static_cast<int>(uptime_us / 1000000);
     cJSON_AddNumberToObject(root.get(), "uptime", uptime_sec);
     // Free heap size
-    cJSON_AddNumberToObject(root.get(), "heap_free", esp_get_free_heap_size()/1024); // Convert to KB
+    cJSON_AddNumberToObject(root.get(), "heap_free", esp_get_free_heap_size() / 1024); // Convert to KB
     // IP address
     cJSON_AddStringToObject(root.get(), "ip_address", get_ip_address());
 
     cJSON_AddStringToObject(root.get(), "version", version);
-    
+
     // Build date/time
     std::string build_datetime = std::string(__DATE__) + " " + __TIME__;
     cJSON_AddStringToObject(root.get(), "build_date", build_datetime.c_str());
@@ -292,11 +290,13 @@ void send_bridge_discovery()
                 esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
-            else{
+            else
+            {
                 LOG_ERROR(TAG, "Invalid unique_id in switch discovery JSON");
             }
         }
-        else{
+        else
+        {
             LOG_ERROR(TAG, "No unique_id found in switch discovery JSON");
         }
     }
@@ -315,16 +315,18 @@ void send_bridge_discovery()
                 esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
-            else{
+            else
+            {
                 LOG_ERROR(TAG, "Invalid unique_id in button discovery JSON");
             }
         }
-        else{
+        else
+        {
             LOG_ERROR(TAG, "No unique_id found in button discovery JSON");
         }
     }
 
-    for (const auto sensor_json_func : {create_uptime_json, create_mem_json, create_ip_json} )
+    for (const auto sensor_json_func : {create_uptime_json, create_mem_json, create_ip_json})
     {
         CJsonPtr sensor_json = sensor_json_func();
         if (cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(sensor_json.get(), "unique_id"))
@@ -338,17 +340,19 @@ void send_bridge_discovery()
                 esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
                 cJSON_free(json_data);
             }
-            else {
+            else
+            {
                 LOG_ERROR(TAG, "Invalid unique_id in sensor JSON");
             }
         }
-        else{
+        else
+        {
             LOG_ERROR(TAG, "No unique_id found in sensor JSON");
         }
     }
-    
+
     {
-       publish_bridge_info("0.1.0");
+        publish_bridge_info("0.1.0");
     }
     {
         mqtt_publish_provisioning_enabled(enable_provisioning);
@@ -371,8 +375,7 @@ void start_periodic_publish_timer()
         .callback = &periodic_publish_callback,
         .arg = NULL,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "mqtt_info_pub"
-    };
+        .name = "mqtt_info_pub"};
 
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &publish_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(publish_timer, PUBLISH_INTERVAL_MS * 1000));
@@ -388,7 +391,7 @@ void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)
 {
     int msg_id = esp_mqtt_client_subscribe(client, get_bridge_provisioning_set_topic(), 0);
     LOG_INFO(TAG, "sent provisioning subscribe successful, msg_id=%d", msg_id);
-    
+
     msg_id = esp_mqtt_client_subscribe(client, get_bridge_restart_set_topic(), 0);
     LOG_INFO(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);
 

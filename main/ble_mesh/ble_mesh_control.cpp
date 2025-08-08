@@ -143,14 +143,19 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
     uint16_t features = data[8] | (data[9] << 8);
     const char *company_name = lookup_company_name(cid);
 
-    LOG_INFO(TAG, "Node composition - CID: 0x%04X (%s), PID: 0x%04X, VID: 0x%04X, CRPL: %d, Features: 0x%04X", 
+    LOG_INFO(TAG, "Node composition - CID: 0x%04X (%s), PID: 0x%04X, VID: 0x%04X, CRPL: %d, Features: 0x%04X",
              cid, company_name, pid, vid, crpl, features);
     char feature_str[256] = {0};
-    if (features & BIT(0)) strcat(feature_str, "Relay ");
-    if (features & BIT(1)) strcat(feature_str, "Proxy ");
-    if (features & BIT(2)) strcat(feature_str, "Friend ");
-    if (features & BIT(3)) strcat(feature_str, "LowPower ");
-    if (strlen(feature_str) > 0) {
+    if (features & BIT(0))
+        strcat(feature_str, "Relay ");
+    if (features & BIT(1))
+        strcat(feature_str, "Proxy ");
+    if (features & BIT(2))
+        strcat(feature_str, "Friend ");
+    if (features & BIT(3))
+        strcat(feature_str, "LowPower ");
+    if (strlen(feature_str) > 0)
+    {
         LOG_INFO(TAG, "Supported features: %s", feature_str);
     }
 
@@ -216,8 +221,9 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
 
 void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
 {
-    if (!node) return;
-    
+    if (!node)
+        return;
+
     LOG_WARN(TAG, "features_to_bind : [%d]", node->features_to_bind);
 
     if ((node->features_to_bind & FEATURE_GENERIC_ONOFF) != 0)
@@ -225,7 +231,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
         node->features_to_bind &= ~FEATURE_GENERIC_ONOFF; // Clear the feature to avoid rebinding
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "Generic on/off model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -250,7 +256,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_HSL; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "Light hsl model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -275,7 +281,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_LIGHTNESS; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "Light lightness model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -300,13 +306,13 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
     {
         node->features_to_bind &= ~FEATURE_LIGHT_CTL; // Clear the feature to avoid rebinding
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "Light CTL temperature model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
                                               node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
-                                              set_state.model_app_bind.element_addr = node->unicast  + node->light_ctl_temp_offset;
+                                              set_state.model_app_bind.element_addr = node->unicast + node->light_ctl_temp_offset;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
                                               set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
@@ -321,7 +327,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                       });
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "Light CTL model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -348,7 +354,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
         refresh_node(node, nullptr);
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               mqtt_subscribe_node(mqtt_get_client(), node);
                                               mqtt_send_discovery(node);
@@ -501,27 +507,28 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::sha
 
     node->features = node_info.features;
     node->light_ctl_temp_offset = node_info.light_ctl_temp_offset;
-    
+
     // Store the company ID from composition data (reuse existing buf and data variables)
-    if (len >= 2) {
+    if (len >= 2)
+    {
         uint16_t cid = data[0] | (data[1] << 8);
         node->company_id = cid;
         LOG_INFO(TAG, "Stored CID 0x%04X for node 0x%04X", cid, node->unicast);
     }
 
-    if(node->features & FEATURE_LIGHT_LIGHTNESS)
+    if (node->features & FEATURE_LIGHT_LIGHTNESS)
     {
         LOG_WARN(TAG, "[on_composition_received] Light Lightness feature supported");
         node->color_mode = color_mode_t::brightness;
     }
-    
-    if(node->features & FEATURE_LIGHT_HSL)
+
+    if (node->features & FEATURE_LIGHT_HSL)
     {
         LOG_WARN(TAG, "[on_composition_received] Light HSL feature supported");
         node->color_mode = color_mode_t::hs;
     }
 
-    if(node->features & FEATURE_LIGHT_CTL)
+    if (node->features & FEATURE_LIGHT_CTL)
     {
         LOG_WARN(TAG, "[on_composition_received] Light CTL feature supported");
         node->color_mode = color_mode_t::color_temp;
@@ -530,7 +537,7 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::sha
     if (!get_composition_data_debug)
     {
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info>& node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
                                               LOG_WARN(TAG, "[on_composition_received] Requesting composition for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -710,10 +717,10 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                      param->status_cb.hsl_range_status.hue_range_min, param->status_cb.hsl_range_status.hue_range_max,
                      param->status_cb.hsl_range_status.saturation_range_min, param->status_cb.hsl_range_status.saturation_range_max);
 
-                     node->min_hue = param->status_cb.hsl_range_status.hue_range_min;
-                     node->max_hue = param->status_cb.hsl_range_status.hue_range_max;
-                     node->min_saturation = param->status_cb.hsl_range_status.saturation_range_min;
-                     node->max_saturation = param->status_cb.hsl_range_status.saturation_range_max;
+            node->min_hue = param->status_cb.hsl_range_status.hue_range_min;
+            node->max_hue = param->status_cb.hsl_range_status.hue_range_max;
+            node->min_saturation = param->status_cb.hsl_range_status.saturation_range_min;
+            node->max_saturation = param->status_cb.hsl_range_status.saturation_range_max;
         }
         break;
 
@@ -736,7 +743,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
             node->min_lightness = param->status_cb.lightness_range_status.range_min;
             node->max_lightness = param->status_cb.lightness_range_status.range_max;
 
-            if((node->features & FEATURE_LIGHT_HSL) || (node->features & FEATURE_LIGHT_CTL))
+            if ((node->features & FEATURE_LIGHT_HSL) || (node->features & FEATURE_LIGHT_CTL))
             {
                 // FIX-ME : this is the case for my sengled bulb.
                 node->max_lightness /= 2; // HSL and CTL use half of the lightness range
@@ -785,7 +792,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         {
             LOG_INFO("[ble_mesh_light_client_cb] [ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT]", "Set state response: Error Code : %i", param->error_code);
         }
-    
+
         message_queue().handle_ack(node, opcode);
 
         switch (opcode)
@@ -869,12 +876,11 @@ void refresh_all_nodes()
 {
     LOG_INFO(TAG, "Refreshing all nodes");
     for_each_provisioned_node([](const esp_ble_mesh_node_t *node, int node_index)
-    {
+                              {
         if (auto node_info = node_manager().get_or_create(node->dev_uuid))
         {
             refresh_node(node_info, node);
-        }
-    });
+        } });
 }
 
 void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node)
@@ -892,7 +898,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
         LOG_INFO(TAG, "Refreshing ON/OFF for node 0x%04X", node_info->unicast);
 
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
+                                               .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
                                                {
                                                    LOG_WARN(TAG, "Generic on/off model for node 0x%04X", node_info->unicast);
                                                    esp_ble_mesh_client_common_param_t common = {0};
@@ -914,7 +920,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
     {
         {
             message_queue().enqueue(node_info, message_payload{
-                                                   .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
+                                                   .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                                    {
                                                        LOG_WARN(TAG, "Light HSL model for node 0x%04X", node_info->unicast);
                                                        esp_ble_mesh_client_common_param_t common = {0};
@@ -933,7 +939,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
         }
         {
             message_queue().enqueue(node_info, message_payload{
-                                                   .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
+                                                   .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                                    {
                                                        LOG_WARN(TAG, "HSL range for node 0x%04X", node_info->unicast);
                                                        ble_mesh_hsl_range_get(node_info);
@@ -943,41 +949,41 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
                                                });
         }
     }
-    
-    if(node_info->features & FEATURE_LIGHT_LIGHTNESS)
+
+    if (node_info->features & FEATURE_LIGHT_LIGHTNESS)
     {
         message_queue().enqueue(node_info, message_payload{
-                                                   .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
+                                               .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                               {
+                                                   LOG_WARN(TAG, "Light lightness model for node 0x%04X", node_info->unicast);
+                                                   esp_ble_mesh_client_common_param_t common = {0};
+                                                   esp_ble_mesh_light_client_get_state_t get_state_light = {0};
+                                                   node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET);
+                                                   int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
+                                                   if (err)
                                                    {
-                                                       LOG_WARN(TAG, "Light lightness model for node 0x%04X", node_info->unicast);
-                                                       esp_ble_mesh_client_common_param_t common = {0};
-                                                       esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-                                                       node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET);
-                                                       int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
-                                                       if (err)
-                                                       {
-                                                           LOG_ERROR(TAG, "Refreshing Lightness failed");
-                                                           return;
-                                                       }
-                                                   },
-                                                   .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET,
-                                                   .retries_left = 3,
-                                               });
+                                                       LOG_ERROR(TAG, "Refreshing Lightness failed");
+                                                       return;
+                                                   }
+                                               },
+                                               .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET,
+                                               .retries_left = 3,
+                                           });
         message_queue().enqueue(node_info, message_payload{
-                                                   .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
-                                                   {
-                                                       LOG_WARN(TAG, "Light lightness range for node 0x%04X", node_info->unicast);
-                                                       ble_mesh_lightness_range_get(node_info);
-                                                   },
-                                                   .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET,
-                                                   .retries_left = 3,
-                                               });
+                                               .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                               {
+                                                   LOG_WARN(TAG, "Light lightness range for node 0x%04X", node_info->unicast);
+                                                   ble_mesh_lightness_range_get(node_info);
+                                               },
+                                               .opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET,
+                                               .retries_left = 3,
+                                           });
     }
 
     if (node_info->features & FEATURE_LIGHT_CTL)
     {
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
+                                               .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
                                                {
                                                    LOG_WARN(TAG, "Refreshing Temperature Range for node 0x%04X", node_info->unicast);
                                                    ble_mesh_ctl_temperature_range_get(node_info);
@@ -987,7 +993,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
                                            });
 
         message_queue().enqueue(node_info, message_payload{
-                                               .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info) // shared_ptr captured by value, keeps node alive
+                                               .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
                                                {
                                                    LOG_INFO(TAG, "Refreshing CTL Temperature for node 0x%04X", node_info->unicast);
 
@@ -999,7 +1005,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
     }
 
     message_queue().enqueue(node_info, message_payload{
-                                           .send = [](std::shared_ptr<bm2mqtt_node_info>& node_info)
+                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                            {
                                                mqtt_node_send_status(node_info);
                                            },
