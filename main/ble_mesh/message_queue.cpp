@@ -161,7 +161,7 @@ void message_queue_manager::enqueue(std::shared_ptr<bm2mqtt_node_info> node, con
     }
 }
 
-void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
+void message_queue_manager::handle_ack(const std::shared_ptr<bm2mqtt_node_info>& node, uint32_t opcode)
 {
     if (!node)
         return;
@@ -185,7 +185,7 @@ void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, 
     }
 }
 
-void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
+void message_queue_manager::handle_timeout(const std::shared_ptr<bm2mqtt_node_info>& node, uint32_t opcode)
 {
     if (!node)
         return;
@@ -209,7 +209,7 @@ void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> no
     }
 }
 
-void message_queue_manager::clear_queue(std::shared_ptr<bm2mqtt_node_info> node)
+void message_queue_manager::clear_queue(const std::shared_ptr<bm2mqtt_node_info>& node)
 {
     if (!node)
         return;

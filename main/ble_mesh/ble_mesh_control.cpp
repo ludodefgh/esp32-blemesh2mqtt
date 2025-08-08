@@ -219,7 +219,7 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
     return info;
 }
 
-void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
+void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info>& node)
 {
     if (!node)
         return;
@@ -231,7 +231,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
         node->features_to_bind &= ~FEATURE_GENERIC_ONOFF; // Clear the feature to avoid rebinding
 
         message_queue().enqueue(node, message_payload{
-                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node)
                                           {
                                               LOG_WARN(TAG, "Generic on/off model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
@@ -868,7 +868,7 @@ void ble_mesh_refresh_all_nodes()
         } });
 }
 
-void ble_mesh_refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node)
+void ble_mesh_refresh_node(const std::shared_ptr<bm2mqtt_node_info>& node_info, const esp_ble_mesh_node_t *node)
 {
     LOG_INFO(TAG, "Refreshing node 0x%04X", node_info->unicast);
     if (node != nullptr)
