@@ -3,18 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BLE Mesh Bridge</title>
+  <title>BleMesh2MQTT Bridge</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="header">
-    <h1>BLE Mesh Bridge</h1>
-    <div class="status-indicator" id="status"></div>
+    <div class="header-left">
+      <button class="menu-toggle" id="menu-toggle">☰</button>
+      <h1>BleMesh2MQTT Bridge</h1>
+    </div>
+    <div class="header-controls">
+      <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+        <span id="theme-icon">☀️</span>
+      </button>
+      <div class="bridge-status">
+        <div class="status-row">
+          <span class="status-icon" id="connection-status">●</span>
+          <span class="status-uptime" id="bridge-uptime">00d 00h 00m</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Free:</span>
+          <span class="status-memory" id="header-memory">-- KB</span>
+        </div>
+      </div>
+    </div>
   </header>
 
-  <main class="main-content">
-    <div class="grid">
-      <!-- Log Section -->
+  <div class="layout">
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-content">
+        <div class="menu-item active" data-section="bridge">
+          <span class="menu-icon">🌉</span>
+          <span class="menu-text">Bridge</span>
+        </div>
+        <div class="menu-item" data-section="ble-mesh">
+          <span class="menu-icon">📡</span>
+          <span class="menu-text">BLE Mesh</span>
+        </div>
+        <div class="menu-item" data-section="firmware">
+          <span class="menu-icon">💾</span>
+          <span class="menu-text">Firmware</span>
+        </div>
+        <div class="menu-item" data-section="debug">
+          <span class="menu-icon">🐛</span>
+          <span class="menu-text">Debug</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="main-content">
+      <!-- System Logs - Always at the top -->
       <section class="card log-section">
         <h2>System Logs</h2>
         <div class="log-container">
@@ -29,200 +67,257 @@
         </div>
       </section>
 
-      <!-- Provisioned Nodes Section -->
-      <section class="card nodes-section">
-        <div class="section-header">
-          <h2>Provisioned Nodes</h2>
-          <div class="node-count" id="node-count">0 nodes</div>
-        </div>
-        <div id="nodes" class="nodes-grid"></div>
-        <div id="no-nodes" class="empty-state">No nodes provisioned yet</div>
-      </section>
-
-      <!-- Unprovisioned Devices Section -->
-      <section class="card devices-section">
-        <div class="section-header">
-          <h2>Unprovisioned Devices</h2>
-          <button class="btn btn-primary" onclick="refreshDevices()">
-            <span class="icon">🔄</span>
-            Refresh
-          </button>
-        </div>
-        <div id="unprovisioned" class="devices-grid"></div>
-        <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
-      </section>
-
-      <!-- MQTT Configuration Section -->
-      <section class="card mqtt-section">
-        <div class="section-header">
-          <h2>MQTT Configuration</h2>
-          <div class="connection-status" id="mqtt-status">
-            <span class="status-label">Status:</span>
-            <span class="status-value" id="mqtt-state">Loading...</span>
-          </div>
-        </div>
-        
-        <form id="mqtt-config-form" class="mqtt-form">
-          <div class="form-group">
-            <label for="broker-host">Broker Host:</label>
-            <input type="text" id="broker-host" name="broker_host" placeholder="192.168.1.100 or mqtt.example.com" required>
-          </div>
-          
-          <div class="form-row">
-            <div class="form-group">
-              <label for="broker-port">Port:</label>
-              <input type="number" id="broker-port" name="broker_port" value="1883" min="1" max="65535" required>
+      <!-- Bridge Section -->
+      <div class="section-content active" id="bridge-section">
+        <div class="section-grid">
+          <!-- Bridge Controls -->
+          <section class="card controls-section">
+            <div class="section-header">
+              <h2>Bridge Controls</h2>
+              <div class="memory-info" id="memory-info">
+                <div class="memory-item">
+                  <span class="memory-label">Free Memory</span>
+                  <span class="memory-value" id="free-memory">-- KB</span>
+                </div>
+                <div class="memory-item">
+                  <span class="memory-label">Total Memory</span>
+                  <span class="memory-value" id="total-memory">-- KB</span>
+                </div>
+              </div>
             </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="use-ssl" name="use_ssl">
-                Use SSL/TLS
-              </label>
-            </div>
-          </div>
-          
-          <div class="form-group">
-            <label for="username">Username:</label>
-            <input type="text" id="username" name="username" placeholder="homeassistant" required>
-          </div>
-          
-          <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" name="password" placeholder="Enter MQTT password" required>
-            <button type="button" class="btn btn-small toggle-password" onclick="togglePassword()">👁️</button>
-          </div>
-          
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary">
-              <span class="icon">💾</span>
-              Save Configuration
-            </button>
-            <button type="button" class="btn btn-warning" onclick="testConnection()">
-              <span class="icon">🔧</span>
-              Test Connection
-            </button>
-            <button type="button" class="btn btn-danger" onclick="clearCredentials()">
-              <span class="icon">🗑️</span>
-              Clear
-            </button>
-          </div>
-        </form>
-        
-        <div id="mqtt-error" class="error-message" style="display: none;"></div>
-      </section>
-
-      <!-- Bridge Controls Section -->
-      <section class="card controls-section">
-        <div class="section-header">
-          <h2>Bridge Controls</h2>
-          <div class="memory-info" id="memory-info">
-            <div class="memory-item">
-              <span class="memory-label">Free Memory</span>
-              <span class="memory-value" id="free-memory">-- KB</span>
-            </div>
-            <div class="memory-item">
-              <span class="memory-label">Total Memory</span>
-              <span class="memory-value" id="total-memory">-- KB</span>
-            </div>
-          </div>
-        </div>
-        <div class="controls-grid">
-          <button class="btn btn-primary" onclick="sendBridgeMqttDiscovery()">
-            <span class="icon">📡</span>
-            Send MQTT Discovery
-          </button>
-          <button class="btn btn-primary" onclick="sendBridgeMqttStatus()">
-            <span class="icon">📊</span>
-            Send MQTT Status
-          </button>
-          <button class="btn btn-warning" onclick="restartBridge()">
-            <span class="icon">🔄</span>
-            Restart Bridge
-          </button>
-          <button class="btn btn-danger" onclick="resetWiFi()">
-            <span class="icon">⚠️</span>
-            Reset WiFi
-          </button>
-        </div>
-      </section>
-
-      <!-- Bridge Firmware Section -->
-      <section class="card firmware-section">
-        <div class="section-header">
-          <h2>Bridge Firmware</h2>
-          <div class="firmware-info" id="firmware-info">
-            <div class="info-item">
-              <span class="info-label">Current Version</span>
-              <span class="info-value" id="current-version">Loading...</span>
-            </div>
-          </div>
-        </div>
-        
-        <div class="firmware-upload">
-          <div class="upload-area" id="upload-area">
-            <div class="upload-content">
-              <span class="upload-icon">📁</span>
-              <p class="upload-text">
-                <strong>Select firmware file (.bin)</strong><br>
-                or drag and drop here
-              </p>
-              <input type="file" id="firmware-file" accept=".bin" style="display: none;">
-              <button class="btn btn-primary" onclick="document.getElementById('firmware-file').click()">
-                <span class="icon">📂</span>
-                Choose File
+            <div class="controls-grid">
+              <button class="btn btn-primary" onclick="sendBridgeMqttDiscovery()">
+                <span class="icon">📡</span>
+                Send MQTT Discovery
+              </button>
+              <button class="btn btn-primary" onclick="sendBridgeMqttStatus()">
+                <span class="icon">📊</span>
+                Send MQTT Status
+              </button>
+              <button class="btn btn-warning" onclick="restartBridge()">
+                <span class="icon">🔄</span>
+                Restart Bridge
               </button>
             </div>
-          </div>
-          
-          <div id="file-info" class="file-info" style="display: none;">
-            <div class="file-details">
-              <span class="file-icon">📄</span>
-              <div class="file-text">
-                <div class="file-name" id="file-name"></div>
-                <div class="file-size" id="file-size"></div>
-              </div>
-              <button class="btn btn-small btn-secondary" onclick="clearFile()">✕</button>
-            </div>
-          </div>
-          
-          <div id="upload-progress" class="upload-progress" style="display: none;">
-            <div class="progress-info">
-              <span class="progress-text" id="progress-text">Preparing upload...</span>
-              <span class="progress-percent" id="progress-percent">0%</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" id="progress-fill"></div>
-            </div>
-            <div class="progress-details" id="progress-details"></div>
-          </div>
-          
-          <div class="upload-actions">
-            <button class="btn btn-danger" id="upload-btn" onclick="uploadFirmware()" disabled>
-              <span class="icon">⬆️</span>
-              Upload Firmware
-            </button>
-            <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" style="display: none;">
-              <span class="icon">✕</span>
-              Cancel
-            </button>
-          </div>
-          
-          <div class="firmware-warning">
-            <p><strong>⚠️ Warning:</strong> Uploading invalid firmware may render the device unusable. 
-               Ensure you have the correct firmware file for this device.</p>
-          </div>
-        </div>
-        
-        <div id="firmware-error" class="error-message" style="display: none;"></div>
-      </section>
+          </section>
 
-      <!-- Console Commands Section -->
-      <section class="card commands-section">
-        <h2>Available Commands</h2>
-        <div id="console-commands" class="commands-list"></div>
-      </section>
-    </div>
-  </main>
+          <!-- WiFi Status -->
+          <section class="card wifi-section">
+            <div class="section-header">
+              <h2>WiFi Status</h2>
+              <div class="connection-status" id="wifi-status">
+                <span class="status-label">Status:</span>
+                <span class="status-value" id="wifi-state">Loading...</span>
+              </div>
+            </div>
+            
+            <div class="wifi-info-grid">
+              <div class="info-row">
+                <span class="info-label">SSID:</span>
+                <span class="info-value" id="wifi-ssid">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">IP Address:</span>
+                <span class="info-value" id="wifi-ip">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Subnet Mask:</span>
+                <span class="info-value" id="wifi-netmask">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Gateway:</span>
+                <span class="info-value" id="wifi-gateway">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">MAC Address:</span>
+                <span class="info-value" id="wifi-mac">--</span>
+              </div>
+            </div>
+            
+            <div class="wifi-controls">
+              <button class="btn btn-danger" onclick="resetWifi()">
+                <span class="icon">🔄</span>
+                Reset WiFi
+              </button>
+            </div>
+          </section>
+
+          <!-- MQTT Configuration -->
+          <section class="card mqtt-section">
+            <div class="section-header">
+              <h2>MQTT Configuration</h2>
+              <div class="connection-status" id="mqtt-status">
+                <span class="status-label">Status:</span>
+                <span class="status-value" id="mqtt-state">Loading...</span>
+              </div>
+            </div>
+            
+            <form id="mqtt-config-form" class="mqtt-form">
+              <div class="form-group">
+                <label for="broker-host">Broker Host:</label>
+                <input type="text" id="broker-host" name="broker_host" placeholder="192.168.1.100 or mqtt.example.com" required>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="broker-port">Port:</label>
+                  <input type="number" id="broker-port" name="broker_port" value="1883" min="1" max="65535" required>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="use-ssl" name="use_ssl">
+                    Use SSL/TLS
+                  </label>
+                </div>
+              </div>
+              
+              <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" placeholder="homeassistant" required>
+              </div>
+              
+              <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" placeholder="Enter MQTT password" required>
+                <button type="button" class="btn btn-small toggle-password" onclick="togglePassword()">👁️</button>
+              </div>
+              
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                  <span class="icon">💾</span>
+                  Save Configuration
+                </button>
+                <button type="button" class="btn btn-warning" onclick="testConnection()">
+                  <span class="icon">🔧</span>
+                  Test Connection
+                </button>
+                <button type="button" class="btn btn-danger" onclick="clearCredentials()">
+                  <span class="icon">🗑️</span>
+                  Clear
+                </button>
+              </div>
+            </form>
+            
+            <div id="mqtt-error" class="error-message" style="display: none;"></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- BLE Mesh Section -->
+      <div class="section-content" id="ble-mesh-section">
+        <div class="section-grid">
+          <!-- Provisioned Nodes -->
+          <section class="card nodes-section">
+            <div class="section-header">
+              <h2>Provisioned Nodes</h2>
+              <div class="node-count" id="node-count">0 nodes</div>
+            </div>
+            <div id="nodes" class="nodes-grid"></div>
+            <div id="no-nodes" class="empty-state">No nodes provisioned yet</div>
+          </section>
+
+          <!-- Unprovisioned Devices -->
+          <section class="card devices-section">
+            <div class="section-header">
+              <h2>Unprovisioned Devices</h2>
+              <button class="btn btn-primary" onclick="refreshDevices()">
+                <span class="icon">🔄</span>
+                Refresh
+              </button>
+            </div>
+            <div id="unprovisioned" class="devices-grid"></div>
+            <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Firmware Section -->
+      <div class="section-content" id="firmware-section">
+        <div class="section-grid">
+          <section class="card firmware-section">
+            <div class="section-header">
+              <h2>Bridge Firmware</h2>
+              <div class="firmware-info" id="firmware-info">
+                <div class="info-item">
+                  <span class="info-label">Current Version</span>
+                  <span class="info-value" id="current-version">Loading...</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="firmware-upload">
+              <div class="upload-area" id="upload-area">
+                <div class="upload-content">
+                  <span class="upload-icon">📁</span>
+                  <p class="upload-text">
+                    <strong>Select firmware file (.bin)</strong><br>
+                    or drag and drop here
+                  </p>
+                  <input type="file" id="firmware-file" accept=".bin" style="display: none;">
+                  <button class="btn btn-primary" onclick="document.getElementById('firmware-file').click()">
+                    <span class="icon">📂</span>
+                    Choose File
+                  </button>
+                </div>
+              </div>
+              
+              <div id="file-info" class="file-info" style="display: none;">
+                <div class="file-details">
+                  <span class="file-icon">📄</span>
+                  <div class="file-text">
+                    <div class="file-name" id="file-name"></div>
+                    <div class="file-size" id="file-size"></div>
+                  </div>
+                  <button class="btn btn-small btn-secondary" onclick="clearFile()">✕</button>
+                </div>
+              </div>
+              
+              <div id="upload-progress" class="upload-progress" style="display: none;">
+                <div class="progress-info">
+                  <span class="progress-text" id="progress-text">Preparing upload...</span>
+                  <span class="progress-percent" id="progress-percent">0%</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-details" id="progress-details"></div>
+              </div>
+              
+              <div class="upload-actions">
+                <button class="btn btn-danger" id="upload-btn" onclick="uploadFirmware()" disabled>
+                  <span class="icon">⬆️</span>
+                  Upload Firmware
+                </button>
+                <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" style="display: none;">
+                  <span class="icon">✕</span>
+                  Cancel
+                </button>
+              </div>
+              
+              <div class="firmware-warning">
+                <p><strong>⚠️ Warning:</strong> Uploading invalid firmware may render the device unusable. 
+                   Ensure you have the correct firmware file for this device.</p>
+              </div>
+            </div>
+            
+            <div id="firmware-error" class="error-message" style="display: none;"></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Debug Section -->
+      <div class="section-content" id="debug-section">
+        <div class="section-grid">
+          <section class="card commands-section">
+            <h2>Available Commands</h2>
+            <div id="console-commands" class="commands-list"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="sidebar-overlay"></div>
 
   <script src="/js/main.js"></script>
 

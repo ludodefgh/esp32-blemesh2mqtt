@@ -3,10 +3,227 @@ let throttleTimeout = null;
 let lastSend = 0;
 let pending = {};
 let logAutoScroll = true;
+let currentSection = 'bridge';
+
+// Navigation functions
+function switchSection(sectionId) {
+  // Hide all sections
+  document.querySelectorAll('.section-content').forEach(section => {
+    section.classList.remove('active');
+  });
+  
+  // Show selected section
+  const targetSection = document.getElementById(sectionId + '-section');
+  if (targetSection) {
+    targetSection.classList.add('active');
+  }
+  
+  // Update menu items
+  document.querySelectorAll('.menu-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  
+  // Set active menu item
+  const targetMenuItem = document.querySelector(`[data-section="${sectionId}"]`);
+  if (targetMenuItem) {
+    targetMenuItem.classList.add('active');
+  }
+  
+  currentSection = sectionId;
+  
+  // Close mobile sidebar
+  closeMobileSidebar();
+}
+
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.querySelector('.sidebar-overlay');
+  
+  if (!overlay) {
+    // Create overlay if it doesn't exist
+    const newOverlay = document.createElement('div');
+    newOverlay.className = 'sidebar-overlay';
+    newOverlay.addEventListener('click', closeMobileSidebar);
+    document.body.appendChild(newOverlay);
+  }
+  
+  sidebar.classList.toggle('open');
+  document.querySelector('.sidebar-overlay').classList.toggle('show');
+}
+
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  const overlay = document.querySelector('.sidebar-overlay');
+  if (overlay) {
+    overlay.classList.remove('show');
+  }
+}
+
+function initNavigation() {
+  // Add click handlers for menu items
+  document.querySelectorAll('.menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const sectionId = item.dataset.section;
+      switchSection(sectionId);
+    });
+  });
+  
+  // Add click handler for mobile menu toggle
+  const menuToggle = document.getElementById('menu-toggle');
+  if (menuToggle) {
+    menuToggle.addEventListener('click', toggleMobileSidebar);
+  }
+  
+  // Initialize with the Bridge section active
+  switchSection('bridge');
+}
+
+// Node name editing functions
+function startEditingNodeName(nameElement) {
+  const container = nameElement.closest('.node-name-container');
+  const input = container.querySelector('.node-name-input');
+  const editButtons = container.querySelector('.edit-buttons');
+  
+  // Hide the name span and show input + buttons
+  nameElement.style.display = 'none';
+  input.style.display = 'inline-block';
+  editButtons.style.display = 'flex';
+  
+  // Focus and select the input text
+  input.focus();
+  input.select();
+  
+  // Add keydown handler for Enter/Escape
+  input.addEventListener('keydown', handleEditKeydown);
+}
+
+function handleEditKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    acceptNameEdit(e.target);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    discardNameEdit(e.target);
+  }
+}
+
+function acceptNameEdit(input) {
+  const container = input.closest('.node-name-container');
+  const nameElement = container.querySelector('.node-name');
+  const editButtons = container.querySelector('.edit-buttons');
+  const nodeEl = container.closest('.node');
+  const uuid = nodeEl.dataset.uuid;
+  const newName = input.value.trim();
+  
+  if (!newName) {
+    showToast('Please enter a name', 'warning');
+    return;
+  }
+  
+  // Disable buttons during API call
+  const acceptBtn = container.querySelector('.accept-btn');
+  const discardBtn = container.querySelector('.discard-btn');
+  acceptBtn.disabled = true;
+  discardBtn.disabled = true;
+  acceptBtn.textContent = '⏳';
+  
+  // Make API call to rename node
+  fetch("/node/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uuid, name: newName })
+  }).then(res => {
+    if (res.ok) {
+      // Update the display name and original name
+      nameElement.textContent = newName;
+      nameElement.dataset.originalName = newName;
+      finishEditing(container, false);
+      showToast('Node renamed successfully', 'success');
+    } else {
+      showToast('Failed to rename node', 'error');
+      finishEditing(container, true);
+    }
+  }).catch(err => {
+    showToast('Network error renaming node', 'error');
+    finishEditing(container, true);
+  });
+}
+
+function discardNameEdit(input) {
+  const container = input.closest('.node-name-container');
+  finishEditing(container, true);
+}
+
+function finishEditing(container, restore) {
+  const nameElement = container.querySelector('.node-name');
+  const input = container.querySelector('.node-name-input');
+  const editButtons = container.querySelector('.edit-buttons');
+  const acceptBtn = container.querySelector('.accept-btn');
+  const discardBtn = container.querySelector('.discard-btn');
+  
+  if (restore) {
+    // Restore original value
+    const originalName = nameElement.dataset.originalName;
+    input.value = originalName;
+  }
+  
+  // Show name span, hide input and buttons
+  nameElement.style.display = 'inline';
+  input.style.display = 'none';
+  editButtons.style.display = 'none';
+  
+  // Reset buttons
+  acceptBtn.disabled = false;
+  discardBtn.disabled = false;
+  acceptBtn.textContent = '✓';
+  
+  // Remove keydown handler
+  input.removeEventListener('keydown', handleEditKeydown);
+}
 
 // Utility functions
 function showToast(message, type = 'info') {
   console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+function formatUptime(uptimeSeconds) {
+  const days = Math.floor(uptimeSeconds / (24 * 3600));
+  const hours = Math.floor((uptimeSeconds % (24 * 3600)) / 3600);
+  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+  
+  return `${days.toString().padStart(2, '0')}d ${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m`;
+}
+
+function updateBridgeStatus(systemData) {
+  // Update connection status to green when we successfully get data
+  const connectionStatus = document.getElementById('connection-status');
+  if (connectionStatus) {
+    connectionStatus.style.color = 'var(--success)';
+  }
+  
+  // Update uptime
+  if (systemData.uptime !== undefined) {
+    const uptimeElement = document.getElementById('bridge-uptime');
+    if (uptimeElement) {
+      const uptimeSeconds = Math.floor(systemData.uptime / 1000000); // Convert microseconds to seconds
+      uptimeElement.textContent = formatUptime(uptimeSeconds);
+    }
+  } else {
+    // Fallback if uptime is not available
+    const uptimeElement = document.getElementById('bridge-uptime');
+    if (uptimeElement && uptimeElement.textContent === '00d 00h 00m') {
+      uptimeElement.textContent = '--d --h --m';
+    }
+  }
+  
+  // Update memory
+  if (systemData.memory) {
+    const headerMemoryElement = document.getElementById('header-memory');
+    if (headerMemoryElement) {
+      const freeMemoryKB = Math.round(systemData.memory.free / 1024);
+      headerMemoryElement.textContent = `${freeMemoryKB} KB`;
+    }
+  }
 }
 
 function updateNodeCount(count) {
@@ -309,34 +526,32 @@ function createNodeElement(node) {
   
   el.innerHTML = `
     <div class="node-header">
-      <span class="node-name">${node.name}</span>
+      <div class="node-name-container">
+        <span class="node-name editable" data-original-name="${node.name}">${node.name}</span>
+        <input type="text" class="node-name-input" value="${node.name}" style="display: none;">
+        <div class="edit-buttons" style="display: none;">
+          <button class="btn btn-primary btn-small accept-btn" title="Accept">✓</button>
+          <button class="btn btn-secondary btn-small discard-btn" title="Discard">✕</button>
+        </div>
+      </div>
       <span class="node-status ${node.unicast ? 'online' : 'offline'}">
         ${node.unicast ? 'Online' : 'Offline'}
       </span>
     </div>
     
-    <div class="node-info">
-      <div class="info-item">
-        <span class="info-label">UUID</span>
+    <div class="node-info-grid">
+      <div class="info-row">
+        <span class="info-label">UUID:</span>
         <span class="info-value">${node.uuid}</span>
       </div>
-    </div>
-    <div class="node-info">
-      <div class="info-item">
-        <span class="info-label">Address</span>
+      <div class="info-row">
+        <span class="info-label">Address:</span>
         <span class="info-value">${node.unicast || 'Not assigned'}</span>
       </div>
-    </div>
-    ${node.company ? `<div class="node-info">
-      <div class="info-item">
-        <span class="info-label">Manufacturer</span>
+      ${node.company ? `<div class="info-row">
+        <span class="info-label">Manufacturer:</span>
         <span class="info-value">${node.company}</span>
-      </div>
-    </div>` : ''}
-    
-    <div class="rename-section">
-      <input type="text" class="name-input" placeholder="New name" value="">
-      <button class="btn btn-secondary btn-small rename-btn">Rename</button>
+      </div>` : ''}
     </div>
     
     <div class="lightness-control">
@@ -479,11 +694,76 @@ window.addEventListener('beforeunload', function() {
   }
 });
 
+// WiFi info functions
+function loadWifiInfo() {
+  fetch("/api/wifi_info")
+    .then(res => res.json())
+    .then(data => {
+      updateWifiStatus(data);
+    })
+    .catch(err => {
+      console.error('Failed to load WiFi info:', err);
+      // Show offline status if WiFi info fails
+      const wifiState = document.getElementById('wifi-state');
+      if (wifiState) {
+        wifiState.textContent = 'Error';
+        wifiState.className = 'status-value network_error';
+      }
+    });
+}
+
+function updateWifiStatus(wifiData) {
+  // Update status display
+  const wifiState = document.getElementById('wifi-state');
+  if (wifiState) {
+    wifiState.textContent = capitalizeFirst(wifiData.status || 'Unknown');
+    wifiState.className = `status-value ${wifiData.status || 'unknown'}`;
+  }
+  
+  // Update SSID
+  const sssidElement = document.getElementById('wifi-ssid');
+  if (sssidElement) {
+    sssidElement.textContent = wifiData.ssid || '--';
+  }
+  
+  // Update IP Address
+  const ipElement = document.getElementById('wifi-ip');
+  if (ipElement) {
+    ipElement.textContent = wifiData.ip || '--';
+  }
+  
+  // Update Subnet Mask
+  const netmaskElement = document.getElementById('wifi-netmask');
+  if (netmaskElement) {
+    netmaskElement.textContent = wifiData.netmask || '--';
+  }
+  
+  // Update Gateway
+  const gatewayElement = document.getElementById('wifi-gateway');
+  if (gatewayElement) {
+    gatewayElement.textContent = wifiData.gateway || '--';
+  }
+  
+  // Update MAC Address
+  const macElement = document.getElementById('wifi-mac');
+  if (macElement) {
+    macElement.textContent = wifiData.mac || '--';
+  }
+}
+
+function capitalizeFirst(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 // System info functions
 function loadSystemInfo() {
   fetch("/api/system_info")
     .then(res => res.json())
     .then(data => {
+      // Update bridge status in header
+      updateBridgeStatus(data);
+      
+      // Update detailed memory info in Bridge section
       if (data.memory) {
         const freeMemoryKB = Math.round(data.memory.free / 1024);
         const totalMemoryKB = Math.round(data.memory.total / 1024);
@@ -497,6 +777,11 @@ function loadSystemInfo() {
     })
     .catch(err => {
       console.error('Failed to load system info:', err);
+      // Show offline status if system info fails
+      const connectionStatus = document.getElementById('connection-status');
+      if (connectionStatus) {
+        connectionStatus.style.color = 'var(--danger)';
+      }
     });
 }
 
@@ -635,6 +920,12 @@ function testConnection() {
 
 // Main initialization
 document.addEventListener("DOMContentLoaded", function () {
+  // Initialize theme
+  initializeTheme();
+  
+  // Initialize navigation
+  initNavigation();
+  
   // Initialize firmware upload
   initFirmwareUpload();
   
@@ -644,11 +935,17 @@ document.addEventListener("DOMContentLoaded", function () {
   // Load system information
   loadSystemInfo();
   
+  // Load WiFi information
+  loadWifiInfo();
+  
   // Load MQTT status
   loadMqttStatus();
   
-  // Refresh system info every 30 seconds
-  setInterval(loadSystemInfo, 30000);
+  // Refresh system info every 5 seconds for real-time uptime display
+  setInterval(loadSystemInfo, 5000);
+  
+  // Refresh WiFi info every 15 seconds
+  setInterval(loadWifiInfo, 15000);
   
   // Refresh MQTT status every 10 seconds
   setInterval(loadMqttStatus, 10000);
@@ -712,39 +1009,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
 // Event handlers
 document.addEventListener("click", function (e) {
-  if (e.target.classList.contains("rename-btn")) {
-    const nodeEl = e.target.closest(".node");
-    const uuid = nodeEl.dataset.uuid;
-    const nameInput = nodeEl.querySelector(".name-input");
-    const newName = nameInput.value.trim();
-    
-    if (!newName) {
-      showToast('Please enter a name', 'warning');
-      return;
-    }
-
-    const button = e.target;
-    button.disabled = true;
-    button.textContent = 'Renaming...';
-
-    fetch("/node/rename", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uuid, name: newName })
-    }).then(res => {
-      if (res.ok) {
-        nodeEl.querySelector(".node-name").textContent = newName;
-        nameInput.value = '';
-        showToast('Node renamed successfully', 'success');
-      } else {
-        showToast('Failed to rename node', 'error');
-      }
-    }).catch(err => {
-      showToast('Network error renaming node', 'error');
-    }).finally(() => {
-      button.disabled = false;
-      button.textContent = 'Rename';
-    });
+  // Handle node name editing
+  if (e.target.classList.contains("node-name") && e.target.classList.contains("editable")) {
+    startEditingNodeName(e.target);
+  }
+  
+  // Handle accept button
+  if (e.target.classList.contains("accept-btn")) {
+    const input = e.target.closest('.node-name-container').querySelector('.node-name-input');
+    acceptNameEdit(input);
+  }
+  
+  // Handle discard button
+  if (e.target.classList.contains("discard-btn")) {
+    const input = e.target.closest('.node-name-container').querySelector('.node-name-input');
+    discardNameEdit(input);
   }
 });
 
@@ -1012,3 +1291,76 @@ function formatFileSize(bytes) {
 }
 
 // Firmware upload initialization moved to main DOMContentLoaded handler above
+
+// Theme Toggle Functions
+function toggleTheme() {
+  const html = document.documentElement;
+  const currentTheme = html.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  
+  // Apply theme
+  if (newTheme === 'dark') {
+    html.setAttribute('data-theme', 'dark');
+  } else {
+    html.removeAttribute('data-theme');
+  }
+  
+  // Update icon
+  updateThemeIcon(newTheme);
+  
+  // Save preference
+  localStorage.setItem('theme', newTheme);
+}
+
+function updateThemeIcon(theme) {
+  const icon = document.getElementById('theme-icon');
+  if (icon) {
+    icon.textContent = theme === 'dark' ? '🌙' : '☀️';
+  }
+}
+
+function initializeTheme() {
+  // Check for saved theme preference or default to 'light'
+  const savedTheme = localStorage.getItem('theme') || 'light';
+  
+  // Apply saved theme
+  const html = document.documentElement;
+  if (savedTheme === 'dark') {
+    html.setAttribute('data-theme', 'dark');
+  } else {
+    html.removeAttribute('data-theme');
+  }
+  
+  // Update icon
+  updateThemeIcon(savedTheme);
+}
+
+// WiFi Reset Function
+function resetWifi() {
+  if (confirm('Are you sure you want to reset WiFi credentials? The device will restart and enter configuration mode.')) {
+    // Show loading state
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<span class="icon">⏳</span> Resetting...';
+    button.disabled = true;
+    
+    fetch('/api/reset_wifi', {
+      method: 'POST'
+    })
+    .then(response => {
+      if (response.ok) {
+        alert('WiFi credentials have been reset. The device will restart in configuration mode.');
+      } else {
+        throw new Error('Failed to reset WiFi');
+      }
+    })
+    .catch(error => {
+      console.error('Error resetting WiFi:', error);
+      alert('Failed to reset WiFi credentials. Please try again.');
+      
+      // Restore button state
+      button.innerHTML = originalText;
+      button.disabled = false;
+    });
+  }
+}
