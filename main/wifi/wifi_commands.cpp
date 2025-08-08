@@ -10,18 +10,21 @@
 #include "debug/debug_commands_registry.h"
 #include "wifi_provisioning.h"
 
-static const char* TAG = "wifi_commands";
+static const char *TAG = "wifi_commands";
 
 static int wifi_clear_cmd(int argc, char **argv)
 {
     LOG_INFO(TAG, "Clearing WiFi credentials...");
     esp_err_t err = wifi_provisioning_clear_credentials();
-    if (err == ESP_OK) {
+    if (err == ESP_OK)
+    {
         LOG_INFO(TAG, "WiFi credentials cleared successfully");
         LOG_INFO(TAG, "Restarting device to enter captive portal mode...");
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
-    } else {
+    }
+    else
+    {
         LOG_ERROR(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
     }
     return 0;
@@ -29,31 +32,50 @@ static int wifi_clear_cmd(int argc, char **argv)
 
 static int wifi_status_cmd(int argc, char **argv)
 {
-    if (wifi_provisioning_is_configured()) {
+    if (wifi_provisioning_is_configured())
+    {
         char ssid[32] = {0};
         char password[64] = {0};
         esp_err_t err = wifi_provisioning_get_credentials(ssid, password, sizeof(ssid), sizeof(password));
-        if (err == ESP_OK) {
+        if (err == ESP_OK)
+        {
             LOG_INFO(TAG, "WiFi configured - SSID: %s", ssid);
-        } else {
+        }
+        else
+        {
             LOG_INFO(TAG, "WiFi configured but failed to read credentials");
         }
-    } else {
+    }
+    else
+    {
         LOG_INFO(TAG, "WiFi not configured - will start captive portal on boot");
     }
-    
+
     wifi_provisioning_state_t state = wifi_provisioning_get_state();
-    const char* state_str;
-    switch (state) {
-        case WIFI_PROV_STATE_IDLE: state_str = "IDLE"; break;
-        case WIFI_PROV_STATE_AP_STARTED: state_str = "AP_STARTED"; break;
-        case WIFI_PROV_STATE_STA_CONNECTING: state_str = "STA_CONNECTING"; break;
-        case WIFI_PROV_STATE_STA_CONNECTED: state_str = "STA_CONNECTED"; break;
-        case WIFI_PROV_STATE_STA_FAILED: state_str = "STA_FAILED"; break;
-        default: state_str = "UNKNOWN"; break;
+    const char *state_str;
+    switch (state)
+    {
+    case WIFI_PROV_STATE_IDLE:
+        state_str = "IDLE";
+        break;
+    case WIFI_PROV_STATE_AP_STARTED:
+        state_str = "AP_STARTED";
+        break;
+    case WIFI_PROV_STATE_STA_CONNECTING:
+        state_str = "STA_CONNECTING";
+        break;
+    case WIFI_PROV_STATE_STA_CONNECTED:
+        state_str = "STA_CONNECTED";
+        break;
+    case WIFI_PROV_STATE_STA_FAILED:
+        state_str = "STA_FAILED";
+        break;
+    default:
+        state_str = "UNKNOWN";
+        break;
     }
     LOG_INFO(TAG, "Current state: %s", state_str);
-    
+
     return 0;
 }
 

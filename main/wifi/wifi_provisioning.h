@@ -6,7 +6,8 @@
 #include "esp_http_server.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #define CAPTIVE_PORTAL_SSID_PREFIX "ESP32-Setup-"
@@ -20,40 +21,42 @@ extern "C" {
 #define WIFI_PASSWORD_KEY "password"
 #define WIFI_CONFIGURED_KEY "configured"
 
-typedef enum {
-    WIFI_PROV_STATE_IDLE,
-    WIFI_PROV_STATE_AP_STARTED,
-    WIFI_PROV_STATE_STA_CONNECTING,
-    WIFI_PROV_STATE_STA_CONNECTED,
-    WIFI_PROV_STATE_STA_FAILED
-} wifi_provisioning_state_t;
+    typedef enum
+    {
+        WIFI_PROV_STATE_IDLE,
+        WIFI_PROV_STATE_AP_STARTED,
+        WIFI_PROV_STATE_STA_CONNECTING,
+        WIFI_PROV_STATE_STA_CONNECTED,
+        WIFI_PROV_STATE_STA_FAILED
+    } wifi_provisioning_state_t;
 
-typedef struct {
-    char ssid[32];
-    int8_t rssi;
-    wifi_auth_mode_t authmode;
-} wifi_ap_record_extended_t;
+    typedef struct
+    {
+        char ssid[32];
+        int8_t rssi;
+        wifi_auth_mode_t authmode;
+    } wifi_ap_record_extended_t;
 
-typedef void (*wifi_provisioning_event_cb_t)(wifi_provisioning_state_t state, void* event_data);
+    typedef void (*wifi_provisioning_event_cb_t)(wifi_provisioning_state_t state, void *event_data);
 
-char* get_ip_address();
+    char *get_ip_address();
 
-esp_err_t wifi_provisioning_init(void);
-esp_err_t wifi_provisioning_start_captive_portal(void);
-esp_err_t wifi_provisioning_stop_captive_portal(void);
-esp_err_t wifi_provisioning_set_credentials(const char* ssid, const char* password);
-esp_err_t wifi_provisioning_get_credentials(char* ssid, char* password, size_t ssid_len, size_t password_len);
-bool wifi_provisioning_is_configured(void);
-esp_err_t wifi_provisioning_clear_credentials(void);
-esp_err_t wifi_provisioning_scan_start(void);
-esp_err_t wifi_provisioning_get_scan_results(wifi_ap_record_extended_t** ap_records, uint16_t* count);
-wifi_provisioning_state_t wifi_provisioning_get_state(void);
-esp_err_t wifi_provisioning_set_event_callback(wifi_provisioning_event_cb_t callback);
+    esp_err_t wifi_provisioning_init(void);
+    esp_err_t wifi_provisioning_start_captive_portal(void);
+    esp_err_t wifi_provisioning_stop_captive_portal(void);
+    esp_err_t wifi_provisioning_set_credentials(const char *ssid, const char *password);
+    esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t ssid_len, size_t password_len);
+    bool wifi_provisioning_is_configured(void);
+    esp_err_t wifi_provisioning_clear_credentials(void);
+    esp_err_t wifi_provisioning_scan_start(void);
+    esp_err_t wifi_provisioning_get_scan_results(wifi_ap_record_extended_t **ap_records, uint16_t *count);
+    wifi_provisioning_state_t wifi_provisioning_get_state(void);
+    esp_err_t wifi_provisioning_set_event_callback(wifi_provisioning_event_cb_t callback);
 
-esp_err_t wifi_provisioning_try_connect_sta(void);
-bool wifi_provisioning_should_start_captive_portal(void);
+    esp_err_t wifi_provisioning_try_connect_sta(void);
+    bool wifi_provisioning_should_start_captive_portal(void);
 
-void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server);
+    void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server);
 
 #ifdef __cplusplus
 }

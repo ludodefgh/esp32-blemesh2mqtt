@@ -61,7 +61,7 @@ extern struct example_info_store store;
 void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
-    for (auto& node : tracked_nodes)
+    for (auto &node : tracked_nodes)
     {
         if (node && node->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
         {
@@ -83,7 +83,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const Uuid128
 std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const Uuid128 &uuid)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
-    
+
     // Check if node already exists
     auto it = uuid_index.find(uuid);
     if (it != uuid_index.end())
@@ -94,7 +94,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const Uu
     // Create new node
     auto node = std::make_shared<bm2mqtt_node_info>();
     node->uuid = uuid;
-    
+
     // Add to both containers
     tracked_nodes.push_back(node);
     uuid_index[uuid] = node;
@@ -137,22 +137,22 @@ void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
 {
     LOG_WARN(TAG, "Removing node with UUID %s", uuid.to_string().c_str());
     std::lock_guard<std::mutex> lock(tn_mutex);
-    
+
     // Remove from UUID index first
     auto uuid_it = uuid_index.find(uuid);
     if (uuid_it != uuid_index.end())
     {
         LOG_WARN(TAG, "Remove unprovisioned device 0x%04x", uuid_it->second->unicast);
-        
+
         // Remove from vector
         tracked_nodes.erase(
             std::remove_if(tracked_nodes.begin(), tracked_nodes.end(),
-                [&uuid](const std::shared_ptr<bm2mqtt_node_info>& node) {
-                    return node && node->uuid == uuid;
-                }),
-            tracked_nodes.end()
-        );
-        
+                           [&uuid](const std::shared_ptr<bm2mqtt_node_info> &node)
+                           {
+                               return node && node->uuid == uuid;
+                           }),
+            tracked_nodes.end());
+
         // Remove from index
         uuid_index.erase(uuid_it);
     }
@@ -204,7 +204,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(uint16_t unic
     }
 
     std::lock_guard<std::mutex> lock(tn_mutex);
-    for (auto& node : tracked_nodes)
+    for (auto &node : tracked_nodes)
     {
         if (node && node->unicast <= unicast &&
             node->unicast + node->elem_num > unicast)
@@ -222,15 +222,17 @@ void ble2mqtt_node_manager::print_registered_nodes()
     LOG_INFO(TAG, "Provisioned nodes: %d", tracked_nodes.size());
     for (const auto &node : tracked_nodes)
     {
-        if (!node) continue;
-        
+        if (!node)
+            continue;
+
         // Get the node name from the provisioner
         uint16_t node_index = get_node_index(node->uuid); // Ensure node_index is set
-        const char* node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
-        if (!node_name) {
+        const char *node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
+        if (!node_name)
+        {
             node_name = "Unknown";
         }
-        
+
         LOG_INFO(TAG, "==device uuid: %s", bt_hex(node->uuid.raw(), 16));
         LOG_INFO(TAG, "  Node Name: %s", node_name);
         LOG_INFO(TAG, "  Primary Address: 0x%04X", node->unicast);
@@ -238,8 +240,8 @@ void ble2mqtt_node_manager::print_registered_nodes()
         LOG_INFO(TAG, "  On/Off State: %d", node->onoff);
         LOG_INFO(TAG, "  Level: %d", node->level);
         LOG_INFO(TAG, "  HSL: H=%d S=%d L=%d", node->hsl_h, node->hsl_s, node->hsl_l);
-        LOG_INFO(TAG, "  HSL Ranges - Hue: %d-%d, Saturation: %d-%d, Lightness: %d-%d", 
-                 node->min_hue, node->max_hue, node->min_saturation, node->max_saturation, 
+        LOG_INFO(TAG, "  HSL Ranges - Hue: %d-%d, Saturation: %d-%d, Lightness: %d-%d",
+                 node->min_hue, node->max_hue, node->min_saturation, node->max_saturation,
                  node->min_lightness, node->max_lightness);
         LOG_INFO(TAG, "  Temperature: Current=%d, Range=%d-%d", node->curr_temp, node->min_temp, node->max_temp);
         LOG_INFO(TAG, "  Color Mode: %s", get_color_mode_string(node->color_mode));
@@ -262,19 +264,19 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
 
     {
         std::lock_guard<std::mutex> lock(tn_mutex);
-        
+
         // Convert shared_ptr vector to raw data for NVS storage
         std::vector<bm2mqtt_node_info> raw_nodes;
         raw_nodes.reserve(tracked_nodes.size());
-        
-        for (const auto& node : tracked_nodes)
+
+        for (const auto &node : tracked_nodes)
         {
             if (node)
             {
                 raw_nodes.push_back(*node);
             }
         }
-        
+
         size_t total_size = raw_nodes.size() * sizeof(bm2mqtt_node_info);
         err = nvs_set_blob(handle, "nodes", raw_nodes.data(), total_size);
         if (err == ESP_OK)
@@ -290,59 +292,59 @@ esp_err_t ble2mqtt_node_manager::save_node_info_vector()
     nvs_close(handle);
     return err;
 }
-template<int StructVers>
+template <int StructVers>
 struct node_info_version_type
 {
 };
 
-template<>
+template <>
 struct node_info_version_type<NODE_INFO_SCHEMA_VERSION>
 {
     using type = bm2mqtt_node_info;
 };
 
-template<>
+template <>
 struct node_info_version_type<1>
 {
     using type = bm2mqtt_node_info_v1;
 };
-template<>
+template <>
 struct node_info_version_type<2>
 {
     using type = bm2mqtt_node_info_v2;
 };
 
 template <uint32_t Start>
-auto Converter_worker( std::vector<typename node_info_version_type<Start>::type>&& from)
+auto Converter_worker(std::vector<typename node_info_version_type<Start>::type> &&from)
 {
-        LOG_INFO(TAG, "Detected old node info schema version %d", Start);
-        using node_info_version_to = node_info_version_type<Start+1>::type;
+    LOG_INFO(TAG, "Detected old node info schema version %d", Start);
+    using node_info_version_to = node_info_version_type<Start + 1>::type;
 
-        std::vector<node_info_version_to> tracked_nodes_to;
-        tracked_nodes_to.resize(from.size());
-        
-        for (size_t i = 0; i < from.size(); i++)
-        {
-            tracked_nodes_to[i].convert_from_previous(from[i]);
-            LOG_INFO(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
-                     i, from[i].uuid.to_string().c_str(),
-                     from[i].unicast, from[i].elem_num);
-        }
-        
-        if constexpr(std::is_same_v<typename node_info_version_type<NODE_INFO_SCHEMA_VERSION>::type, node_info_version_to>)
-        {
-            // If we reached the end of the conversion chain, return the final vector
-            return tracked_nodes_to;
-        }
-        else
-        {
-            // Otherwise, continue converting to the next version
-            return Converter_worker<Start + 1>(std::move(tracked_nodes_to));
-        }
+    std::vector<node_info_version_to> tracked_nodes_to;
+    tracked_nodes_to.resize(from.size());
+
+    for (size_t i = 0; i < from.size(); i++)
+    {
+        tracked_nodes_to[i].convert_from_previous(from[i]);
+        LOG_INFO(TAG, "Converted node %zu: UUID=%s, Unicast=0x%04X, ElemNum=%d",
+                 i, from[i].uuid.to_string().c_str(),
+                 from[i].unicast, from[i].elem_num);
+    }
+
+    if constexpr (std::is_same_v<typename node_info_version_type<NODE_INFO_SCHEMA_VERSION>::type, node_info_version_to>)
+    {
+        // If we reached the end of the conversion chain, return the final vector
+        return tracked_nodes_to;
+    }
+    else
+    {
+        // Otherwise, continue converting to the next version
+        return Converter_worker<Start + 1>(std::move(tracked_nodes_to));
+    }
 }
 
 template <uint32_t Start>
-auto Converter( nvs_handle_t& handle, size_t& size)
+auto Converter(nvs_handle_t &handle, size_t &size)
 {
     LOG_INFO(TAG, "Loading node info schema version %d. Current version %d", Start, NODE_INFO_SCHEMA_VERSION);
     using node_info_version_from = node_info_version_type<Start>::type;
@@ -354,7 +356,7 @@ auto Converter( nvs_handle_t& handle, size_t& size)
     if (count == 0 || size % sizeof(node_info_version_from) != 0)
     {
         LOG_ERROR(TAG, "Invalid data size for version %d: %zu bytes", Start, size);
-        return loaded_nodes;// Return empty vector on error
+        return loaded_nodes; // Return empty vector on error
     }
 
     std::vector<node_info_version_from> tracked_nodes_from(count);
@@ -370,7 +372,7 @@ auto Converter( nvs_handle_t& handle, size_t& size)
     }
 
     std::vector<current_node_info_type_t> raw_nodes;
-    if constexpr(std::is_same_v<current_node_info_type_t, node_info_version_from>)
+    if constexpr (std::is_same_v<current_node_info_type_t, node_info_version_from>)
     {
         raw_nodes = tracked_nodes_from;
     }
@@ -378,7 +380,7 @@ auto Converter( nvs_handle_t& handle, size_t& size)
     {
         raw_nodes = Converter_worker<Start>(std::move(tracked_nodes_from));
     }
-    
+
     loaded_nodes.reserve(raw_nodes.size());
     for (const auto &raw_node : raw_nodes)
     {
@@ -501,7 +503,7 @@ void ble2mqtt_node_manager::initialize()
     load_node_info_vector();
 }
 
-void ble2mqtt_node_manager::set_node_name(const Uuid128& uuid, const char* name)
+void ble2mqtt_node_manager::set_node_name(const Uuid128 &uuid, const char *name)
 {
     if (auto node = get_node(uuid))
     {
@@ -509,7 +511,8 @@ void ble2mqtt_node_manager::set_node_name(const Uuid128& uuid, const char* name)
         esp_ble_mesh_provisioner_set_node_name(node_index, name);
         mark_node_info_dirty();
     }
-    else{
+    else
+    {
         LOG_WARN(TAG, "Node with UUID %s not found", uuid.to_string().c_str());
     }
 }

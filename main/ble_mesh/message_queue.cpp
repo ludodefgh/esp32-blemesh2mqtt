@@ -29,7 +29,7 @@ void message_queue::enqueue(const message_payload &msg)
         try_send_next();
     }
 }
-void message_queue::set_node(std::shared_ptr<bm2mqtt_node_info>& in_node)
+void message_queue::set_node(std::shared_ptr<bm2mqtt_node_info> &in_node)
 {
     if (node == nullptr)
     {
@@ -59,7 +59,7 @@ void message_queue::try_send_next()
         try_send_next();
     }
 
-    LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u",msg.opcode, msg.retries_left);
+    LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u", msg.opcode, msg.retries_left);
 }
 
 void message_queue::handle_ack(uint32_t opcode)
@@ -143,28 +143,29 @@ void message_queue::on_failsafe_trigger()
 }
 void message_queue_manager::enqueue(std::shared_ptr<bm2mqtt_node_info> node, const message_payload &msg)
 {
-    if (!node) return;
-    
+    if (!node)
+        return;
+
     LOG_DEBUG(TAG, "Enqueueing message for node 0x%04X, opcode 0x%08X", node->unicast, msg.opcode);
     auto it = node_queues.find(node);
     if (it == node_queues.end())
     {
-       // Set the node in the message queue
-        auto& new_queue = node_queues[node];
-        new_queue.set_node(node); 
+        // Set the node in the message queue
+        auto &new_queue = node_queues[node];
+        new_queue.set_node(node);
         new_queue.enqueue(msg);
     }
     else
     {
         it->second.enqueue(msg);
     }
-    
 }
 
 void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
 {
-    if (!node) return;
-    
+    if (!node)
+        return;
+
     LOG_INFO(TAG, "Ack for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
@@ -186,8 +187,9 @@ void message_queue_manager::handle_ack(std::shared_ptr<bm2mqtt_node_info> node, 
 
 void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> node, uint32_t opcode)
 {
-    if (!node) return;
-    
+    if (!node)
+        return;
+
     LOG_WARN(TAG, "Timeout for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
     auto it = node_queues.find(node);
     if (it != node_queues.end())
@@ -209,8 +211,9 @@ void message_queue_manager::handle_timeout(std::shared_ptr<bm2mqtt_node_info> no
 
 void message_queue_manager::clear_queue(std::shared_ptr<bm2mqtt_node_info> node)
 {
-    if (!node) return;
-    
+    if (!node)
+        return;
+
     node_queues.erase(node);
 }
 

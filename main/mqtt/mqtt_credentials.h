@@ -3,7 +3,8 @@
 #include <string>
 #include "esp_err.h"
 
-enum class mqtt_connection_state_t : uint8_t {
+enum class mqtt_connection_state_t : uint8_t
+{
     UNCONFIGURED = 0,
     CONFIGURED,
     CONNECTING,
@@ -14,20 +15,23 @@ enum class mqtt_connection_state_t : uint8_t {
     ERROR_TIMEOUT
 };
 
-struct mqtt_credentials_t {
+struct mqtt_credentials_t
+{
     std::string broker_host;
     uint16_t broker_port;
     std::string username;
     std::string password;
     bool use_ssl;
-    
+
     mqtt_credentials_t() : broker_port(1883), use_ssl(false) {}
-    
-    bool is_valid() const {
+
+    bool is_valid() const
+    {
         return !broker_host.empty() && !username.empty() && !password.empty();
     }
-    
-    void clear() {
+
+    void clear()
+    {
         broker_host.clear();
         username.clear();
         password.clear();
@@ -36,56 +40,58 @@ struct mqtt_credentials_t {
     }
 };
 
-class MqttCredentialManager {
+class MqttCredentialManager
+{
 public:
-    static MqttCredentialManager& instance();
-    
+    static MqttCredentialManager &instance();
+
     // Credential management
     esp_err_t load_credentials();
-    esp_err_t save_credentials(const mqtt_credentials_t& creds);
+    esp_err_t save_credentials(const mqtt_credentials_t &creds);
     esp_err_t clear_credentials();
-    
+
     // Getters
-    const mqtt_credentials_t& get_credentials() const { return credentials_; }
+    const mqtt_credentials_t &get_credentials() const { return credentials_; }
     mqtt_connection_state_t get_connection_state() const { return connection_state_; }
     std::string get_connection_state_string() const;
     std::string get_last_error() const { return last_error_; }
-    
+
     // State management
     void set_connection_state(mqtt_connection_state_t state);
-    void set_last_error(const std::string& error);
-    
+    void set_last_error(const std::string &error);
+
     // Validation
-    bool validate_credentials(const mqtt_credentials_t& creds, std::string& error_msg) const;
+    bool validate_credentials(const mqtt_credentials_t &creds, std::string &error_msg) const;
     bool has_valid_credentials() const;
-    
+
     // Security
     void clear_sensitive_memory();
-    
+
 private:
     MqttCredentialManager() = default;
     ~MqttCredentialManager() { clear_sensitive_memory(); }
-    
+
     // Non-copyable
-    MqttCredentialManager(const MqttCredentialManager&) = delete;
-    MqttCredentialManager& operator=(const MqttCredentialManager&) = delete;
-    
-    esp_err_t encrypt_and_store(const std::string& key, const std::string& value);
-    esp_err_t decrypt_and_load(const std::string& key, std::string& value);
-    
+    MqttCredentialManager(const MqttCredentialManager &) = delete;
+    MqttCredentialManager &operator=(const MqttCredentialManager &) = delete;
+
+    esp_err_t encrypt_and_store(const std::string &key, const std::string &value);
+    esp_err_t decrypt_and_load(const std::string &key, std::string &value);
+
     mqtt_credentials_t credentials_;
     mqtt_connection_state_t connection_state_ = mqtt_connection_state_t::UNCONFIGURED;
     std::string last_error_;
-    
-    static constexpr const char* NVS_NAMESPACE = "mqtt_creds";
-    static constexpr const char* KEY_BROKER_HOST = "broker_host";
-    static constexpr const char* KEY_BROKER_PORT = "broker_port";
-    static constexpr const char* KEY_USERNAME = "username";
-    static constexpr const char* KEY_PASSWORD = "password";
-    static constexpr const char* KEY_USE_SSL = "use_ssl";
+
+    static constexpr const char *NVS_NAMESPACE = "mqtt_creds";
+    static constexpr const char *KEY_BROKER_HOST = "broker_host";
+    static constexpr const char *KEY_BROKER_PORT = "broker_port";
+    static constexpr const char *KEY_USERNAME = "username";
+    static constexpr const char *KEY_PASSWORD = "password";
+    static constexpr const char *KEY_USE_SSL = "use_ssl";
 };
 
 // Convenience function
-inline MqttCredentialManager& mqtt_credentials() {
+inline MqttCredentialManager &mqtt_credentials()
+{
     return MqttCredentialManager::instance();
 }

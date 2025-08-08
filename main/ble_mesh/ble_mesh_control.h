@@ -13,7 +13,6 @@ typedef enum
 
 long map(long x, long in_min, long in_max, long out_min, long out_max);
 
-
 esp_err_t ble_mesh_init(void);
 void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::shared_ptr<bm2mqtt_node_info> node);
 void refresh_all_nodes();
