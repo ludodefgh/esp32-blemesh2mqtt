@@ -413,7 +413,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
     return 0;
 }
 
-void RegisterBleMeshCommandsDebugCommands()
+void register_blemesh_action_commands()
 {
     /* Register commands */
 
@@ -489,4 +489,4 @@ void RegisterBleMeshCommandsDebugCommands()
     };
     ESP_ERROR_CHECK(register_console_command(&ble_mesh_ctl_temperature_set_cmd));
 }
-REGISTER_DEBUG_COMMAND(RegisterBleMeshCommandsDebugCommands);
+REGISTER_DEBUG_COMMAND(register_blemesh_action_commands);

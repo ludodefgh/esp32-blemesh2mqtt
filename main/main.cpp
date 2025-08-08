@@ -41,7 +41,7 @@ static int heap_size(int argc, char **argv)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma region Debug
 
-void RegisterDebugCommands()
+void register_debug_commands()
 {
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
@@ -62,7 +62,7 @@ void RegisterDebugCommands()
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
-REGISTER_DEBUG_COMMAND(RegisterDebugCommands);
+REGISTER_DEBUG_COMMAND(register_debug_commands);
 #pragma endregion Debug
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////

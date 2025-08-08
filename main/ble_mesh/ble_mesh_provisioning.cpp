@@ -536,7 +536,7 @@ int list_unprovisionned_devices(int argc, char **argv)
     return 0;
 }
 
-void RegisterProvisioningDebugCommands()
+void register_provisioning_commands()
 {
     /* Register commands */
 
@@ -586,4 +586,4 @@ void RegisterProvisioningDebugCommands()
     ESP_ERROR_CHECK(register_console_command(&provision_device_index_cmd));
 }
 
-REGISTER_DEBUG_COMMAND(RegisterProvisioningDebugCommands);
+REGISTER_DEBUG_COMMAND(register_provisioning_commands);
