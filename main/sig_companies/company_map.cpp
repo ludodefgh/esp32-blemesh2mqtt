@@ -169,7 +169,7 @@ static const char *linear_search_file(uint16_t company_id)
         }
 
         // Validate entry data
-        if (entry.name_len == 0 || entry.name_len > 255)
+        if (entry.name_len == 0)
         {
             LOG_ERROR(TAG, "Invalid name_len %d for entry %d (CID: 0x%04X) at file pos %ld",
                       entry.name_len, i, entry.company_id, ftell(company_file));
@@ -178,7 +178,7 @@ static const char *linear_search_file(uint16_t company_id)
         }
 
         // Read the name
-        size_t bytes_to_read = (entry.name_len < 511) ? entry.name_len : 511;
+        size_t bytes_to_read = entry.name_len;
         size_t name_bytes_read = fread(name_buffer, 1, bytes_to_read, company_file);
         if (name_bytes_read != bytes_to_read)
         {
