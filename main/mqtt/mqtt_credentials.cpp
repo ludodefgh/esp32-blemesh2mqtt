@@ -189,14 +189,14 @@ esp_err_t MqttCredentialManager::encrypt_and_store(const std::string &key, const
 
     // Encrypt the value
     std::string encrypted_value;
-    if (!CredentialEncryption::instance().is_initialized())
+    if (!credential_encryption::instance().is_initialized())
     {
         LOG_ERROR(TAG, "Encryption not initialized");
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t encrypt_err = CredentialEncryption::instance().encrypt_string(value, encrypted_value);
+    esp_err_t encrypt_err = credential_encryption::instance().encrypt_string(value, encrypted_value);
     if (encrypt_err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to encrypt %s: %s", key.c_str(), esp_err_to_name(encrypt_err));
@@ -256,7 +256,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string &key, std::s
 
     // Decrypt the value
     std::string decrypted_value;
-    if (!CredentialEncryption::instance().is_initialized())
+    if (!credential_encryption::instance().is_initialized())
     {
         LOG_ERROR(TAG, "Encryption not initialized");
         delete[] encrypted_buffer;
@@ -264,7 +264,7 @@ esp_err_t MqttCredentialManager::decrypt_and_load(const std::string &key, std::s
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t decrypt_err = CredentialEncryption::instance().decrypt_string(encrypted_buffer, decrypted_value);
+    esp_err_t decrypt_err = credential_encryption::instance().decrypt_string(encrypted_buffer, decrypted_value);
     if (decrypt_err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to decrypt %s: %s", key.c_str(), esp_err_to_name(decrypt_err));

@@ -178,8 +178,8 @@ esp_err_t node_provision_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    const Uuid128 uuid128{uuid};
-    provision_device(uuid128.raw());
+    const device_uuid128 uuid128{uuid};
+    ble_mesh_provision_device(uuid128.raw());
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -209,8 +209,8 @@ esp_err_t node_unprovision_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    const Uuid128 uuid128{uuid};
-    unprovision_device(uuid128);
+    const device_uuid128 uuid128{uuid};
+    ble_mesh_unprovision_device(uuid128);
 
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -240,7 +240,7 @@ esp_err_t node_send_mqtt_status_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    const Uuid128 uuid128{uuid};
+    const device_uuid128 uuid128{uuid};
     if (auto node_info = node_manager().get_node(uuid128))
     {
         mqtt_node_send_status(node_info);
@@ -274,7 +274,7 @@ esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    const Uuid128 uuid128{uuid};
+    const device_uuid128 uuid128{uuid};
     if (auto node_info = node_manager().get_node(uuid128))
     {
         mqtt_send_discovery(node_info);
@@ -337,7 +337,7 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
 
     // Optional: use node->unicast_addr or other data
     printf("Lightness for UUID: %s → %d\n", uuid_str, lightness);
-    const Uuid128 dev_uuid{uuid};
+    const device_uuid128 dev_uuid{uuid};
     ble_mesh_ctl_lightness_set(lightness, dev_uuid); // Extend this to accept node?
 
     httpd_resp_send(req, NULL, 0);
@@ -594,7 +594,7 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
 
         // Get company name from node manager
         const char *company_name = "Unknown";
-        if (auto node_info = node_manager().get_node(Uuid128{node->dev_uuid}))
+        if (auto node_info = node_manager().get_node(device_uuid128{node->dev_uuid}))
         {
             if (node_info->company_id != 0)
             {
@@ -839,7 +839,7 @@ esp_err_t rename_node_handler(httpd_req_t *req)
         }
     }
 
-    Uuid128 uuid{uuid_tmp};
+    device_uuid128 uuid{uuid_tmp};
 
     node_manager().set_node_name(uuid, name_json->valuestring);
     if (auto node = node_manager().get_node(uuid))

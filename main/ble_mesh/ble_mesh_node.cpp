@@ -36,12 +36,12 @@ const char *get_color_mode_string(color_mode_t mode)
     }
 }
 
-uint16_t get_node_index(Uuid128 uuid)
+uint16_t get_node_index(device_uuid128 uuid)
 {
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
-        if (node != nullptr && Uuid128(node->dev_uuid) == uuid)
+        if (node != nullptr && device_uuid128(node->dev_uuid) == uuid)
         {
             return i;
         }
@@ -56,7 +56,7 @@ ble2mqtt_node_manager &node_manager()
     return instance;
 }
 
-extern struct example_info_store store;
+extern struct mesh_network_info_store store;
 
 void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>)> func)
 {
@@ -70,7 +70,7 @@ void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2
     }
 }
 
-std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const Uuid128 &uuid)
+std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const device_uuid128 &uuid)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
     auto it = uuid_index.find(uuid);
@@ -80,7 +80,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const Uuid128
     }
     return nullptr;
 }
-std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const Uuid128 &uuid)
+std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const device_uuid128 &uuid)
 {
     std::lock_guard<std::mutex> lock(tn_mutex);
 
@@ -104,7 +104,7 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const Uu
 
 std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_or_create(const uint8_t uuid[16])
 {
-    const Uuid128 inuuid{uuid};
+    const device_uuid128 inuuid{uuid};
     return get_or_create(inuuid);
 }
 
@@ -126,14 +126,14 @@ std::shared_ptr<bm2mqtt_node_info> ble2mqtt_node_manager::get_node(const std::st
             const std::string inAddr {bt_hex(node->addr, BD_ADDR_LEN)};
             if (inAddr == mac)
             {
-                const Uuid128 uuid{node->dev_uuid};
+                const device_uuid128 uuid{node->dev_uuid};
                 result = get_node(uuid);
             } });
 
     return result;
 }
 
-void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
+void ble2mqtt_node_manager::remove_node(const device_uuid128 &uuid)
 {
     LOG_WARN(TAG, "Removing node with UUID %s", uuid.to_string().c_str());
     std::lock_guard<std::mutex> lock(tn_mutex);
@@ -160,7 +160,7 @@ void ble2mqtt_node_manager::remove_node(const Uuid128 &uuid)
     mark_node_info_dirty();
 }
 
-esp_err_t ble2mqtt_node_manager::example_ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
+esp_err_t ble2mqtt_node_manager::ble_mesh_set_msg_common(esp_ble_mesh_client_common_param_t *common,
                                                                  std::shared_ptr<bm2mqtt_node_info> node,
                                                                  esp_ble_mesh_model_t *model, uint32_t opcode)
 {
@@ -180,7 +180,7 @@ esp_err_t ble2mqtt_node_manager::example_ble_mesh_set_msg_common(esp_ble_mesh_cl
     return ESP_OK;
 }
 
-esp_err_t ble2mqtt_node_manager::store_node_info(const Uuid128 &uuid, uint16_t unicast,
+esp_err_t ble2mqtt_node_manager::store_node_info(const device_uuid128 &uuid, uint16_t unicast,
                                                  uint8_t elem_num, uint16_t node_index)
 {
     if (!ESP_BLE_MESH_ADDR_IS_UNICAST(unicast))
@@ -503,7 +503,7 @@ void ble2mqtt_node_manager::initialize()
     load_node_info_vector();
 }
 
-void ble2mqtt_node_manager::set_node_name(const Uuid128 &uuid, const char *name)
+void ble2mqtt_node_manager::set_node_name(const device_uuid128 &uuid, const char *name)
 {
     if (auto node = get_node(uuid))
     {

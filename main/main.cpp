@@ -157,7 +157,7 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(err);
 
     // Initialize credential encryption system
-    err = CredentialEncryption::instance().initialize();
+    err = credential_encryption::instance().initialize();
     if (err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to initialize credential encryption: %s", esp_err_to_name(err));
@@ -226,11 +226,10 @@ extern "C" void app_main()
 
         node_manager().initialize();
         mqtt5_app_start();
-        refresh_all_nodes();
+        ble_mesh_refresh_all_nodes();
 
         esp_log_level_set("*", ESP_LOG_INFO);
         esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
-        esp_log_level_set("mqtt_example", ESP_LOG_VERBOSE);
         esp_log_level_set("transport_base", ESP_LOG_VERBOSE);
         esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
         esp_log_level_set("transport", ESP_LOG_VERBOSE);

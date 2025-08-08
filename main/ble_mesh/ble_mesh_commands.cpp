@@ -8,7 +8,7 @@
 #include <argtable3/argtable3.h>
 
 // Project includes
-#include "Uui128.h"
+#include "device_uuid128.h"
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
 #include "common/log_common.h"
@@ -26,7 +26,7 @@ extern esp_ble_mesh_client_t lightness_cli;
 extern esp_ble_mesh_client_t hsl_cli;
 extern esp_ble_mesh_client_t ctl_cli;
 
-extern struct example_info_store store;
+extern struct mesh_network_info_store store;
 
 long map(long x, long in_min, long in_max, long out_min, long out_max)
 {
@@ -47,7 +47,7 @@ void ble_mesh_ctl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
+                                    node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
 
                                     set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
                                     set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
@@ -73,7 +73,7 @@ void ble_mesh_ctl_temperature_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+    node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
     common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
 
     set_state_light.ctl_temperature_set.ctl_temperature = node_info->curr_temp;
@@ -88,7 +88,7 @@ void ble_mesh_ctl_temperature_set(std::shared_ptr<bm2mqtt_node_info> node_info)
     }
 }
 
-void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
+void ble_mesh_light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info)
         return;
@@ -97,11 +97,11 @@ void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             message_payload{
                                 .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
                                 {
-                                    LOG_WARN(TAG, "[light_hsl_set] Setting HSL for node 0x%04X", node_info->unicast);
+                                    LOG_WARN(TAG, "[ble_mesh_light_hsl_set] Setting HSL for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state = {0};
 
-                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
+                                    node_manager().ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
                                     node_info->color_mode = color_mode_t::hs;
                                     set_state.hsl_set.hsl_hue = node_info->hsl_h;
@@ -121,7 +121,7 @@ void light_hsl_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                             });
 }
 
-void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
+void ble_mesh_gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
 {
     if (!node_info)
         return;
@@ -134,7 +134,7 @@ void gen_onoff_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
-                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
+                                    node_manager().ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
                                     set_state.onoff_set.op_en = false;
                                     set_state.onoff_set.onoff = node_info->onoff;
                                     set_state.onoff_set.tid = store.tid++;
@@ -188,7 +188,7 @@ void ble_mesh_hsl_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET);
+    node_manager().ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET);
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
@@ -221,7 +221,7 @@ void ble_mesh_lightness_range_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
+    node_manager().ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET);
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
     {
@@ -254,7 +254,7 @@ void ble_mesh_ctl_temperature_get(std::shared_ptr<bm2mqtt_node_info> node_info)
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
+    node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_GET);
     common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
     if (err)
@@ -288,7 +288,7 @@ void ble_mesh_ctl_temperature_range_get(std::shared_ptr<bm2mqtt_node_info> node_
     esp_ble_mesh_client_common_param_t common = {0};
     esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-    node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
+    node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET);
     common.ctx.addr = node_info->unicast;
 
     int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
@@ -313,7 +313,7 @@ int ble_mesh_ctl_get(int argc, char **argv)
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state_light = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
+        node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET);
         int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
         if (err)
         {
@@ -341,7 +341,7 @@ int ble_mesh_ctl_lightness_set(int argc, char **argv)
     return 0;
 }
 
-void ble_mesh_ctl_lightness_set(int lightness_value, const Uuid128 &uuid)
+void ble_mesh_ctl_lightness_set(int lightness_value, const device_uuid128 &uuid)
 {
     if (auto node_info = node_manager().get_node(uuid); node_info && node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
@@ -363,7 +363,7 @@ void ble_mesh_lightness_set(std::shared_ptr<bm2mqtt_node_info> node_info)
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-                                    node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
+                                    node_manager().ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
                                     common.ctx.addr = node_info->unicast;
 
                                     set_state_light.lightness_set.lightness = node_info->hsl_l;
@@ -396,7 +396,7 @@ int ble_mesh_ctl_temperature_set(int argc, char **argv)
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_set_state_t set_state_light = {0};
 
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
+        node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET_UNACK);
         common.ctx.addr = node_info->unicast + node_info->light_ctl_temp_offset;
 
         set_state_light.ctl_temperature_set.ctl_temperature = ctl_temperature_set_args.temperature->ival[0];

@@ -56,10 +56,10 @@ static esp_mqtt5_subscribe_property_config_t subscribe_property = {
     // .share_name = "group1",
 };
 
-static esp_mqtt5_unsubscribe_property_config_t unsubscribe_property = {
-    .is_share_subscribe = false,
-    //.share_name = "group1",
-};
+// static esp_mqtt5_unsubscribe_property_config_t unsubscribe_property = {
+//     .is_share_subscribe = false,
+//     //.share_name = "group1",
+// };
 
 static esp_mqtt5_disconnect_property_config_t disconnect_property = {
     .session_expiry_interval = 60,
@@ -590,12 +590,12 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         if (strcmp(name->valuestring, "ON") == 0)
                         {
                             node_info->onoff = true;
-                            gen_onoff_set(node_info);
+                            ble_mesh_gen_onoff_set(node_info);
                         }
                         else if (strcmp(name->valuestring, "OFF") == 0)
                         {
                             node_info->onoff = false;
-                            gen_onoff_set(node_info);
+                            ble_mesh_gen_onoff_set(node_info);
                         }
                     }
 
@@ -669,7 +669,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         }
                         else if (current_mode == color_mode_t::hs)
                         {
-                            light_hsl_set(node_info);
+                            ble_mesh_light_hsl_set(node_info);
                         }
                         else if (current_mode == color_mode_t::brightness)
                         {

@@ -7,7 +7,7 @@
 #define PROV_OWN_ADDR 0x0001
 #define COMP_DATA_PAGE_0 0x00
 
-struct example_info_store
+struct mesh_network_info_store
 {
     uint16_t net_idx; /* NetKey Index */
     uint16_t app_idx; /* AppKey Index */
@@ -38,7 +38,7 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device);
 
 void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned_device &unprov_device)> func);
 
-void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
+void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                                       esp_ble_mesh_prov_cb_param_t *param);
 
 int list_provisioned_nodes_esp(int argc = 0, char **argv = nullptr);
@@ -47,5 +47,5 @@ void for_each_provisioned_node(std::function<void(const esp_ble_mesh_node_t *, i
 
 void register_provisioning_commands();
 
-void unprovision_device(const Uuid128 &dev_uuid);
-void provision_device(const uint8_t uuid[16]);
+void ble_mesh_unprovision_device(const device_uuid128 &dev_uuid);
+void ble_mesh_provision_device(const uint8_t uuid[16]);

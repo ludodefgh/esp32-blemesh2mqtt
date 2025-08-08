@@ -32,7 +32,7 @@
 extern esp_ble_mesh_client_t config_client;
 std::vector<ble2mqtt_unprovisioned_device> unprovisioned_devices;
 
-void remove_unprovisioned_device(const Uuid128 &uuid)
+void remove_unprovisioned_device(const device_uuid128 &uuid)
 {
     for (auto it = unprovisioned_devices.begin(); it != unprovisioned_devices.end(); ++it)
     {
@@ -44,10 +44,10 @@ void remove_unprovisioned_device(const Uuid128 &uuid)
     }
 }
 
-struct example_info_store store = {
+struct mesh_network_info_store store = {
     .net_idx = ESP_BLE_MESH_KEY_UNUSED,
     .app_idx = ESP_BLE_MESH_KEY_UNUSED,
-    .onoff = LED_OFF,
+    .onoff = 0,
     .tid = 0x0,
 };
 
@@ -87,7 +87,7 @@ void print_model_name(uint16_t model_id)
 esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_comp_param &node_aparam)
 {
     int node_idx = node_aparam.node_idx;
-    const Uuid128 uuid128{node_aparam.device_uuid};
+    const device_uuid128 uuid128{node_aparam.device_uuid};
     uint16_t unicast = node_aparam.unicast_addr;
     uint8_t elem_num = node_aparam.element_num;
     uint16_t net_idx = node_aparam.netkey_idx;
@@ -130,7 +130,7 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
                                     LOG_WARN(TAG, "Setting CTL for node 0x%04X", node->unicast);
-                                    node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+                                    node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
                                     get_state.comp_data_get.page = COMP_DATA_PAGE_0;
                                     esp_err_t err = esp_ble_mesh_config_client_get_state(&common, &get_state);
                                     if (err)
@@ -198,7 +198,7 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
     }
 }
 
-void provision_device(const uint8_t uuid[16])
+void ble_mesh_provision_device(const uint8_t uuid[16])
 {
     ble2mqtt_unprovisioned_device *device = nullptr;
     for (auto index = 0; index < unprovisioned_devices.size(); ++index)
@@ -250,14 +250,13 @@ void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
     return;
 }
 
-void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
+void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
                                       esp_ble_mesh_prov_cb_param_t *param)
 {
     switch (event)
     {
     case ESP_BLE_MESH_PROV_REGISTER_COMP_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_PROV_REGISTER_COMP_EVT, err_code %d", param->prov_register_comp.err_code);
-        // mesh_example_info_restore(); /* Restore proper mesh example info */
         break;
 
     case ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT:
@@ -267,7 +266,6 @@ void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_DISABLE_COMP_EVT, err_code %d", param->provisioner_prov_disable_comp.err_code);
         break;
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT:
-        // LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT");
 
         ble2mqtt_unprovisioned_device new_entry;
         memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
@@ -402,7 +400,7 @@ int list_provisioned_nodes_esp(int argc, char **argv)
     return 0;
 }
 
-void unprovision_device(const Uuid128 &uuid)
+void ble_mesh_unprovision_device(const device_uuid128 &uuid)
 {
     if (auto node_info = node_manager().get_node(uuid))
     {
@@ -413,7 +411,7 @@ void unprovision_device(const Uuid128 &uuid)
                                         LOG_WARN(TAG, "unprovision_device for node 0x%04X", node_info->unicast);
                                         esp_ble_mesh_client_common_param_t common = {0};
                                         esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+                                        node_manager().ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
                                         int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                         if (err != ESP_OK)
@@ -433,7 +431,7 @@ void unprovision_device(const Uuid128 &uuid)
 
 int unprovision_all_nodes(int argc, char **argv)
 {
-    std::vector<Uuid128> uuids_to_remove;
+    std::vector<device_uuid128> uuids_to_remove;
 
     for_each_provisioned_node([&](const esp_ble_mesh_node_t *node, int node_index)
                               {
@@ -444,9 +442,9 @@ int unprovision_all_nodes(int argc, char **argv)
             LOG_INFO(TAG, "  Element Count: %d", node->element_num);
             LOG_INFO(TAG, "  NetKey Index: %d", node->net_idx);
 
-            uuids_to_remove.emplace_back(Uuid128{node->dev_uuid}); });
+            uuids_to_remove.emplace_back(device_uuid128{node->dev_uuid}); });
 
-    for (Uuid128 &bla : uuids_to_remove)
+    for (device_uuid128 &bla : uuids_to_remove)
     {
         if (auto node_info = node_manager().get_node(bla))
         {
@@ -455,7 +453,7 @@ int unprovision_all_nodes(int argc, char **argv)
                                                    {
                                                        esp_ble_mesh_client_common_param_t common = {0};
                                                        esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                                       node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
+                                                       node_manager().ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_NODE_RESET);
 
                                                        int err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                                        if (err != ESP_OK)
@@ -490,7 +488,7 @@ int get_composition_data(int argc, char **argv)
         get_composition_data_debug = true;
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-        node_manager().example_ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
+        node_manager().ble_mesh_set_msg_common(&common, node_info, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
         get_state.comp_data_get.page = COMP_DATA_PAGE_0;
         auto err = esp_ble_mesh_config_client_get_state(&common, &get_state);
         if (err)
@@ -519,7 +517,7 @@ int provision_device_index(int argc, char **argv)
     }
 
     const ble2mqtt_unprovisioned_device &unprov_device = unprovisioned_devices[node_index_args.node_index->ival[0]];
-    provision_device(unprov_device.dev_uuid);
+    ble_mesh_provision_device(unprov_device.dev_uuid);
 
     return 0;
 }

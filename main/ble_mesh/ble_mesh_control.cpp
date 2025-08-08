@@ -45,7 +45,7 @@
 
 static uint8_t dev_uuid[16];
 
-extern struct example_info_store store;
+extern struct mesh_network_info_store store;
 
 static struct esp_ble_mesh_key
 {
@@ -236,7 +236,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               LOG_WARN(TAG, "Generic on/off model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV;
@@ -261,7 +261,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               LOG_WARN(TAG, "Light hsl model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_SRV;
@@ -286,7 +286,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               LOG_WARN(TAG, "Light lightness model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV;
@@ -311,7 +311,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               LOG_WARN(TAG, "Light CTL temperature model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
                                               set_state.model_app_bind.element_addr = node->unicast + node->light_ctl_temp_offset;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV;
@@ -332,7 +332,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
                                               LOG_WARN(TAG, "Light CTL model for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_SRV;
@@ -351,7 +351,7 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info> node)
     if (node->features_to_bind == 0)
     {
         LOG_WARN(TAG, "All features bound, no more binding needed");
-        refresh_node(node, nullptr);
+        ble_mesh_refresh_node(node, nullptr);
 
         message_queue().enqueue(node, message_payload{
                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
@@ -401,7 +401,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
         {
             LOG_INFO(TAG, "Get : composition data %s", bt_hex(param->status_cb.comp_data_status.composition_data->data, param->status_cb.comp_data_status.composition_data->len));
 
-            on_composition_received(param, node);
+            ble_mesh_on_composition_received(param, node);
             break;
         }
 
@@ -458,7 +458,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
             ESP_LOG_BUFFER_HEX("Publish evt : composition data %s", param->status_cb.comp_data_status.composition_data->data,
                                param->status_cb.comp_data_status.composition_data->len);
 
-            on_composition_received(param, node);
+            ble_mesh_on_composition_received(param, node);
         }
         break;
         case ESP_BLE_MESH_MODEL_OP_APP_KEY_STATUS:
@@ -470,21 +470,6 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     case ESP_BLE_MESH_CFG_CLIENT_TIMEOUT_EVT:
 
         message_queue().handle_timeout(node, opcode);
-        // switch (opcode)
-        // {
-        // case ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET:
-        // {
-        //     esp_ble_mesh_cfg_client_get_state_t get_state = {0};
-        //     node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET);
-        //     get_state.comp_data_get.page = COMP_DATA_PAGE_0;
-        //     err = esp_ble_mesh_config_client_get_state(&common, &get_state);
-        //     if (err)
-        //     {
-        //         LOG_ERROR(TAG, "%s: Config Composition Data Get failed", __func__);
-        //         return;
-        //     }
-        //     break;
-        // }
 
         break;
     default:
@@ -493,7 +478,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
     }
 }
 
-void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::shared_ptr<bm2mqtt_node_info> node)
+void ble_mesh_on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::shared_ptr<bm2mqtt_node_info> node)
 {
     uint16_t addr = param->params->ctx.addr;
 
@@ -518,19 +503,19 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::sha
 
     if (node->features & FEATURE_LIGHT_LIGHTNESS)
     {
-        LOG_WARN(TAG, "[on_composition_received] Light Lightness feature supported");
+        LOG_WARN(TAG, "Light Lightness feature supported");
         node->color_mode = color_mode_t::brightness;
     }
 
     if (node->features & FEATURE_LIGHT_HSL)
     {
-        LOG_WARN(TAG, "[on_composition_received] Light HSL feature supported");
+        LOG_WARN(TAG, "Light HSL feature supported");
         node->color_mode = color_mode_t::hs;
     }
 
     if (node->features & FEATURE_LIGHT_CTL)
     {
-        LOG_WARN(TAG, "[on_composition_received] Light CTL feature supported");
+        LOG_WARN(TAG, "Light CTL feature supported");
         node->color_mode = color_mode_t::color_temp;
     }
 
@@ -539,17 +524,17 @@ void on_composition_received(esp_ble_mesh_cfg_client_cb_param_t *param, std::sha
         message_queue().enqueue(node, message_payload{
                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node) // shared_ptr captured by value, keeps node alive
                                           {
-                                              LOG_WARN(TAG, "[on_composition_received] Requesting composition for node 0x%04X", node->unicast);
+                                              LOG_WARN(TAG, "Requesting composition for node 0x%04X", node->unicast);
                                               esp_ble_mesh_client_common_param_t common = {0};
                                               esp_ble_mesh_cfg_client_set_state_t set_state = {0};
-                                              node_manager().example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD);
                                               set_state.app_key_add.net_idx = store.net_idx;
                                               set_state.app_key_add.app_idx = store.app_idx;
                                               memcpy(set_state.app_key_add.app_key, prov_key.app_key, 16);
                                               esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                               if (err)
                                               {
-                                                  LOG_ERROR(TAG, "[on_composition_received] Requesting composition failed");
+                                                  LOG_ERROR(TAG, "Requesting composition failed");
                                               }
                                           },
                                           .opcode = ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD,
@@ -835,7 +820,7 @@ esp_err_t ble_mesh_init(void)
     store.app_idx = APP_KEY_IDX;
     memset(prov_key.app_key, APP_KEY_OCTET, sizeof(prov_key.app_key));
 
-    esp_ble_mesh_register_prov_callback(example_ble_mesh_provisioning_cb);
+    esp_ble_mesh_register_prov_callback(ble_mesh_provisioning_cb);
     esp_ble_mesh_register_config_client_callback(ble_mesh_config_client_cb);
     esp_ble_mesh_register_generic_client_callback(ble_mesh_generic_client_cb);
     esp_ble_mesh_register_light_client_callback(ble_mesh_light_client_cb);
@@ -872,23 +857,23 @@ esp_err_t ble_mesh_init(void)
     return err;
 }
 
-void refresh_all_nodes()
+void ble_mesh_refresh_all_nodes()
 {
     LOG_INFO(TAG, "Refreshing all nodes");
     for_each_provisioned_node([](const esp_ble_mesh_node_t *node, int node_index)
                               {
         if (auto node_info = node_manager().get_or_create(node->dev_uuid))
         {
-            refresh_node(node_info, node);
+            ble_mesh_refresh_node(node_info, node);
         } });
 }
 
-void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node)
+void ble_mesh_refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_mesh_node_t *node)
 {
     LOG_INFO(TAG, "Refreshing node 0x%04X", node_info->unicast);
     if (node != nullptr)
     {
-        node_info->uuid = Uuid128{node->dev_uuid};
+        node_info->uuid = device_uuid128{node->dev_uuid};
         node_info->unicast = node->unicast_addr;
         node_info->elem_num = node->element_num;
     }
@@ -903,7 +888,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
                                                    LOG_WARN(TAG, "Generic on/off model for node 0x%04X", node_info->unicast);
                                                    esp_ble_mesh_client_common_param_t common = {0};
                                                    esp_ble_mesh_generic_client_get_state_t get_state = {0};
-                                                   node_manager().example_ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
+                                                   node_manager().ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET);
                                                    int err = esp_ble_mesh_generic_client_get_state(&common, &get_state);
                                                    if (err)
                                                    {
@@ -925,7 +910,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
                                                        LOG_WARN(TAG, "Light HSL model for node 0x%04X", node_info->unicast);
                                                        esp_ble_mesh_client_common_param_t common = {0};
                                                        esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-                                                       node_manager().example_ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
+                                                       node_manager().ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET);
                                                        int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
                                                        if (err)
                                                        {
@@ -958,7 +943,7 @@ void refresh_node(std::shared_ptr<bm2mqtt_node_info> node_info, const esp_ble_me
                                                    LOG_WARN(TAG, "Light lightness model for node 0x%04X", node_info->unicast);
                                                    esp_ble_mesh_client_common_param_t common = {0};
                                                    esp_ble_mesh_light_client_get_state_t get_state_light = {0};
-                                                   node_manager().example_ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET);
+                                                   node_manager().ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET);
                                                    int err = esp_ble_mesh_light_client_get_state(&common, &get_state_light);
                                                    if (err)
                                                    {
