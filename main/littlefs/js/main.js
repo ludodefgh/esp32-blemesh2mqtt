@@ -1078,10 +1078,19 @@ document.getElementById("mqtt-config-form").addEventListener("submit", function(
 // Firmware Upload Functionality
 let selectedFirmwareFile = null;
 let uploadInProgress = false;
+let currentUploadXhr = null;
 
 function initFirmwareUpload() {
   const fileInput = document.getElementById('firmware-file');
   const uploadArea = document.getElementById('upload-area');
+  const radioButtons = document.querySelectorAll('input[name="update-type"]');
+  
+  // Update UI when upload type changes
+  radioButtons.forEach(radio => {
+    radio.addEventListener('change', function() {
+      updateUploadUI();
+    });
+  });
   
   // File input change handler
   fileInput.addEventListener('change', function(e) {
@@ -1107,7 +1116,10 @@ function initFirmwareUpload() {
     
     if (e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.name.endsWith('.bin')) {
+      const updateType = getSelectedUpdateType();
+      const expectedExtension = updateType === 'storage' ? '.bin' : '.bin';
+      
+      if (file.name.endsWith(expectedExtension)) {
         handleFileSelection(file);
       } else {
         showFirmwareError('Please select a .bin firmware file');
@@ -1120,19 +1132,42 @@ function initFirmwareUpload() {
 }
 
 function handleFileSelection(file) {
+  const updateType = getSelectedUpdateType();
+  
   if (!file.name.endsWith('.bin')) {
-    showFirmwareError('Please select a .bin firmware file');
+    const fileType = updateType === 'storage' ? 'storage' : 'firmware';
+    showFirmwareError(`Please select a .bin ${fileType} file`);
     return;
   }
   
-  if (file.size < 1024) {
-    showFirmwareError('Firmware file appears to be too small');
-    return;
-  }
-  
-  if (file.size > 4 * 1024 * 1024) {
-    showFirmwareError('Firmware file is too large (max 4MB)');
-    return;
+  // Validate file based on update type
+  if (updateType === 'storage') {
+    if (file.size < 512) {
+      showFirmwareError('Storage file appears to be too small');
+      return;
+    }
+    
+    if (file.size > 256 * 1024) { // 256KB max for storage partition
+      showFirmwareError('Storage file is too large (max 256KB)');
+      return;
+    }
+    
+    // Validate storage file name
+    if (!file.name.toLowerCase().includes('storage')) {
+      showFirmwareError('Storage file should be named "storage.bin"');
+      return;
+    }
+  } else {
+    // Firmware validation
+    if (file.size < 1024) {
+      showFirmwareError('Firmware file appears to be too small');
+      return;
+    }
+    
+    if (file.size > 4 * 1024 * 1024) {
+      showFirmwareError('Firmware file is too large (max 4MB)');
+      return;
+    }
   }
   
   selectedFirmwareFile = file;
@@ -1158,11 +1193,38 @@ function clearFile() {
   hideFirmwareError();
 }
 
+// Helper functions for upload type management
+function getSelectedUpdateType() {
+  const radio = document.querySelector('input[name="update-type"]:checked');
+  return radio ? radio.value : 'firmware';
+}
+
+function updateUploadUI() {
+  const updateType = getSelectedUpdateType();
+  const uploadText = document.getElementById('upload-text');
+  const fileInput = document.getElementById('firmware-file');
+  const uploadBtnText = document.getElementById('upload-btn-text');
+  
+  if (updateType === 'storage') {
+    uploadText.innerHTML = '<strong>Select storage.bin file</strong><br>or drag and drop here';
+    fileInput.accept = '.bin';
+    uploadBtnText.textContent = 'Upload Storage';
+  } else {
+    uploadText.innerHTML = '<strong>Select firmware file (.bin)</strong><br>or drag and drop here';
+    fileInput.accept = '.bin';
+    uploadBtnText.textContent = 'Upload Firmware';
+  }
+  
+  // Clear selected file when switching types
+  clearFile();
+}
+
 function uploadFirmware() {
   if (!selectedFirmwareFile || uploadInProgress) {
     return;
   }
   
+  const updateType = getSelectedUpdateType();
   uploadInProgress = true;
   
   // Show progress UI
@@ -1172,13 +1234,16 @@ function uploadFirmware() {
   document.getElementById('upload-area').classList.add('disabled');
   
   // Update progress
-  updateProgress('Starting upload...', 0);
+  const progressText = updateType === 'storage' ? 'Starting storage upload...' : 'Starting firmware upload...';
+  updateProgress(progressText, 0);
   
   // Create FormData and upload
   const formData = new FormData();
-  formData.append('firmware', selectedFirmwareFile);
+  const fieldName = updateType === 'storage' ? 'storage' : 'firmware';
+  formData.append(fieldName, selectedFirmwareFile);
   
   const xhr = new XMLHttpRequest();
+  currentUploadXhr = xhr;
   
   xhr.upload.addEventListener('progress', function(e) {
     if (e.lengthComputable) {
@@ -1223,16 +1288,26 @@ function uploadFirmware() {
     resetUploadUI();
   });
   
-  xhr.open('POST', '/api/ota/upload');
+  // Set upload endpoint based on update type
+  const uploadUrl = updateType === 'storage' ? '/api/storage/upload' : '/api/ota/upload';
+  xhr.open('POST', uploadUrl);
+  
   // Add authentication header
+  // ⚠️ SECURITY: Hardcoded key - replace with proper authentication in production
   xhr.setRequestHeader('X-OTA-Key', 'ota_secure_key_2024');
   xhr.send(selectedFirmwareFile);
 }
 
 function cancelUpload() {
-  if (uploadInProgress) {
-    // This would cancel the XMLHttpRequest if we stored it globally
-    showFirmwareError('Upload cancellation not implemented');
+  if (uploadInProgress && currentUploadXhr) {
+    // Cancel the XMLHttpRequest
+    currentUploadXhr.abort();
+    currentUploadXhr = null;
+    
+    // Abort the backend operation
+    ota_manager_abort();
+    
+    showFirmwareError('Upload cancelled by user');
   }
   resetUploadUI();
 }
@@ -1250,6 +1325,7 @@ function updateProgress(message, percent) {
 
 function resetUploadUI() {
   uploadInProgress = false;
+  currentUploadXhr = null;
   document.getElementById('upload-progress').style.display = 'none';
   document.getElementById('upload-btn').style.display = 'inline-flex';
   document.getElementById('cancel-btn').style.display = 'none';

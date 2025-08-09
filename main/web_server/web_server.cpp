@@ -90,6 +90,7 @@ esp_err_t rename_node_handler(httpd_req_t *req);
 esp_err_t node_send_mqtt_status_handler(httpd_req_t *req);
 esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req);
 esp_err_t ota_upload_handler(httpd_req_t *req);
+esp_err_t storage_upload_handler(httpd_req_t *req);
 esp_err_t ota_status_handler(httpd_req_t *req);
 esp_err_t ota_restart_handler(httpd_req_t *req);
 
@@ -433,6 +434,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/ota/upload"))
     {
         return ota_upload_handler(req);
+    }
+    else if (strstr(req->uri, "/api/storage/upload"))
+    {
+        return storage_upload_handler(req);
     }
     else if (strstr(req->uri, "/api/ota/status"))
     {
@@ -914,7 +919,9 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 #define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
 #define OTA_BUFFER_SIZE 1024
 
-// Simple OTA authentication (should be replaced with proper auth in production)
+// ⚠️  SECURITY WARNING: This is a hardcoded key for development only!
+// 🚨 CRITICAL: Replace with proper authentication before production deployment
+// TODO: Implement certificate-based authentication or device-specific keys
 #define OTA_API_KEY "ota_secure_key_2024"
 
 static bool authenticate_ota_request(httpd_req_t *req)
@@ -1104,6 +1111,142 @@ cleanup:
     // Restart after a short delay to allow response to be sent
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
+
+    return ESP_OK;
+}
+
+esp_err_t storage_upload_handler(httpd_req_t *req)
+{
+    LOG_INFO(TAG, "Storage upload handler called");
+
+    if (req->method != HTTP_POST)
+    {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+
+    // Authenticate request
+    if (!authenticate_ota_request(req))
+    {
+        LOG_WARN(TAG, "Unauthorized storage upload attempt");
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
+        return ESP_FAIL;
+    }
+
+    // Get content length
+    size_t content_length = req->content_len;
+
+    LOG_INFO(TAG, "Starting storage upload, content length: %zu bytes", content_length);
+
+    // Validate storage file size
+    if (content_length < 512)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Storage file too small (minimum 512 bytes)");
+        return ESP_FAIL;
+    }
+
+    if (content_length > 256 * 1024) // 256KB max for storage
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Storage file too large (maximum 256KB)");
+        return ESP_FAIL;
+    }
+
+    // Begin storage update
+    esp_err_t err = ota_manager_begin_storage(content_length);
+    if (err != ESP_OK)
+    {
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "Failed to begin storage update: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+
+    // Read and write storage data in chunks
+    char *buffer = (char *)malloc(OTA_BUFFER_SIZE);
+    if (buffer == NULL)
+    {
+        ota_manager_abort();
+        LOG_ERROR(TAG, "Failed to allocate %d bytes for storage buffer", OTA_BUFFER_SIZE);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+
+    esp_err_t ret = ESP_FAIL;
+    size_t remaining = content_length;
+    size_t total_written = 0;
+    int recv_len = 0;
+
+    while (remaining > 0)
+    {
+        size_t chunk_size = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
+        recv_len = httpd_req_recv(req, buffer, chunk_size);
+
+        if (recv_len <= 0)
+        {
+            LOG_ERROR(TAG, "Storage receive failed after %zu bytes. Error: %d", total_written, recv_len);
+            goto storage_cleanup;
+        }
+
+        if ((size_t)recv_len > remaining)
+        {
+            LOG_ERROR(TAG, "Received more data than expected: %d > %zu", recv_len, remaining);
+            goto storage_cleanup;
+        }
+
+        err = ota_manager_write((const uint8_t *)buffer, (size_t)recv_len);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Storage write failed at offset %zu: %s", total_written, esp_err_to_name(err));
+            goto storage_cleanup;
+        }
+
+        remaining -= (size_t)recv_len;
+        total_written += (size_t)recv_len;
+
+        // Log progress every 32KB
+        if (total_written % (32 * 1024) == 0)
+        {
+            LOG_INFO(TAG, "Storage progress: %zu / %zu bytes (%.1f%%)",
+                     total_written, content_length,
+                     (float)total_written / content_length * 100.0);
+        }
+    }
+
+    ret = ESP_OK;
+    LOG_INFO(TAG, "Storage upload completed: %zu bytes", total_written);
+
+storage_cleanup:
+    free(buffer);
+    if (ret != ESP_OK)
+    {
+        ota_manager_abort();
+        if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Upload timeout");
+        }
+        else
+        {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Upload failed");
+        }
+        return ESP_FAIL;
+    }
+
+    // Finalize storage update
+    err = ota_manager_end();
+    if (err != ESP_OK)
+    {
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "Storage finalization failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+
+    // Send success response
+    httpd_resp_set_type(req, "application/json");
+    const char *success_response = "{ \"success\": true, \"message\": \"Storage uploaded successfully. Please refresh the page to see changes.\" }";
+    httpd_resp_send(req, success_response, -1);
+
+    LOG_INFO(TAG, "Storage update completed successfully");
 
     return ESP_OK;
 }

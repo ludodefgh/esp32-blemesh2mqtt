@@ -246,10 +246,30 @@
             </div>
             
             <div class="firmware-upload">
+              <div class="upload-type-selector">
+                <h3>Update Type</h3>
+                <div class="radio-group">
+                  <label class="radio-label">
+                    <input type="radio" name="update-type" value="firmware" checked>
+                    <span class="radio-text">
+                      <strong>Firmware Update</strong><br>
+                      <small>Updates application code (requires restart)</small>
+                    </span>
+                  </label>
+                  <label class="radio-label">
+                    <input type="radio" name="update-type" value="storage">
+                    <span class="radio-text">
+                      <strong>Web Interface Update</strong><br>
+                      <small>Updates web files (no restart required)</small>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <div class="upload-area" id="upload-area">
                 <div class="upload-content">
                   <span class="upload-icon">📁</span>
-                  <p class="upload-text">
+                  <p class="upload-text" id="upload-text">
                     <strong>Select firmware file (.bin)</strong><br>
                     or drag and drop here
                   </p>
@@ -286,7 +306,7 @@
               <div class="upload-actions">
                 <button class="btn btn-danger" id="upload-btn" onclick="uploadFirmware()" disabled>
                   <span class="icon">⬆️</span>
-                  Upload Firmware
+                  <span id="upload-btn-text">Upload Firmware</span>
                 </button>
                 <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" style="display: none;">
                   <span class="icon">✕</span>
