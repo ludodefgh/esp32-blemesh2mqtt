@@ -5,6 +5,13 @@
 
 #include "esp_err.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
+
+enum class update_type_t
+{
+    FIRMWARE,
+    STORAGE
+};
 
 struct ota_progress_info_t
 {
@@ -12,6 +19,7 @@ struct ota_progress_info_t
     size_t written_size;
     uint8_t progress_percent;
     const char *status_message;
+    update_type_t update_type;
 };
 
 typedef std::function<void(const ota_progress_info_t &)> ota_progress_callback_t;
@@ -22,6 +30,7 @@ public:
     static ota_manager &instance();
 
     esp_err_t begin_ota_update(size_t firmware_size);
+    esp_err_t begin_storage_update(size_t storage_size);
     esp_err_t write_ota_data(const uint8_t *data, size_t size);
     esp_err_t end_ota_update();
     esp_err_t abort_ota_update();
@@ -49,9 +58,11 @@ private:
 
     esp_ota_handle_t ota_handle_ = 0;
     const esp_partition_t *update_partition_ = nullptr;
+    const esp_partition_t *storage_partition_ = nullptr;
     ota_progress_info_t progress_info_ = {};
     ota_progress_callback_t progress_callback_;
     bool ota_in_progress_ = false;
+    bool storage_update_ = false;
     char last_error_[256] = {};
 };
 
@@ -59,6 +70,7 @@ private:
 extern "C"
 {
     esp_err_t ota_manager_begin(size_t firmware_size);
+    esp_err_t ota_manager_begin_storage(size_t storage_size);
     esp_err_t ota_manager_write(const uint8_t *data, size_t size);
     esp_err_t ota_manager_end();
     esp_err_t ota_manager_abort();

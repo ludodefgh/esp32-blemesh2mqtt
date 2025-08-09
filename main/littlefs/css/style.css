@@ -1107,3 +1107,71 @@ body {
   align-items: center;
   gap: 1rem;
 }
+
+/* Upload Type Selector Styles */
+.upload-type-selector {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.upload-type-selector h3 {
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.radio-group {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.radio-label {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.radio-label:hover {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.radio-label input[type="radio"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.radio-label input[type="radio"]:checked + .radio-text {
+  color: var(--primary);
+}
+
+.radio-label:has(input[type="radio"]:checked) {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.radio-text strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.radio-text small {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
