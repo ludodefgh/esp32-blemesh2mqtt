@@ -17,6 +17,7 @@
 #include "ble_mesh/ble_mesh_node.h"
 #include "ble_mesh/ble_mesh_provisioning.h"
 #include "common/log_common.h"
+#include "common/version.h"
 #include "debug/console_cmd.h"
 #include "debug/websocket_logger.h"
 #include "mqtt/mqtt_bridge.h"
@@ -357,10 +358,10 @@ esp_err_t system_info_handler(httpd_req_t *req)
     uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
     int64_t uptime_us = esp_timer_get_time();
 
-    char buf[384];
+    char buf[512];
     snprintf(buf, sizeof(buf),
-             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld }",
-             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us);
+             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\" }",
+             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION);
 
     httpd_resp_send(req, buf, -1);
     return ESP_OK;
@@ -757,7 +758,7 @@ esp_err_t mqtt_wildcard_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
             return ESP_FAIL;
         }
-        publish_bridge_info("0.1.0");
+        publish_bridge_info();
         httpd_resp_send(req, NULL, 0);
         return ESP_OK;
     }

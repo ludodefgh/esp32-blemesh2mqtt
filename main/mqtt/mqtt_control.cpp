@@ -17,6 +17,7 @@
 #include "ble_mesh/ble_mesh_node.h"
 #include "ble_mesh/message_queue.h"
 #include "common/log_common.h"
+#include "common/version.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
 #include "debug_console_common.h"
@@ -482,8 +483,7 @@ void on_home_assistant_restart_timer(void *arg)
         mqtt_bridge_subscribe(mqtt_get_client());
         send_bridge_discovery();
         esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
-        const char *version = "0.1.0";
-        publish_bridge_info(version);
+        publish_bridge_info();
     }
     else
     {

@@ -1338,9 +1338,9 @@ function loadFirmwareInfo() {
   fetch('/api/system_info')
     .then(res => res.json())
     .then(data => {
-      // For now, show a placeholder version
-      // In a real implementation, you'd add version info to the system_info endpoint
-      document.getElementById('current-version').textContent = 'v1.0.0';
+      // Display version from system info
+      const version = data.version ? `v${data.version}` : 'Unknown';
+      document.getElementById('current-version').textContent = version;
     })
     .catch(err => {
       console.error('Failed to load firmware info:', err);
