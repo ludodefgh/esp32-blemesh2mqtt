@@ -14,6 +14,7 @@
 
 // Project includes
 #include "common/log_common.h"
+#include "common/version.h"
 #include "mqtt_control.h"
 #include "wifi/wifi_provisioning.h"
 
@@ -76,7 +77,7 @@ static cJSON *create_bridge_device_object()
     cJSON_AddStringToObject(device, "model", "Bridge");
     std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
     cJSON_AddStringToObject(device, "name", device_name.c_str());
-    cJSON_AddStringToObject(device, "sw_version", "0.1.0");
+    cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);
 
     return device;
 }
@@ -123,7 +124,7 @@ CJsonPtr create_provisioning_json()
 
     cJSON *origin = cJSON_CreateObject();
     cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
-    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "sw", FIRMWARE_VERSION);
 
     cJSON_AddItemToObject(root.get(), "origin", origin);
 
@@ -154,7 +155,7 @@ CJsonPtr create_restart_json()
 
     cJSON *origin = cJSON_CreateObject();
     cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
-    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "sw", FIRMWARE_VERSION);
 
     cJSON_AddItemToObject(root.get(), "origin", origin);
 
@@ -235,7 +236,7 @@ CJsonPtr create_ip_json()
     return root;
 }
 
-CJsonPtr create_bridge_info_json(const char *version)
+CJsonPtr create_bridge_info_json()
 {
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
 
@@ -248,7 +249,7 @@ CJsonPtr create_bridge_info_json(const char *version)
     // IP address
     cJSON_AddStringToObject(root.get(), "ip_address", get_ip_address());
 
-    cJSON_AddStringToObject(root.get(), "version", version);
+    cJSON_AddStringToObject(root.get(), "version", FIRMWARE_VERSION);
 
     // Build date/time
     std::string build_datetime = std::string(__DATE__) + " " + __TIME__;
@@ -257,7 +258,7 @@ CJsonPtr create_bridge_info_json(const char *version)
     // Origin
     cJSON *origin = cJSON_CreateObject();
     cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
-    cJSON_AddStringToObject(origin, "sw", "0.1.0");
+    cJSON_AddStringToObject(origin, "sw", FIRMWARE_VERSION);
     cJSON_AddStringToObject(origin, "url", get_ip_address());
 
     cJSON_AddItemToObject(root.get(), "origin", origin);
@@ -265,9 +266,9 @@ CJsonPtr create_bridge_info_json(const char *version)
     return root;
 }
 
-void publish_bridge_info(const char *version)
+void publish_bridge_info()
 {
-    CJsonPtr bridge_info_json = create_bridge_info_json(version);
+    CJsonPtr bridge_info_json = create_bridge_info_json();
     char *json_data = cJSON_PrintUnformatted(bridge_info_json.get());
     int msg_id = esp_mqtt_client_publish(mqtt_get_client(), get_bridge_state_topic(), json_data, 0, 0, 0);
     LOG_VERBOSE(TAG, "publish_bridge_info, msg_id=%d", msg_id);
@@ -354,7 +355,7 @@ void send_bridge_discovery()
     }
 
     {
-        publish_bridge_info("0.1.0");
+        publish_bridge_info();
     }
     {
         mqtt_publish_provisioning_enabled(enable_provisioning);
@@ -367,8 +368,7 @@ esp_timer_handle_t publish_timer;
 
 void periodic_publish_callback(void *arg)
 {
-    const char *version = "0.1.0";
-    publish_bridge_info(version);
+    publish_bridge_info();
 }
 
 void start_periodic_publish_timer()
