@@ -14,14 +14,18 @@ const char *get_bridge_availability_topic();
 const char *get_bridge_state_topic();
 const char *get_bridge_provisioning_set_topic();
 const char *get_bridge_provisioning_state_topic();
+const char *get_bridge_auto_provisioning_set_topic();
+const char *get_bridge_auto_provisioning_state_topic();
 const char *get_bridge_restart_set_topic();
 
 CJsonPtr create_provisioning_json();
+CJsonPtr create_auto_provisioning_json();
 CJsonPtr create_restart_json();
 CJsonPtr create_uptime_json();
 CJsonPtr create_bridge_info_json();
 
 void mqtt_publish_provisioning_enabled(bool enable_provisioning);
+void mqtt_publish_auto_provisioning_enabled(bool enable_auto_provisioning);
 void send_bridge_discovery();
 void publish_bridge_info();
 void start_periodic_publish_timer();

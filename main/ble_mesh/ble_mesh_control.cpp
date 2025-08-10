@@ -808,6 +808,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     }
 }
 bool enable_provisioning = true;
+bool enable_auto_provisioning = false;
 
 esp_err_t ble_mesh_init(void)
 {
@@ -1033,6 +1034,29 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }
     }
+}
+
+bool ble_mesh_get_provisioning_enabled(void)
+{
+    return enable_provisioning;
+}
+
+void ble_mesh_set_auto_provisioning_enabled(bool enabled_value)
+{
+    LOG_INFO(TAG, "Auto-provisioning: Current Value : %s Requested Value : %s", enable_auto_provisioning ? "ON" : "OFF", enabled_value ? "ON" : "OFF");
+    if (enabled_value != enable_auto_provisioning)
+    {
+        enable_auto_provisioning = enabled_value;
+        LOG_INFO(TAG, "Auto-provisioning %s", enable_auto_provisioning ? "enabled" : "disabled");
+        
+        // Publish the change to MQTT
+        mqtt_publish_auto_provisioning_enabled(enable_auto_provisioning);
+    }
+}
+
+bool ble_mesh_get_auto_provisioning_enabled(void)
+{
+    return enable_auto_provisioning;
 }
 
 int ble_mesh_set_provisioning_enabled(int argc, char **argv)

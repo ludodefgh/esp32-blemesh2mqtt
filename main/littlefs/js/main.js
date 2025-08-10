@@ -941,6 +941,9 @@ document.addEventListener("DOMContentLoaded", function () {
   // Load MQTT status
   loadMqttStatus();
   
+  // Load auto-provisioning state
+  loadAutoProvisioningState();
+  
   // Refresh system info every 5 seconds for real-time uptime display
   setInterval(loadSystemInfo, 5000);
   
@@ -1439,4 +1442,65 @@ function resetWifi() {
       button.disabled = false;
     });
   }
+}
+
+// Auto-provisioning functions
+function loadAutoProvisioningState() {
+  fetch('/api/auto_provisioning')
+    .then(response => response.json())
+    .then(data => {
+      const toggle = document.getElementById('auto-provisioning-toggle');
+      if (toggle) {
+        toggle.checked = data.enable_auto_provisioning;
+      }
+    })
+    .catch(error => {
+      console.error('Error loading auto-provisioning state:', error);
+    });
+}
+
+function toggleAutoProvisioning(enabled) {
+  const toggle = document.getElementById('auto-provisioning-toggle');
+  const originalState = toggle.checked;
+  
+  // Temporarily disable the toggle to prevent multiple requests
+  toggle.disabled = true;
+  
+  fetch('/api/auto_provisioning', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      enable_auto_provisioning: enabled
+    })
+  })
+  .then(response => {
+    if (response.ok) {
+      return response.json();
+    } else {
+      throw new Error('Failed to update auto-provisioning setting');
+    }
+  })
+  .then(data => {
+    // Update the toggle to reflect the actual state
+    toggle.checked = data.enable_auto_provisioning;
+    
+    const statusMessage = enabled 
+      ? 'Auto-provisioning enabled - new BLE Mesh devices will be automatically provisioned'
+      : 'Auto-provisioning disabled - devices must be manually provisioned';
+    
+    showToast(statusMessage, 'success');
+  })
+  .catch(error => {
+    console.error('Error updating auto-provisioning:', error);
+    
+    // Restore the original state
+    toggle.checked = originalState;
+    
+    showToast('Failed to update auto-provisioning setting', 'error');
+  })
+  .finally(() => {
+    toggle.disabled = false;
+  });
 }

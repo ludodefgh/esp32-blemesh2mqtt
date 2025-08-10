@@ -20,6 +20,7 @@
 #include "nvs_flash.h"
 
 // Project includes
+#include "ble_mesh_control.h"
 #include "ble_mesh_node.h"
 #include "common/log_common.h"
 #include "debug/console_cmd.h"
@@ -195,6 +196,14 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
                  bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
                  unprov_device.addr_type, unprov_device.adv_type);
         unprovisioned_devices.emplace_back(unprov_device);
+        
+        // Auto-provision if enabled
+        if (ble_mesh_get_auto_provisioning_enabled())
+        {
+            LOG_INFO(TAG, "Auto-provisioning enabled - automatically provisioning device: %s", 
+                     bt_hex(unprov_device.dev_uuid, 16));
+            ble_mesh_provision_device(unprov_device.dev_uuid);
+        }
     }
 }
 
