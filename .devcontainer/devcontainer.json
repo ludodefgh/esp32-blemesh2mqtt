@@ -1,21 +1,81 @@
 {
-	"name": "ESP-IDF QEMU",
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
-	"customizations": {
-		"vscode": {
-			"settings": {
-				"terminal.integrated.defaultProfile.linux": "bash",
-				"idf.espIdfPath": "/opt/esp/idf",
-				"idf.toolsPath": "/opt/esp",
-				"idf.gitPath": "/usr/bin/git"
-			},
-			"extensions": [
-				"espressif.esp-idf-extension",
-				"espressif.esp-idf-web"
-			]
-		}
-	},
-	"runArgs": ["--privileged"]
+    "name": "ESP-IDF BleMesh2MQTT Bridge",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "USERNAME": "esp",
+            "USER_UID": "1001",
+            "USER_GID": "1001"
+        }
+    },
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "remoteUser": "esp",
+    "mounts": [
+        "source=/dev,target=/dev,type=bind",
+        "source=${localEnv:HOME}/.gitconfig,target=/home/esp/.gitconfig,type=bind,consistency=cached"
+    ],
+    "runArgs": [
+        "--privileged",
+        "--device=/dev/ttyUSB0:/dev/ttyUSB0",
+        "--device=/dev/ttyACM0:/dev/ttyACM0"
+    ],
+    "postCreateCommand": ".devcontainer/post-create.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "espressif.esp-idf-extension",
+                "ms-python.python",
+                "ms-vscode.vscode-serial-monitor",
+                "formulahendry.auto-rename-tag",
+                "bradlc.vscode-tailwindcss",
+                "ms-vscode.vscode-json"
+            ],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "terminal.integrated.profiles.linux": {
+                    "bash": {
+                        "path": "/bin/bash",
+                        "args": ["-l"]
+                    }
+                },
+                "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+                "C_Cpp.default.compilerPath": "/opt/esp/tools/xtensa-esp32-elf/esp-13.2.0_20240530/xtensa-esp32-elf/bin/xtensa-esp32-elf-gcc",
+                "files.associations": {
+                    "*.h": "c",
+                    "*.c": "c",
+                    "*.cpp": "cpp",
+                    "*.hpp": "cpp"
+                },
+                "python.defaultInterpreter": "/opt/esp/python_env/idf5.4_py3.12_env/bin/python"
+            }
+        }
+    },
+    "forwardPorts": [
+        80,
+        8080,
+        1883,
+        8883
+    ],
+    "portsAttributes": {
+        "80": {
+            "label": "Web Interface",
+            "onAutoForward": "notify"
+        },
+        "8080": {
+            "label": "Development Server",
+            "onAutoForward": "notify"
+        },
+        "1883": {
+            "label": "MQTT",
+            "onAutoForward": "ignore"
+        },
+        "8883": {
+            "label": "MQTT SSL",
+            "onAutoForward": "ignore"
+        }
+    },
+    "features": {}
 }
