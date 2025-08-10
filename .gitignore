@@ -51,8 +51,11 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-#esp-idf build output dir
+# esp-idf build output dir
 build/
 
 !sdkconfig.ci.model
 _config.h
+
+# Devcontainer artifacts
+.devcontainer/.vscode-server/
