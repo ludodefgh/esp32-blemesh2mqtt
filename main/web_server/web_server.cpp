@@ -14,6 +14,7 @@
 
 // Project includes
 #include "ble_mesh/ble_mesh_commands.h"
+#include "ble_mesh/ble_mesh_control.h"
 #include "ble_mesh/ble_mesh_node.h"
 #include "ble_mesh/ble_mesh_provisioning.h"
 #include "common/log_common.h"
@@ -432,6 +433,22 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return list_console_commands_handler(req);
     }
+    else if (strstr(req->uri, "/api/auto_provisioning"))
+    {
+        if (req->method == HTTP_GET)
+        {
+            return auto_provisioning_get_handler(req);
+        }
+        else if (req->method == HTTP_POST)
+        {
+            return auto_provisioning_set_handler(req);
+        }
+        else
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+    }
     else if (strstr(req->uri, "/api/ota/upload"))
     {
         return ota_upload_handler(req);
@@ -777,6 +794,61 @@ esp_err_t mqtt_wildcard_handler(httpd_req_t *req)
 
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "MQTT operation not found");
     return ESP_FAIL;
+}
+
+esp_err_t auto_provisioning_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    
+    char buf[128];
+    snprintf(buf, sizeof(buf), 
+             "{ \"enable_provisioning\": %s, \"enable_auto_provisioning\": %s }",
+             ble_mesh_get_provisioning_enabled() ? "true" : "false",
+             ble_mesh_get_auto_provisioning_enabled() ? "true" : "false");
+    
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t auto_provisioning_set_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+    
+    // Parse JSON to get auto_provisioning value
+    cJSON *json = cJSON_Parse(buf);
+    if (json == NULL)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    
+    cJSON *auto_prov_item = cJSON_GetObjectItem(json, "enable_auto_provisioning");
+    if (cJSON_IsBool(auto_prov_item))
+    {
+        bool new_value = cJSON_IsTrue(auto_prov_item);
+        ble_mesh_set_auto_provisioning_enabled(new_value);
+        
+        httpd_resp_set_type(req, "application/json");
+        snprintf(buf, sizeof(buf), "{ \"success\": true, \"enable_auto_provisioning\": %s }", 
+                 new_value ? "true" : "false");
+        httpd_resp_send(req, buf, -1);
+    }
+    else
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid enable_auto_provisioning field");
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+    
+    cJSON_Delete(json);
+    return ESP_OK;
 }
 
 esp_err_t node_wildcard_handler(httpd_req_t *req)

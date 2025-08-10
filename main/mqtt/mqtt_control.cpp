@@ -554,6 +554,14 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
         return;
     }
 
+    if (strncmp(event->topic, get_bridge_auto_provisioning_set_topic(), event->topic_len) == 0)
+    {
+        LOG_INFO(TAG, "Received auto-provisioning command from MQTT: [%.*s]", event->data_len, event->data);
+        ble_mesh_set_auto_provisioning_enabled(strncmp(event->data, "ON", event->data_len) == 0);
+
+        return;
+    }
+
     if (strncmp(event->topic, get_bridge_restart_set_topic(), event->topic_len) == 0)
     {
         LOG_INFO(TAG, "Received restart command from MQTT: [%.*s]", event->data_len, event->data);

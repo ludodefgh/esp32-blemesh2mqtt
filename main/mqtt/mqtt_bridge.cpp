@@ -13,6 +13,7 @@
 #include "esp_wifi.h"
 
 // Project includes
+#include "ble_mesh/ble_mesh_control.h"
 #include "common/log_common.h"
 #include "common/version.h"
 #include "mqtt_control.h"
@@ -93,6 +94,18 @@ const char *get_bridge_provisioning_set_topic()
     return topic.c_str();
 }
 
+const char *get_bridge_auto_provisioning_state_topic()
+{
+    static const std::string topic{get_bridge_base_topic() + "/bridge/auto_provisioning/state"};
+    return topic.c_str();
+}
+
+const char *get_bridge_auto_provisioning_set_topic()
+{
+    static const std::string topic{get_bridge_base_topic() + "/bridge/auto_provisioning/set"};
+    return topic.c_str();
+}
+
 const char *get_bridge_restart_set_topic()
 {
     static const std::string topic{get_bridge_base_topic() + "/bridge/restart/set"};
@@ -115,6 +128,40 @@ CJsonPtr create_provisioning_json()
     cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
     cJSON_AddStringToObject(root.get(), "payload_available", "on");
     cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
+
+    // Device object
+    cJSON *device = create_bridge_device_object();
+
+    // Add device to root
+    cJSON_AddItemToObject(root.get(), "device", device);
+
+    cJSON *origin = cJSON_CreateObject();
+    cJSON_AddStringToObject(origin, "name", "blemesh2mqtt");
+    cJSON_AddStringToObject(origin, "sw", FIRMWARE_VERSION);
+
+    cJSON_AddItemToObject(root.get(), "origin", origin);
+
+    return root;
+}
+
+CJsonPtr create_auto_provisioning_json()
+{
+    CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
+
+    // Top-level fields
+    cJSON_AddStringToObject(root.get(), "name", "Auto-provisioning");
+    std::string unique_id = get_bridge_mac_identifier();
+    unique_id += "_auto_provisioning";
+    cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
+    cJSON_AddStringToObject(root.get(), "state_topic", get_bridge_auto_provisioning_state_topic());
+    cJSON_AddStringToObject(root.get(), "command_topic", get_bridge_auto_provisioning_set_topic());
+    cJSON_AddStringToObject(root.get(), "state_on", "ON");
+    cJSON_AddStringToObject(root.get(), "state_off", "OFF");
+    cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
+    cJSON_AddStringToObject(root.get(), "payload_available", "on");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
+    cJSON_AddStringToObject(root.get(), "icon", "mdi:auto-mode");
+    cJSON_AddStringToObject(root.get(), "entity_category", "config");
 
     // Device object
     cJSON *device = create_bridge_device_object();
@@ -276,7 +323,6 @@ void publish_bridge_info()
 }
 
 // FIX-ME : make it accesible globally
-extern bool enable_provisioning;
 void send_bridge_discovery()
 {
     // Publish provisioning switch
@@ -301,6 +347,31 @@ void send_bridge_discovery()
         else
         {
             LOG_ERROR(TAG, "No unique_id found in switch discovery JSON");
+        }
+    }
+
+    // Publish auto-provisioning switch
+    {
+        CJsonPtr discovery_json = create_auto_provisioning_json();
+        if (cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(discovery_json.get(), "unique_id"))
+        {
+            if (cJSON_IsString(unique_id) && (unique_id->valuestring != nullptr))
+            {
+                LOG_INFO(TAG, "Publishing auto-provisioning switch discovery for %s", unique_id->valuestring);
+
+                char *json_data = cJSON_PrintUnformatted(discovery_json.get());
+                const std::string topic = "homeassistant/switch/" + std::string{unique_id->valuestring} + "/config";
+                esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), json_data, 0, 0, 0);
+                cJSON_free(json_data);
+            }
+            else
+            {
+                LOG_ERROR(TAG, "Invalid unique_id in auto-provisioning switch discovery JSON");
+            }
+        }
+        else
+        {
+            LOG_ERROR(TAG, "No unique_id found in auto-provisioning switch discovery JSON");
         }
     }
 
@@ -358,7 +429,10 @@ void send_bridge_discovery()
         publish_bridge_info();
     }
     {
-        mqtt_publish_provisioning_enabled(enable_provisioning);
+        mqtt_publish_provisioning_enabled(ble_mesh_get_provisioning_enabled());
+    }
+    {
+        mqtt_publish_auto_provisioning_enabled(ble_mesh_get_auto_provisioning_enabled());
     }
 }
 
@@ -389,10 +463,19 @@ void mqtt_publish_provisioning_enabled(bool enable_provisioning)
     esp_mqtt_client_publish(mqtt_get_client(), get_bridge_provisioning_state_topic(), enable_provisioning ? "ON" : "OFF", 0, 0, 0);
 }
 
+void mqtt_publish_auto_provisioning_enabled(bool enable_auto_provisioning)
+{
+    LOG_INFO(TAG, "Auto-provisioning publish : %s", enable_auto_provisioning ? "ON" : "OFF");
+    esp_mqtt_client_publish(mqtt_get_client(), get_bridge_auto_provisioning_state_topic(), enable_auto_provisioning ? "ON" : "OFF", 0, 0, 0);
+}
+
 void mqtt_bridge_subscribe(esp_mqtt_client_handle_t client)
 {
     int msg_id = esp_mqtt_client_subscribe(client, get_bridge_provisioning_set_topic(), 0);
     LOG_INFO(TAG, "sent provisioning subscribe successful, msg_id=%d", msg_id);
+
+    msg_id = esp_mqtt_client_subscribe(client, get_bridge_auto_provisioning_set_topic(), 0);
+    LOG_INFO(TAG, "sent auto-provisioning subscribe successful, msg_id=%d", msg_id);
 
     msg_id = esp_mqtt_client_subscribe(client, get_bridge_restart_set_topic(), 0);
     LOG_INFO(TAG, "sent restart subscribe successful, msg_id=%d", msg_id);

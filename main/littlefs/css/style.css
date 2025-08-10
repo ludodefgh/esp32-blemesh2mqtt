@@ -238,6 +238,80 @@ body {
   height: 1rem;
 }
 
+/* Provisioning Controls */
+.provisioning-controls {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.toggle-text {
+  font-size: 1rem;
+}
+
+.toggle-description {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-left: 0.25rem;
+}
+
+/* Custom Toggle Switch */
+.toggle-label input[type="checkbox"] {
+  position: relative;
+  width: 3rem;
+  height: 1.5rem;
+  appearance: none;
+  background: var(--secondary);
+  border-radius: 1rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.toggle-label input[type="checkbox"]:checked {
+  background: var(--primary);
+}
+
+.toggle-label input[type="checkbox"]:before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1.25rem;
+  height: 1.25rem;
+  background: white;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-label input[type="checkbox"]:checked:before {
+  transform: translateX(1.5rem);
+}
+
+.toggle-label input[type="checkbox"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Node Cards */
 .nodes-grid, .devices-grid {
   display: grid;

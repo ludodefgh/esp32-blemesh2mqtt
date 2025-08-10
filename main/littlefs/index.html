@@ -85,6 +85,19 @@
                 </div>
               </div>
             </div>
+            
+            <!-- Provisioning Controls -->
+            <div class="provisioning-controls">
+              <div class="toggle-group">
+                <label class="toggle-label">
+                  <span class="toggle-text">Auto-provisioning</span>
+                  <input type="checkbox" id="auto-provisioning-toggle" onchange="toggleAutoProvisioning(this.checked)">
+                  <span class="toggle-slider"></span>
+                </label>
+                <span class="toggle-description">Automatically provision newly discovered BLE Mesh devices</span>
+              </div>
+            </div>
+            
             <div class="controls-grid">
               <button class="btn btn-primary" onclick="sendBridgeMqttDiscovery()">
                 <span class="icon">📡</span>

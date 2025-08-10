@@ -20,7 +20,12 @@ void ble_mesh_refresh_all_nodes();
 void ble_mesh_refresh_node(const std::shared_ptr<bm2mqtt_node_info>& node_info, const esp_ble_mesh_node_t *node);
 void register_blemesh_commands();
 
+// Provisioning control functions
 void ble_mesh_set_provisioning_enabled(bool enabled_value);
+bool ble_mesh_get_provisioning_enabled(void);
+
+void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
+bool ble_mesh_get_auto_provisioning_enabled(void);
 
 // Function declarations from main.cpp
 esp_err_t bluetooth_init(void);
