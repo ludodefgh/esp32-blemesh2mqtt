@@ -27,6 +27,7 @@
 #include "debug/debug_commands_registry.h"
 #include "debug_console_common.h"
 #include "message_queue.h"
+#include "mqtt/mqtt_control.h"
 
 #define TAG "APP_PROV"
 
@@ -591,6 +592,20 @@ void register_provisioning_commands()
         .argtable = &node_index_args,
     };
     ESP_ERROR_CHECK(register_console_command(&provision_device_index_cmd));
+}
+
+void ble_mesh_reset_node(std::shared_ptr<bm2mqtt_node_info> node)
+{
+    if (node != nullptr)
+    {
+        LOG_INFO(TAG, "Node reset successfully");
+        LOG_INFO(TAG, "Resetting node 0x%04X", node->unicast);
+        mqtt_remove_node(node);
+        esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
+        node_manager().remove_node(node->uuid);
+        message_queue().clear_queue(node);
+        node_manager().mark_node_info_dirty();
+    }
 }
 
 REGISTER_DEBUG_COMMAND(register_provisioning_commands);
