@@ -429,21 +429,7 @@ static void ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
 
         case ESP_BLE_MESH_MODEL_OP_NODE_RESET:
         {
-            if (node != nullptr)
-            {
-                LOG_INFO(TAG, "Node reset successfully");
-                LOG_INFO(TAG, "Resetting node 0x%04X", node->unicast);
-                mqtt_remove_node(node);
-                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
-                node_manager().remove_node(node->uuid);
-                message_queue().clear_queue(node);
-                node_manager().mark_node_info_dirty();
-            }
-            else
-            {
-                LOG_ERROR(TAG, "Node not found for reset");
-                esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
-            }
+            ble_mesh_reset_node(node);
         };
         break;
         default:

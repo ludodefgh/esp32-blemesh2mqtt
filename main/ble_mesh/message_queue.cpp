@@ -12,6 +12,7 @@
 #include "common/log_common.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
+#include "ble_mesh_provisioning.h"
 
 static const char *TAG = "MESS_QUEUE";
 
@@ -181,7 +182,7 @@ void message_queue_manager::handle_ack(const std::shared_ptr<bm2mqtt_node_info>&
     {
         // Special handling for node reset
         LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
-        node_queues.erase(node);
+        ble_mesh_reset_node(node);
     }
 }
 
@@ -205,7 +206,7 @@ void message_queue_manager::handle_timeout(const std::shared_ptr<bm2mqtt_node_in
     {
         // Special handling for node reset
         LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
-        node_queues.erase(node);
+        ble_mesh_reset_node(node);
     }
 }
 

@@ -51,3 +51,5 @@ void register_provisioning_commands();
 
 void ble_mesh_unprovision_device(const device_uuid128 &dev_uuid);
 void ble_mesh_provision_device(const uint8_t uuid[16]);
+
+void ble_mesh_reset_node(std::shared_ptr<bm2mqtt_node_info> node);
