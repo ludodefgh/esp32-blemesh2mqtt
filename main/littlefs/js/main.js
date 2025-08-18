@@ -490,20 +490,35 @@ function restartBridge() {
     button.disabled = true;
     button.innerHTML = '<span class="icon">⏳</span> Restarting...';
     
+    // Close WebSocket connection cleanly before restart
+    if (currentWebSocket) {
+      currentWebSocket.close();
+      currentWebSocket = null;
+    }
+    
+    // Clear any existing reconnection timers
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    isReconnecting = false;
+    
     fetch("/bridge/restart", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: ""
     }).then(() => {
       showToast('Bridge restart initiated', 'info');
+      // Wait longer for ESP32 to fully restart (10 seconds instead of 5)
       setTimeout(() => {
         window.location.reload();
-      }, 5000);
+      }, 10000);
     }).catch(err => {
       showToast('Bridge restarting...', 'info');
+      // Wait longer for ESP32 to fully restart (10 seconds instead of 5)
       setTimeout(() => {
         window.location.reload();
-      }, 5000);
+      }, 10000);
     });
   }
 }
@@ -670,108 +685,58 @@ function startLogSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = protocol + "//" + location.host + "/ws/logs";
   
-  console.log('Starting WebSocket connection to:', wsUrl);
-  
-  try {
-    const ws = new WebSocket(wsUrl);
-    currentWebSocket = ws;
-    const logOutput = document.getElementById("log-output");
-    const autoScrollCheckbox = document.getElementById("auto-scroll");
+  const ws = new WebSocket(wsUrl);
+  currentWebSocket = ws;
+  const logOutput = document.getElementById("log-output");
+  const autoScrollCheckbox = document.getElementById("auto-scroll");
 
-    ws.onopen = () => {
-      console.log('WebSocket connection established');
-      isReconnecting = false;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      
-      // Add a connection indicator in logs
-      if (logOutput) {
-        const div = document.createElement("div");
-        div.className = "log-info";
-        div.textContent = "I (WebSocket) Log connection established";
-        logOutput.appendChild(div);
-        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
-          logOutput.scrollTop = logOutput.scrollHeight;
-        }
-      }
-    };
-
-    ws.onmessage = event => {
-      if (!logOutput) return;
-      
-      const line = event.data;
-      let cls = "log-default";
-      
-      if (line.startsWith('E')) cls = "log-error";
-      else if (line.startsWith('W')) cls = "log-warning";
-      else if (line.startsWith('I')) cls = "log-info";
-
-      const div = document.createElement("div");
-      div.className = cls;
-      div.textContent = line;
-      logOutput.appendChild(div);
-      
-      // Auto-scroll if enabled
-      if (autoScrollCheckbox && autoScrollCheckbox.checked) {
-        logOutput.scrollTop = logOutput.scrollHeight;
-      }
-    };
-
-    ws.onclose = (event) => {
-      console.log('WebSocket connection closed:', event.code, event.reason);
-      currentWebSocket = null;
-      
-      // Add a disconnection indicator in logs
-      const logOutput = document.getElementById("log-output");
-      if (logOutput) {
-        const div = document.createElement("div");
-        div.className = "log-warning";
-        div.textContent = `W (WebSocket) Log connection closed (${event.code})`;
-        logOutput.appendChild(div);
-        const autoScrollCheckbox = document.getElementById("auto-scroll");
-        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
-          logOutput.scrollTop = logOutput.scrollHeight;
-        }
-      }
-      
-      if (!isReconnecting) {
-        isReconnecting = true;
-        reconnectTimer = setTimeout(() => {
-          startLogSocket();
-        }, 3000); // Wait 3 seconds before reconnecting
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      currentWebSocket = null;
-      ws.close();
-      
-      // Add an error indicator in logs
-      const logOutput = document.getElementById("log-output");
-      if (logOutput) {
-        const div = document.createElement("div");
-        div.className = "log-error";
-        div.textContent = "E (WebSocket) Log connection error - check network or server";
-        logOutput.appendChild(div);
-        const autoScrollCheckbox = document.getElementById("auto-scroll");
-        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
-          logOutput.scrollTop = logOutput.scrollHeight;
-        }
-      }
-    };
-  } catch (error) {
-    console.error('Failed to create WebSocket:', error);
-    const logOutput = document.getElementById("log-output");
-    if (logOutput) {
-      const div = document.createElement("div");
-      div.className = "log-error";
-      div.textContent = "E (WebSocket) Failed to create log connection: " + error.message;
-      logOutput.appendChild(div);
+  ws.onopen = () => {
+    isReconnecting = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
-  }
+  };
+
+  ws.onmessage = event => {
+    if (!logOutput) return;
+    
+    const line = event.data;
+    let cls = "log-default";
+    
+    if (line.startsWith('E')) cls = "log-error";
+    else if (line.startsWith('W')) cls = "log-warning";
+    else if (line.startsWith('I')) cls = "log-info";
+
+    const div = document.createElement("div");
+    div.className = cls;
+    div.textContent = line;
+    logOutput.appendChild(div);
+    
+    // Auto-scroll if enabled
+    if (autoScrollCheckbox && autoScrollCheckbox.checked) {
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+  };
+
+  ws.onclose = (event) => {
+    console.log('WebSocket closed:', event.code, event.reason);
+    currentWebSocket = null;
+    if (!isReconnecting) {
+      isReconnecting = true;
+      console.log('Scheduling WebSocket reconnection in 3 seconds...');
+      reconnectTimer = setTimeout(() => {
+        console.log('Attempting WebSocket reconnection...');
+        isReconnecting = false; // Reset flag before attempting
+        startLogSocket();
+      }, 3000); // Wait 3 seconds before reconnecting
+    }
+  };
+
+  ws.onerror = (error) => {
+    currentWebSocket = null;
+    ws.close();
+  };
   
   // Handle auto-scroll checkbox
   if (autoScrollCheckbox && !autoScrollCheckbox.hasEventListener) {
@@ -1017,6 +982,14 @@ function testConnection() {
 
 // Main initialization
 document.addEventListener("DOMContentLoaded", function () {
+  // Reset WebSocket state on page load
+  currentWebSocket = null;
+  isReconnecting = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
   // Initialize theme
   initializeTheme();
   
