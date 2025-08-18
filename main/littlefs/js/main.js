@@ -666,54 +666,112 @@ let currentWebSocket = null;
 function startLogSocket() {
   if (isReconnecting || currentWebSocket) return;
   
-  const ws = new WebSocket("ws://" + location.host + "/ws/logs");
-  currentWebSocket = ws;
-  const logOutput = document.getElementById("log-output");
-  const autoScrollCheckbox = document.getElementById("auto-scroll");
+  // Use secure WebSocket if page is served over HTTPS
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = protocol + "//" + location.host + "/ws/logs";
+  
+  console.log('Starting WebSocket connection to:', wsUrl);
+  
+  try {
+    const ws = new WebSocket(wsUrl);
+    currentWebSocket = ws;
+    const logOutput = document.getElementById("log-output");
+    const autoScrollCheckbox = document.getElementById("auto-scroll");
 
-  ws.onopen = () => {
-    isReconnecting = false;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+    ws.onopen = () => {
+      console.log('WebSocket connection established');
+      isReconnecting = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      
+      // Add a connection indicator in logs
+      if (logOutput) {
+        const div = document.createElement("div");
+        div.className = "log-info";
+        div.textContent = "I (WebSocket) Log connection established";
+        logOutput.appendChild(div);
+        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
+          logOutput.scrollTop = logOutput.scrollHeight;
+        }
+      }
+    };
+
+    ws.onmessage = event => {
+      if (!logOutput) return;
+      
+      const line = event.data;
+      let cls = "log-default";
+      
+      if (line.startsWith('E')) cls = "log-error";
+      else if (line.startsWith('W')) cls = "log-warning";
+      else if (line.startsWith('I')) cls = "log-info";
+
+      const div = document.createElement("div");
+      div.className = cls;
+      div.textContent = line;
+      logOutput.appendChild(div);
+      
+      // Auto-scroll if enabled
+      if (autoScrollCheckbox && autoScrollCheckbox.checked) {
+        logOutput.scrollTop = logOutput.scrollHeight;
+      }
+    };
+
+    ws.onclose = (event) => {
+      console.log('WebSocket connection closed:', event.code, event.reason);
+      currentWebSocket = null;
+      
+      // Add a disconnection indicator in logs
+      const logOutput = document.getElementById("log-output");
+      if (logOutput) {
+        const div = document.createElement("div");
+        div.className = "log-warning";
+        div.textContent = `W (WebSocket) Log connection closed (${event.code})`;
+        logOutput.appendChild(div);
+        const autoScrollCheckbox = document.getElementById("auto-scroll");
+        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
+          logOutput.scrollTop = logOutput.scrollHeight;
+        }
+      }
+      
+      if (!isReconnecting) {
+        isReconnecting = true;
+        reconnectTimer = setTimeout(() => {
+          startLogSocket();
+        }, 3000); // Wait 3 seconds before reconnecting
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      currentWebSocket = null;
+      ws.close();
+      
+      // Add an error indicator in logs
+      const logOutput = document.getElementById("log-output");
+      if (logOutput) {
+        const div = document.createElement("div");
+        div.className = "log-error";
+        div.textContent = "E (WebSocket) Log connection error - check network or server";
+        logOutput.appendChild(div);
+        const autoScrollCheckbox = document.getElementById("auto-scroll");
+        if (autoScrollCheckbox && autoScrollCheckbox.checked) {
+          logOutput.scrollTop = logOutput.scrollHeight;
+        }
+      }
+    };
+  } catch (error) {
+    console.error('Failed to create WebSocket:', error);
+    const logOutput = document.getElementById("log-output");
+    if (logOutput) {
+      const div = document.createElement("div");
+      div.className = "log-error";
+      div.textContent = "E (WebSocket) Failed to create log connection: " + error.message;
+      logOutput.appendChild(div);
     }
-  };
-
-  ws.onmessage = event => {
-    if (!logOutput) return;
-    
-    const line = event.data;
-    let cls = "log-default";
-    
-    if (line.startsWith('E')) cls = "log-error";
-    else if (line.startsWith('W')) cls = "log-warning";
-    else if (line.startsWith('I')) cls = "log-info";
-
-    const div = document.createElement("div");
-    div.className = cls;
-    div.textContent = line;
-    logOutput.appendChild(div);
-    
-    // Auto-scroll if enabled
-    if (autoScrollCheckbox && autoScrollCheckbox.checked) {
-      logOutput.scrollTop = logOutput.scrollHeight;
-    }
-  };
-
-  ws.onclose = (event) => {
-    currentWebSocket = null;
-    if (!isReconnecting) {
-      isReconnecting = true;
-      reconnectTimer = setTimeout(() => {
-        startLogSocket();
-      }, 3000); // Wait 3 seconds before reconnecting
-    }
-  };
-
-  ws.onerror = (error) => {
-    currentWebSocket = null;
-    ws.close();
-  };
+  }
   
   // Handle auto-scroll checkbox
   if (autoScrollCheckbox && !autoScrollCheckbox.hasEventListener) {
