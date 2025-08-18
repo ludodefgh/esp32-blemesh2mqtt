@@ -53,7 +53,8 @@
       "Bash(/workspace/setup-idf-env.sh which xtensa-esp32-elf-gcc)",
       "Bash(/workspace/setup-idf-env.sh idf.py build:*)",
       "Bash(/opt/esp/python_env/bin/python:*)",
-      "Bash(. /workspace/setup-idf-env.sh)"
+      "Bash(. /workspace/setup-idf-env.sh)",
+      "Bash(. /opt/esp/idf/export.sh)"
     ],
     "deny": []
   }

@@ -9,7 +9,11 @@
 <body>
   <header class="header">
     <div class="header-left">
-      <button class="menu-toggle" id="menu-toggle">☰</button>
+      <button class="menu-toggle" id="menu-toggle">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+      </button>
       <h1>BleMesh2MQTT Bridge</h1>
     </div>
     <div class="header-controls">
@@ -28,6 +32,28 @@
       </div>
     </div>
   </header>
+
+  <!-- Mobile burger menu dropdown -->
+  <div class="mobile-menu" id="mobile-menu">
+    <div class="mobile-menu-content">
+      <div class="mobile-menu-item active" data-section="bridge">
+        <span class="menu-icon bridge-icon">🔗</span>
+        <span class="menu-text">Bridge</span>
+      </div>
+      <div class="mobile-menu-item" data-section="ble-mesh">
+        <span class="menu-icon mesh-icon">🌐</span>
+        <span class="menu-text">BLE Mesh</span>
+      </div>
+      <div class="mobile-menu-item" data-section="firmware">
+        <span class="menu-icon firmware-icon">💿</span>
+        <span class="menu-text">Firmware</span>
+      </div>
+      <div class="mobile-menu-item" data-section="debug">
+        <span class="menu-icon debug-icon">🔧</span>
+        <span class="menu-text">Debug</span>
+      </div>
+    </div>
+  </div>
 
   <div class="layout">
     <nav class="sidebar" id="sidebar">
@@ -176,12 +202,12 @@
                   <label for="broker-port">Port:</label>
                   <input type="number" id="broker-port" name="broker_port" value="1883" min="1" max="65535" required>
                 </div>
-                <div class="form-group">
+                <!-- <div class="form-group">
                   <label class="checkbox-label">
                     <input type="checkbox" id="use-ssl" name="use_ssl">
                     Use SSL/TLS
                   </label>
-                </div>
+                </div> -->
               </div>
               
               <div class="form-group">

@@ -18,50 +18,72 @@ function switchSection(sectionId) {
     targetSection.classList.add('active');
   }
   
-  // Update menu items
+  // Update desktop menu items
   document.querySelectorAll('.menu-item').forEach(item => {
     item.classList.remove('active');
   });
   
-  // Set active menu item
-  const targetMenuItem = document.querySelector(`[data-section="${sectionId}"]`);
+  // Update mobile menu items
+  document.querySelectorAll('.mobile-menu-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  
+  // Set active menu item (both desktop and mobile)
+  const targetMenuItem = document.querySelector(`.menu-item[data-section="${sectionId}"]`);
+  const targetMobileMenuItem = document.querySelector(`.mobile-menu-item[data-section="${sectionId}"]`);
+  
   if (targetMenuItem) {
     targetMenuItem.classList.add('active');
+  }
+  if (targetMobileMenuItem) {
+    targetMobileMenuItem.classList.add('active');
   }
   
   currentSection = sectionId;
   
-  // Close mobile sidebar
-  closeMobileSidebar();
+  // Close mobile menu
+  closeMobileMenu();
 }
 
-function toggleMobileSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.querySelector('.sidebar-overlay');
+function toggleMobileMenu() {
+  const mobileMenu = document.getElementById('mobile-menu');
+  const menuToggle = document.getElementById('menu-toggle');
   
-  if (!overlay) {
-    // Create overlay if it doesn't exist
-    const newOverlay = document.createElement('div');
-    newOverlay.className = 'sidebar-overlay';
-    newOverlay.addEventListener('click', closeMobileSidebar);
-    document.body.appendChild(newOverlay);
+  if (mobileMenu && menuToggle) {
+    mobileMenu.classList.toggle('show');
+    menuToggle.classList.toggle('active');
+    
+    // Prevent body scroll when menu is open
+    if (mobileMenu.classList.contains('show')) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
   }
-  
-  sidebar.classList.toggle('open');
-  document.querySelector('.sidebar-overlay').classList.toggle('show');
 }
 
-function closeMobileSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  const overlay = document.querySelector('.sidebar-overlay');
-  if (overlay) {
-    overlay.classList.remove('show');
+function closeMobileMenu() {
+  const mobileMenu = document.getElementById('mobile-menu');
+  const menuToggle = document.getElementById('menu-toggle');
+  
+  if (mobileMenu && menuToggle) {
+    mobileMenu.classList.remove('show');
+    menuToggle.classList.remove('active');
+    document.body.style.overflow = '';
   }
 }
 
 function initNavigation() {
-  // Add click handlers for menu items
+  // Add click handlers for desktop menu items
   document.querySelectorAll('.menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const sectionId = item.dataset.section;
+      switchSection(sectionId);
+    });
+  });
+  
+  // Add click handlers for mobile menu items
+  document.querySelectorAll('.mobile-menu-item').forEach(item => {
     item.addEventListener('click', () => {
       const sectionId = item.dataset.section;
       switchSection(sectionId);
@@ -71,8 +93,25 @@ function initNavigation() {
   // Add click handler for mobile menu toggle
   const menuToggle = document.getElementById('menu-toggle');
   if (menuToggle) {
-    menuToggle.addEventListener('click', toggleMobileSidebar);
+    menuToggle.addEventListener('click', toggleMobileMenu);
   }
+  
+  // Close mobile menu when clicking on overlay
+  document.addEventListener('click', (e) => {
+    const mobileMenu = document.getElementById('mobile-menu');
+    const mobileMenuContent = mobileMenu ? mobileMenu.querySelector('.mobile-menu-content') : null;
+    const menuToggle = document.getElementById('menu-toggle');
+    
+    if (mobileMenu && menuToggle && 
+        mobileMenu.classList.contains('show') &&
+        !menuToggle.contains(e.target)) {
+      
+      // If clicking on the overlay (not the content), close the menu
+      if (e.target === mobileMenu || (!mobileMenuContent || !mobileMenuContent.contains(e.target))) {
+        closeMobileMenu();
+      }
+    }
+  });
   
   // Initialize with the Bridge section active
   switchSection('bridge');
