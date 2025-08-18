@@ -7,7 +7,7 @@
 		"vscode": {
 			"settings": {
 				"terminal.integrated.defaultProfile.linux": "bash",
-				"idf.espIdfPath": "${workspaceFolder}/esp-idf",
+				"idf.espIdfPath": "/opt/esp/idf",
 				"idf.toolsPath": "/opt/esp",
 				"idf.gitPath": "/usr/bin/git"
 			},
@@ -16,6 +16,7 @@
 				"espressif.esp-idf-web",
 				"ms-vscode.cpptools",
                 "ms-vscode.cmake-tools",
+				"ms-vscode.cpptools-extension-pack",
                 "ms-python.python",
                 "ms-vscode.vscode-serial-monitor",
                 "bradlc.vscode-tailwindcss",

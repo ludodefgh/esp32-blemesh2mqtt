@@ -1,4 +1,4 @@
-[submodule "esp-idf"]
-	path = esp-idf
-	url = https://github.com/ludodefgh/esp-idf.git
-	branch = ble-mesh-fixes
+# [submodule "esp-idf"]
+# 	path = esp-idf
+# 	url = https://github.com/ludodefgh/esp-idf.git
+# 	branch = ble-mesh-fixes
