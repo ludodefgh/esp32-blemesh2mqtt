@@ -863,7 +863,7 @@ function loadMqttStatus() {
         document.getElementById("broker-host").value = data.broker_host || '';
         document.getElementById("broker-port").value = data.broker_port || 1883;
         document.getElementById("username").value = data.username || '';
-        document.getElementById("use-ssl").checked = data.use_ssl || false;
+        //document.getElementById("use-ssl").checked = data.use_ssl || false;
         // Don't populate password for security
       }
       

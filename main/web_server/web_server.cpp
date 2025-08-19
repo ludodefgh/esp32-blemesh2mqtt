@@ -479,6 +479,7 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
 esp_err_t mqtt_api_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
     // Extract action from URI path
     const char *action = nullptr;
@@ -511,20 +512,53 @@ esp_err_t mqtt_api_handler(httpd_req_t *req)
 
         const auto &creds = mqtt_credentials().get_credentials();
         std::string last_error = mqtt_credentials().get_last_error();
+        std::string state_str = mqtt_credentials().get_connection_state_string();
 
-        char buf[512];
+        // Escape JSON strings to prevent malformed JSON
+        auto escape_json_string = [](const std::string& str) -> std::string {
+            std::string escaped;
+            escaped.reserve(str.length() * 1.2);
+            for (char c : str) {
+                switch (c) {
+                    case '"': escaped += "\\\""; break;
+                    case '\\': escaped += "\\\\"; break;
+                    case '\b': escaped += "\\b"; break;
+                    case '\f': escaped += "\\f"; break;
+                    case '\n': escaped += "\\n"; break;
+                    case '\r': escaped += "\\r"; break;
+                    case '\t': escaped += "\\t"; break;
+                    default:
+                        if (c < 0x20) {
+                            char hex[7];
+                            snprintf(hex, sizeof(hex), "\\u%04x", c);
+                            escaped += hex;
+                        } else {
+                            escaped += c;
+                        }
+                        break;
+                }
+            }
+            return escaped;
+        };
+
+        std::string state = escape_json_string(mqtt_credentials().get_connection_state_string());
+        std::string broker_host = creds.is_valid() ? escape_json_string(creds.broker_host) : "";
+        std::string username = creds.is_valid() ? escape_json_string(creds.username) : "";
+        std::string escaped_last_error = escape_json_string(last_error);
+
+        char buf[1024];
         snprintf(buf, sizeof(buf),
                  "{ \"state\": \"%s\", \"configured\": %s, \"broker_host\": \"%s\", \"broker_port\": %d, \"use_ssl\": %s, \"username\": \"%s\", \"last_error\": \"%s\" }",
-                 mqtt_credentials().get_connection_state_string().c_str(),
+                 state.c_str(),
                  creds.is_valid() ? "true" : "false",
-                 creds.is_valid() ? creds.broker_host.c_str() : "",
+                 broker_host.c_str(),
                  creds.broker_port,
                  creds.use_ssl ? "true" : "false",
-                 creds.is_valid() ? creds.username.c_str() : "",
-                 last_error.c_str());
+                 username.c_str(),
+                 escaped_last_error.c_str());
 
-        httpd_resp_send(req, buf, -1);
-        return ESP_OK;
+        esp_err_t result = httpd_resp_send(req, buf, strlen(buf));
+        return result;
     }
 
     // Handle POST requests (config, clear)
