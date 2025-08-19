@@ -54,7 +54,9 @@
       "Bash(/workspace/setup-idf-env.sh idf.py build:*)",
       "Bash(/opt/esp/python_env/bin/python:*)",
       "Bash(. /workspace/setup-idf-env.sh)",
-      "Bash(. /opt/esp/idf/export.sh)"
+      "Bash(. /opt/esp/idf/export.sh)",
+      "Bash(git restore:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }

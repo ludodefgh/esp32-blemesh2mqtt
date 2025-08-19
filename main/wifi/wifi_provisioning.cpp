@@ -198,12 +198,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 }
                 else
                 {
-                    LOG_INFO(TAG, "Successfully switched to APSTA mode - WiFi scanning now available");
-
-                    // Start a background WiFi scan to populate the list
-                    LOG_INFO(TAG, "Starting background WiFi scan to populate network list");
-                    vTaskDelay(pdMS_TO_TICKS(500)); // Give mode switch time to complete
-                    wifi_provisioning_scan_start();
+                    LOG_INFO(TAG, "Successfully switched to APSTA mode - WiFi scanning available on demand");
+                    // Note: WiFi scanning will only be performed when explicitly requested
+                    // to avoid interference with client connections
                 }
             }
         }
@@ -782,8 +779,8 @@ esp_err_t wifi_provisioning_scan_start(void)
     static uint32_t last_scan_time = 0;
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-    // Only scan if more than 10 seconds have passed since last scan (reduced for better UX)
-    if (s_scan_results && (current_time - last_scan_time) < 10000)
+    // Only scan if more than 30 seconds have passed since last scan (increased to reduce interference)
+    if (s_scan_results && (current_time - last_scan_time) < 30000)
     {
         LOG_INFO(TAG, "Using cached scan results (%d networks) - last scan was %d ms ago",
                  s_scan_count, (int)(current_time - last_scan_time));
@@ -826,12 +823,12 @@ esp_err_t wifi_provisioning_scan_start(void)
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
         .scan_time = {
             .active = {
-                .min = 50, // Reduced for less AP disruption
-                .max = 120 // Much shorter scan time to minimize disruption
+                .min = 30, // Very short minimum scan time
+                .max = 80  // Reduced maximum scan time to minimize client disconnections
             }}};
 
-    // Small delay to ensure AP operations are stable before scanning
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Delay to ensure AP operations are stable and no client activity is ongoing
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // Start non-blocking scan with minimal disruption
     LOG_INFO(TAG, "Starting gentle non-blocking WiFi scan...");

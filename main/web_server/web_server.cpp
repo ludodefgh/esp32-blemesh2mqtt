@@ -465,6 +465,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return ota_restart_handler(req);
     }
+    else if (strstr(req->uri, "/api/reset_wifi"))
+    {
+        return reset_wifi_handler(req);
+    }
     else
     {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
