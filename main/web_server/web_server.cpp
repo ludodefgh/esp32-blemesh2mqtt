@@ -1684,24 +1684,30 @@ void unregister_captive_portal_handlers(httpd_handle_t server)
         const char *uri;
         httpd_method_t method;
     } captive_uris[] = {
-        // Android captive portal detection
+        // Android captive portal detection (modern versions)
         {"/generate_204", HTTP_GET},
         {"/gen_204", HTTP_GET},
         {"/ncsi.txt", HTTP_GET},
         {"/connectivity-check.html", HTTP_GET},
+        {"/connectivitycheck.gstatic.com/generate_204", HTTP_GET},
 
         // iOS captive portal detection
         {"/hotspot-detect.html", HTTP_GET},
         {"/library/test/success.html", HTTP_GET},
+        {"/captive.apple.com/hotspot-detect.html", HTTP_GET},
 
         // Windows captive portal detection
         {"/connecttest.txt", HTTP_GET},
         {"/redirect", HTTP_GET},
+        {"/msftconnecttest.com/connecttest.txt", HTTP_GET},
+        {"/msftncsi.com/ncsi.txt", HTTP_GET},
 
-        // Additional common captive portal endpoints
+        // Additional modern connectivity checks
         {"/mobile/status.php", HTTP_GET},
         {"/canonical.html", HTTP_GET},
         {"/success.txt", HTTP_GET},
+        {"/kindle-wifi/wifiredirect.html", HTTP_GET},
+        {"/kindle-wifi/wifistub.html", HTTP_GET},
 
         // API endpoints
         {"/api/wifi/scan", HTTP_GET},

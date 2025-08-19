@@ -973,15 +973,26 @@ static esp_err_t captive_android_handler(httpd_req_t *req)
 {
     LOG_INFO(TAG, "Android captive portal detection: %s", req->uri);
 
-    // Modern Android captive portal detection optimization
-    // Return 200 with captive portal content for faster detection
+    // Handle specific Android connectivity checks differently
+    if (strstr(req->uri, "/generate_204") || strstr(req->uri, "/gen_204"))
+    {
+        // Android expects 204 (No Content) for successful connectivity
+        // Return different status to trigger captive portal
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/setup");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    // For other Android endpoints, return modified content
     httpd_resp_set_status(req, "200 OK");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
     httpd_resp_set_hdr(req, "Expires", "0");
     httpd_resp_set_hdr(req, "Content-Type", "text/html");
 
-    // Send minimal HTML that triggers captive portal detection
+    // Send modified HTML that signals captive portal
     const char *response = "<html><head><title>Captive Portal</title></head>"
                            "<body><script>window.location.href='http://192.168.4.1/setup';</script>"
                            "<h1>WiFi Setup Required</h1>"
@@ -995,10 +1006,31 @@ static esp_err_t captive_android_handler(httpd_req_t *req)
 static esp_err_t captive_ios_handler(httpd_req_t *req)
 {
     LOG_INFO(TAG, "iOS captive portal detection: %s", req->uri);
-    // iOS expects specific content for hotspot-detect.html
-    // Return different content to trigger captive portal
+    
+    // Handle different iOS connectivity check endpoints specifically
+    if (strstr(req->uri, "/hotspot-detect.html"))
+    {
+        // iOS hotspot-detect.html expects specific HTML content
+        // Return modified content to trigger captive portal
+        httpd_resp_set_status(req, "200 OK");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+        httpd_resp_set_hdr(req, "Content-Type", "text/html");
+        
+        // iOS expects different content than the default "Success"
+        const char *response = "<HTML><HEAD><TITLE>WiFi Setup Required</TITLE></HEAD>"
+                               "<BODY><H1>WiFi Configuration Needed</H1>"
+                               "<P>To access the internet, configure WiFi settings.</P>"
+                               "<P><A HREF='http://192.168.4.1/setup'>Configure WiFi</A></P>"
+                               "</BODY></HTML>";
+        
+        httpd_resp_sendstr(req, response);
+        return ESP_OK;
+    }
+    
+    // For other iOS endpoints, use redirect
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/setup");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
@@ -1219,19 +1251,25 @@ void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
         {.uri = "/gen_204", .method = HTTP_GET, .handler = captive_android_handler},
         {.uri = "/ncsi.txt", .method = HTTP_GET, .handler = captive_android_handler},
         {.uri = "/connectivity-check.html", .method = HTTP_GET, .handler = captive_android_handler},
+        {.uri = "/connectivitycheck.gstatic.com/generate_204", .method = HTTP_GET, .handler = captive_android_handler},
 
         // iOS captive portal detection
         {.uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = captive_ios_handler},
         {.uri = "/library/test/success.html", .method = HTTP_GET, .handler = captive_ios_handler},
+        {.uri = "/captive.apple.com/hotspot-detect.html", .method = HTTP_GET, .handler = captive_ios_handler},
 
         // Windows captive portal detection
         {.uri = "/connecttest.txt", .method = HTTP_GET, .handler = captive_windows_handler},
         {.uri = "/redirect", .method = HTTP_GET, .handler = captive_redirect_handler},
+        {.uri = "/msftconnecttest.com/connecttest.txt", .method = HTTP_GET, .handler = captive_windows_handler},
+        {.uri = "/msftncsi.com/ncsi.txt", .method = HTTP_GET, .handler = captive_windows_handler},
 
-        // Additional common captive portal endpoints
+        // Additional modern connectivity checks
         {.uri = "/mobile/status.php", .method = HTTP_GET, .handler = captive_redirect_handler},
         {.uri = "/canonical.html", .method = HTTP_GET, .handler = captive_redirect_handler},
         {.uri = "/success.txt", .method = HTTP_GET, .handler = captive_redirect_handler},
+        {.uri = "/kindle-wifi/wifiredirect.html", .method = HTTP_GET, .handler = captive_redirect_handler},
+        {.uri = "/kindle-wifi/wifistub.html", .method = HTTP_GET, .handler = captive_redirect_handler},
 
         // API endpoints
         {.uri = "/api/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_handler},
