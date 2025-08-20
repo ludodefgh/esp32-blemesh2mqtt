@@ -836,6 +836,9 @@ function loadSystemInfo() {
         if (freeMemoryEl) freeMemoryEl.textContent = `${freeMemoryKB} KB`;
         if (totalMemoryEl) totalMemoryEl.textContent = `${totalMemoryKB} KB`;
       }
+
+      // Update version information in Bridge section
+      updateVersionInfo(data);
     })
     .catch(err => {
       console.error('Failed to load system info:', err);
@@ -845,6 +848,50 @@ function loadSystemInfo() {
         connectionStatus.style.color = 'var(--danger)';
       }
     });
+}
+
+function updateVersionInfo(data) {
+  // Update firmware version (legacy version field)
+  const firmwareVersionEl = document.getElementById("firmware-version");
+  if (firmwareVersionEl && data.version) {
+    firmwareVersionEl.textContent = data.version;
+  }
+
+  // Update git version
+  const gitVersionEl = document.getElementById("git-version");
+  if (gitVersionEl && data.git_version) {
+    gitVersionEl.textContent = data.git_version;
+  }
+
+  // Update project name
+  const projectNameEl = document.getElementById("project-name");
+  if (projectNameEl && data.project) {
+    projectNameEl.textContent = data.project;
+  }
+
+  // Update ESP-IDF version
+  const idfVersionEl = document.getElementById("idf-version");
+  if (idfVersionEl && data.idf_version) {
+    idfVersionEl.textContent = data.idf_version;
+  }
+
+  // Update build date
+  const buildDateEl = document.getElementById("build-date-full");
+  if (buildDateEl && data.build_date) {
+    buildDateEl.textContent = data.build_date;
+  }
+
+  // Update build time
+  const buildTimeEl = document.getElementById("build-time");
+  if (buildTimeEl && data.build_time) {
+    buildTimeEl.textContent = data.build_time;
+  }
+
+  // Update the header build date status (short format)
+  const headerBuildDateEl = document.getElementById("build-date");
+  if (headerBuildDateEl && data.build_date) {
+    headerBuildDateEl.textContent = data.build_date;
+  }
 }
 
 // MQTT Configuration functions

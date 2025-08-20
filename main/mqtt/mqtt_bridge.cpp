@@ -11,6 +11,7 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include <esp_app_desc.h>
 
 // Project includes
 #include "ble_mesh/ble_mesh_control.h"
@@ -79,6 +80,12 @@ static cJSON *create_bridge_device_object()
     std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
     cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);
+    
+    // Add detailed version info
+    const esp_app_desc_t* app_desc = esp_app_get_description();
+    cJSON_AddStringToObject(device, "git_version", app_desc->version);
+    cJSON_AddStringToObject(device, "build_date", app_desc->date);
+    cJSON_AddStringToObject(device, "idf_version", app_desc->idf_ver);
 
     return device;
 }

@@ -8,7 +8,7 @@ file(GLOB_RECURSE SRC_FILES "web_server/*.cpp" "debug/*.cpp" "ble_mesh/*.cpp" "w
 
 
 idf_component_register(SRCS "main.cpp" ${SRC_FILES}
-                    PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_uart esp_netif mqtt json esp_http_server app_update bt mbedtls
+                    PRIV_REQUIRES esp_wifi nvs_flash driver console esp_driver_uart esp_netif mqtt json esp_http_server app_update bt mbedtls bootloader_support
                     INCLUDE_DIRS  ".")
 
 littlefs_create_partition_image(storage ./littlefs FLASH_IN_PROJECT)

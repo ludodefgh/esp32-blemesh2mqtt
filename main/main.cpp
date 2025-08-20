@@ -12,6 +12,7 @@
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include <esp_app_desc.h>
 
 // Project includes
 #include "ble_mesh/ble_mesh_commands.h"
@@ -146,6 +147,16 @@ extern "C" void app_main()
     esp_err_t err;
 
     LOG_INFO(TAG, "Initializing...");
+    
+    // Display version information
+    esp_app_desc_t app_desc_copy;
+    const esp_app_desc_t* app_desc = esp_app_get_description();
+    memcpy(&app_desc_copy, app_desc, sizeof(esp_app_desc_t));
+    
+    LOG_INFO(TAG, "Firmware: %s", app_desc_copy.version);
+    LOG_INFO(TAG, "Project: %s", app_desc_copy.project_name);
+    LOG_INFO(TAG, "ESP-IDF: %s", app_desc_copy.idf_ver);
+    LOG_INFO(TAG, "Built: %s %s", app_desc_copy.date, app_desc_copy.time);
 
     // Initialize NVS
     err = nvs_flash_init();
