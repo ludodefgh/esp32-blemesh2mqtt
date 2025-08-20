@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include <esp_app_desc.h>
 #include <esp_ble_mesh_networking_api.h>
 
 // Third-party libraries
@@ -358,11 +359,12 @@ esp_err_t system_info_handler(httpd_req_t *req)
     uint32_t min_heap = esp_get_minimum_free_heap_size();
     uint32_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
     int64_t uptime_us = esp_timer_get_time();
+    const esp_app_desc_t* app_desc = esp_app_get_description();
 
-    char buf[512];
+    char buf[768];
     snprintf(buf, sizeof(buf),
-             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\" }",
-             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION);
+             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\", \"git_version\": \"%s\", \"project\": \"%s\", \"idf_version\": \"%s\", \"build_date\": \"%s\", \"build_time\": \"%s\" }",
+             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION, app_desc->version, app_desc->project_name, app_desc->idf_ver, app_desc->date, app_desc->time);
 
     httpd_resp_send(req, buf, -1);
     return ESP_OK;
