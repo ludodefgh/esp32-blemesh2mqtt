@@ -1510,3 +1510,55 @@ body.sidebar-open {
     min-width: auto;
   }
 }
+
+/* Info Grid Layouts for WiFi and Version Information */
+.wifi-info-grid,
+.version-info-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.info-value {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 0.875rem;
+  text-align: left;
+  font-family: monospace;
+  background: var(--bg-secondary);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+}
+
+/* Responsive adjustments for info rows */
+@media (max-width: 640px) {
+  .info-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+    text-align: left;
+  }
+  
+  .info-value {
+    text-align: left;
+  }
+}
