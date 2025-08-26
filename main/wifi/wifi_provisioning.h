@@ -27,7 +27,8 @@ extern "C"
         WIFI_PROV_STATE_AP_STARTED,
         WIFI_PROV_STATE_STA_CONNECTING,
         WIFI_PROV_STATE_STA_CONNECTED,
-        WIFI_PROV_STATE_STA_FAILED
+        WIFI_PROV_STATE_STA_FAILED,
+        WIFI_PROV_STATE_STA_RECONNECTING
     } wifi_provisioning_state_t;
 
     typedef struct
@@ -55,6 +56,8 @@ extern "C"
 
     esp_err_t wifi_provisioning_try_connect_sta(void);
     bool wifi_provisioning_should_start_captive_portal(void);
+    esp_err_t wifi_provisioning_start_reconnect_task(void);
+    void wifi_provisioning_stop_reconnect_task(void);
 
     void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server);
 

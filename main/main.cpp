@@ -222,7 +222,7 @@ extern "C" void app_main()
     }
     else
     {
-        LOG_INFO(TAG, "WiFi already connected via provisioning");
+        LOG_INFO(TAG, "WiFi already connected via provisioning - reconnect task will be started automatically");
     }
 
 #if defined(DEBUG_USE_GPIO)
