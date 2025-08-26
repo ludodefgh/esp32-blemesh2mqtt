@@ -50,6 +50,43 @@ menu "Example Configuration"
         help
             Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
 
+    menu "WiFi Reconnection Settings"
+        
+        config WIFI_RECONNECT_UNLIMITED_ATTEMPTS
+            bool "Enable unlimited reconnection attempts"
+            default n
+            help
+                When enabled, the device will continuously attempt to reconnect to WiFi
+                without giving up after a maximum number of attempts.
+        
+        config WIFI_RECONNECT_MAX_ATTEMPTS
+            int "Maximum reconnection attempts"
+            depends on !WIFI_RECONNECT_UNLIMITED_ATTEMPTS
+            default 5
+            range 1 50
+            help
+                Maximum number of consecutive reconnection attempts before giving up.
+                Only used when unlimited attempts is disabled.
+        
+        config WIFI_RECONNECT_DELAY_MS
+            int "Reconnection delay (milliseconds)"
+            default 20000
+            range 1000 300000
+            help
+                Delay between reconnection attempts when unlimited attempts is enabled,
+                or maximum delay for exponential backoff when limited attempts is used.
+        
+        config WIFI_RECONNECT_INITIAL_DELAY_MS
+            int "Initial reconnection delay (milliseconds)"
+            depends on !WIFI_RECONNECT_UNLIMITED_ATTEMPTS
+            default 1000
+            range 100 60000
+            help
+                Initial delay for the first reconnection attempt when using exponential backoff.
+                Subsequent attempts will double the delay up to the maximum delay.
+
+    endmenu
+
     choice ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD
         prompt "WiFi Scan auth mode threshold"
         default ESP_WIFI_AUTH_WPA2_PSK

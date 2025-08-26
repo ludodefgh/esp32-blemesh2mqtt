@@ -39,6 +39,26 @@ static uint16_t s_scan_count = 0;
 static EventGroupHandle_t s_wifi_event_group;
 static bool s_scan_in_progress = false;
 
+// WiFi reconnection management
+static TaskHandle_t s_reconnect_task_handle = NULL;
+static bool s_normal_operation_mode = false;
+static uint32_t s_reconnect_attempt = 0;
+
+// Configuration-based reconnection parameters
+#ifdef CONFIG_WIFI_RECONNECT_UNLIMITED_ATTEMPTS
+static const bool UNLIMITED_ATTEMPTS = true;
+static const uint32_t FIXED_RECONNECT_DELAY_MS = CONFIG_WIFI_RECONNECT_DELAY_MS;
+static const uint32_t MAX_RECONNECT_ATTEMPTS = 1; // Not used in unlimited mode
+static const uint32_t INITIAL_RECONNECT_DELAY_MS = 1000; // Not used in unlimited mode
+static const uint32_t MAX_RECONNECT_DELAY_MS = CONFIG_WIFI_RECONNECT_DELAY_MS;
+#else
+static const bool UNLIMITED_ATTEMPTS = false;
+static const uint32_t FIXED_RECONNECT_DELAY_MS = CONFIG_WIFI_RECONNECT_DELAY_MS; // Not used in limited mode
+static const uint32_t MAX_RECONNECT_ATTEMPTS = CONFIG_WIFI_RECONNECT_MAX_ATTEMPTS;
+static const uint32_t INITIAL_RECONNECT_DELAY_MS = CONFIG_WIFI_RECONNECT_INITIAL_DELAY_MS;
+static const uint32_t MAX_RECONNECT_DELAY_MS = CONFIG_WIFI_RECONNECT_DELAY_MS;
+#endif
+
 static char ip_address[16] = {0};
 
 char *get_ip_address()
@@ -48,6 +68,122 @@ char *get_ip_address()
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
+
+static void wifi_reconnect_task(void *pvParameters)
+{
+    LOG_INFO(TAG, "WiFi reconnect task started - will persist for multiple disconnections");
+    if (UNLIMITED_ATTEMPTS)
+    {
+        LOG_INFO(TAG, "Reconnection mode: UNLIMITED attempts with %d ms fixed delay", FIXED_RECONNECT_DELAY_MS);
+    }
+    else
+    {
+        LOG_INFO(TAG, "Reconnection mode: %d max attempts, %d-%d ms exponential backoff", 
+                 MAX_RECONNECT_ATTEMPTS, INITIAL_RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS);
+    }
+    
+    while (s_normal_operation_mode)
+    {
+        // Wait for disconnection notification
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        
+        if (!s_normal_operation_mode)
+        {
+            LOG_DEBUG(TAG, "Not in normal operation mode, exiting reconnect task");
+            break;
+        }
+        
+        // Reset attempt counter for each new disconnection event
+        s_reconnect_attempt = 0;
+        
+        // Reconnection loop for this disconnection event
+        while (s_normal_operation_mode && (UNLIMITED_ATTEMPTS || s_reconnect_attempt < MAX_RECONNECT_ATTEMPTS))
+        {
+            if (UNLIMITED_ATTEMPTS)
+            {
+                LOG_INFO(TAG, "WiFi reconnection attempt %d (unlimited mode)", s_reconnect_attempt + 1);
+            }
+            else
+            {
+                LOG_INFO(TAG, "WiFi reconnection attempt %d/%d", s_reconnect_attempt + 1, MAX_RECONNECT_ATTEMPTS);
+            }
+            
+            uint32_t delay_ms;
+            if (UNLIMITED_ATTEMPTS)
+            {
+                // Use fixed delay for unlimited attempts
+                delay_ms = FIXED_RECONNECT_DELAY_MS;
+            }
+            else
+            {
+                // Calculate exponential backoff delay for limited attempts
+                delay_ms = INITIAL_RECONNECT_DELAY_MS * (1 << s_reconnect_attempt);
+                if (delay_ms > MAX_RECONNECT_DELAY_MS)
+                {
+                    delay_ms = MAX_RECONNECT_DELAY_MS;
+                }
+            }
+            
+            LOG_INFO(TAG, "Waiting %d ms before reconnection attempt", delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+            
+            if (!s_normal_operation_mode)
+            {
+                LOG_DEBUG(TAG, "Normal operation mode disabled during delay, stopping reconnect");
+                break;
+            }
+            
+            // Set state to reconnecting
+            s_provisioning_state = WIFI_PROV_STATE_STA_RECONNECTING;
+            if (s_event_callback)
+            {
+                s_event_callback(s_provisioning_state, NULL);
+            }
+            
+            // Attempt to reconnect
+            LOG_INFO(TAG, "Attempting WiFi reconnection...");
+            esp_err_t err = esp_wifi_connect();
+            if (err != ESP_OK)
+            {
+                LOG_WARN(TAG, "Failed to initiate WiFi connection: %s", esp_err_to_name(err));
+            }
+            
+            // Wait for connection result
+            EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+                                                   WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                                   pdTRUE, pdFALSE,
+                                                   pdMS_TO_TICKS(10000));
+            
+            if (bits & WIFI_CONNECTED_BIT)
+            {
+                LOG_INFO(TAG, "WiFi reconnected successfully - task continues running for future disconnections");
+                s_reconnect_attempt = 0; // Reset attempt counter
+                break; // Exit reconnection loop, but keep task running
+            }
+            else
+            {
+                LOG_WARN(TAG, "WiFi reconnection failed");
+                s_reconnect_attempt++;
+            }
+        }
+        
+        // Check if we exhausted all attempts for this disconnection (only applies to limited attempts mode)
+        if (!UNLIMITED_ATTEMPTS && s_reconnect_attempt >= MAX_RECONNECT_ATTEMPTS)
+        {
+            LOG_ERROR(TAG, "Max reconnection attempts (%d) reached for this disconnection event", MAX_RECONNECT_ATTEMPTS);
+            s_provisioning_state = WIFI_PROV_STATE_STA_FAILED;
+            if (s_event_callback)
+            {
+                s_event_callback(s_provisioning_state, NULL);
+            }
+            // Continue running the task for future disconnection events
+        }
+    }
+    
+    LOG_INFO(TAG, "WiFi reconnect task ending");
+    s_reconnect_task_handle = NULL;
+    vTaskDelete(NULL);
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -98,8 +234,31 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
         case WIFI_EVENT_STA_DISCONNECTED:
             LOG_INFO(TAG, "WiFi STA disconnected");
-            s_provisioning_state = WIFI_PROV_STATE_STA_FAILED;
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            
+            if (s_normal_operation_mode)
+            {
+                LOG_INFO(TAG, "In normal operation mode, triggering automatic reconnection");
+                // Trigger reconnection task if it exists and we have credentials
+                if (s_reconnect_task_handle != NULL && wifi_provisioning_is_configured())
+                {
+                    s_provisioning_state = WIFI_PROV_STATE_STA_RECONNECTING;
+                    xTaskNotifyGive(s_reconnect_task_handle);
+                }
+                else
+                {
+                    LOG_WARN(TAG, "Cannot reconnect: task=%p, configured=%d", 
+                             s_reconnect_task_handle, wifi_provisioning_is_configured());
+                    s_provisioning_state = WIFI_PROV_STATE_STA_FAILED;
+                    xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+                }
+            }
+            else
+            {
+                LOG_INFO(TAG, "In provisioning mode, not attempting reconnection");
+                s_provisioning_state = WIFI_PROV_STATE_STA_FAILED;
+                xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            }
+            
             if (s_event_callback)
             {
                 s_event_callback(s_provisioning_state, event_data);
@@ -171,6 +330,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             snprintf(ip_address, sizeof(ip_address), "%d.%d.%d.%d", IP2STR(&event->ip_info.ip));
 
             s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
+            s_reconnect_attempt = 0; // Reset reconnection counter on successful connection
             xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
             if (s_event_callback)
             {
@@ -958,7 +1118,78 @@ bool wifi_provisioning_should_start_captive_portal(void)
     }
 
     LOG_INFO(TAG, "Successfully connected with stored credentials, no need for captive portal");
+    
+    // Start reconnect task for automatic reconnection if connection is lost
+    esp_err_t reconnect_err = wifi_provisioning_start_reconnect_task();
+    if (reconnect_err != ESP_OK)
+    {
+        LOG_WARN(TAG, "Failed to start WiFi reconnect task: %s", esp_err_to_name(reconnect_err));
+    }
+    else
+    {
+        LOG_INFO(TAG, "WiFi reconnect task started for automatic reconnection");
+    }
+    
     return false;
+}
+
+esp_err_t wifi_provisioning_start_reconnect_task(void)
+{
+    if (s_reconnect_task_handle != NULL)
+    {
+        LOG_WARN(TAG, "Reconnect task already running");
+        return ESP_OK;
+    }
+    
+    s_normal_operation_mode = true;
+    s_reconnect_attempt = 0;
+    
+    BaseType_t task_created = xTaskCreate(
+        wifi_reconnect_task,
+        "wifi_reconnect",
+        4096,
+        NULL,
+        5,
+        &s_reconnect_task_handle
+    );
+    
+    if (task_created != pdPASS)
+    {
+        LOG_ERROR(TAG, "Failed to create WiFi reconnect task");
+        s_normal_operation_mode = false;
+        return ESP_FAIL;
+    }
+    
+    LOG_INFO(TAG, "WiFi reconnect task started successfully");
+    return ESP_OK;
+}
+
+void wifi_provisioning_stop_reconnect_task(void)
+{
+    s_normal_operation_mode = false;
+    
+    if (s_reconnect_task_handle != NULL)
+    {
+        // Wake up the task so it can exit cleanly
+        xTaskNotifyGive(s_reconnect_task_handle);
+        
+        // Wait a bit for the task to exit
+        for (int i = 0; i < 10 && s_reconnect_task_handle != NULL; i++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        
+        // Force delete if it didn't exit cleanly
+        if (s_reconnect_task_handle != NULL)
+        {
+            LOG_WARN(TAG, "Force deleting WiFi reconnect task");
+            vTaskDelete(s_reconnect_task_handle);
+            s_reconnect_task_handle = NULL;
+        }
+    }
+    
+    s_reconnect_attempt = 0;
+    LOG_INFO(TAG, "WiFi reconnect task stopped");
 }
 
 static esp_err_t captive_redirect_handler(httpd_req_t *req)
@@ -1229,6 +1460,9 @@ static esp_err_t wifi_status_handler(httpd_req_t *req)
     case WIFI_PROV_STATE_STA_CONNECTED:
         cJSON_AddStringToObject(response, "status", "connected");
         break;
+    case WIFI_PROV_STATE_STA_RECONNECTING:
+        cJSON_AddStringToObject(response, "status", "reconnecting");
+        break;
     case WIFI_PROV_STATE_STA_FAILED:
         cJSON_AddStringToObject(response, "status", "failed");
         break;
@@ -1243,9 +1477,9 @@ static esp_err_t wifi_status_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
+namespace
 {
-    httpd_uri_t captive_uris[] = {
+constexpr httpd_uri_t captive_uris[] = {
         // Android captive portal detection (modern versions)
         {.uri = "/generate_204", .method = HTTP_GET, .handler = captive_android_handler},
         {.uri = "/gen_204", .method = HTTP_GET, .handler = captive_android_handler},
@@ -1275,7 +1509,9 @@ void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
         {.uri = "/api/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_handler},
         {.uri = "/api/wifi/connect", .method = HTTP_POST, .handler = wifi_connect_handler},
         {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler}};
-
+}
+void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
+{
     for (int i = 0; i < sizeof(captive_uris) / sizeof(captive_uris[0]); i++)
     {
         httpd_register_uri_handler(server, &captive_uris[i]);

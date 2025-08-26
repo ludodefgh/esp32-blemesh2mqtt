@@ -1625,6 +1625,7 @@ static void wifi_state_change_callback(wifi_provisioning_state_t state, void *ev
         break;
 
     case WIFI_PROV_STATE_STA_CONNECTING:
+    case WIFI_PROV_STATE_STA_RECONNECTING:
     case WIFI_PROV_STATE_STA_FAILED:
     case WIFI_PROV_STATE_IDLE:
     default:
@@ -1704,17 +1705,9 @@ void register_captive_portal_handlers(httpd_handle_t server)
     httpd_register_uri_handler(server, &setup_uri);
 }
 
-void unregister_captive_portal_handlers(httpd_handle_t server)
+namespace
 {
-    if (!server)
-    {
-        LOG_ERROR(TAG, "Server handle is NULL");
-        return;
-    }
-
-    LOG_INFO(TAG, "Unregistering captive portal handlers");
-
-    // Array of captive portal URIs that need to be unregistered (matching wifi_provisioning.cpp)
+      // Array of captive portal URIs that need to be unregistered (matching wifi_provisioning.cpp)
     struct
     {
         const char *uri;
@@ -1750,7 +1743,18 @@ void unregister_captive_portal_handlers(httpd_handle_t server)
         {"/api/wifi/connect", HTTP_POST},
         {"/api/wifi/status", HTTP_GET}};
 
-    const size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);
+    constexpr size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);
+}
+
+void unregister_captive_portal_handlers(httpd_handle_t server)
+{
+    if (!server)
+    {
+        LOG_ERROR(TAG, "Server handle is NULL");
+        return;
+    }
+
+    LOG_INFO(TAG, "Unregistering captive portal handlers");
 
     // Unregister all captive portal handlers
     for (size_t i = 0; i < captive_uris_count; i++)
