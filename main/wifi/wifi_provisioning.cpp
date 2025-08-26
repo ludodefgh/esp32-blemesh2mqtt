@@ -96,6 +96,22 @@ static void wifi_reconnect_task(void *pvParameters)
         // Reset attempt counter for each new disconnection event
         s_reconnect_attempt = 0;
         
+        // Check if WiFi has already reconnected before starting reconnection attempts
+        wifi_ap_record_t ap_info;
+        esp_err_t initial_wifi_status = esp_wifi_sta_get_ap_info(&ap_info);
+        if (initial_wifi_status == ESP_OK)
+        {
+            LOG_INFO(TAG, "WiFi already reconnected to AP: %s, no reconnection needed", ap_info.ssid);
+            s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
+            if (s_event_callback)
+            {
+                s_event_callback(s_provisioning_state, NULL);
+            }
+            continue; // Skip to next disconnection event
+        }
+        
+        LOG_INFO(TAG, "Starting reconnection attempts for disconnection event");
+        
         // Reconnection loop for this disconnection event
         while (s_normal_operation_mode && (UNLIMITED_ATTEMPTS || s_reconnect_attempt < MAX_RECONNECT_ATTEMPTS))
         {
@@ -133,11 +149,39 @@ static void wifi_reconnect_task(void *pvParameters)
                 break;
             }
             
+            // Check if WiFi is already connected before attempting reconnection
+            wifi_ap_record_t ap_info;
+            esp_err_t wifi_status = esp_wifi_sta_get_ap_info(&ap_info);
+            if (wifi_status == ESP_OK)
+            {
+                LOG_INFO(TAG, "WiFi already connected to AP: %s, stopping reconnection attempts", ap_info.ssid);
+                s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
+                if (s_event_callback)
+                {
+                    s_event_callback(s_provisioning_state, NULL);
+                }
+                break; // Exit reconnection loop, connection is restored
+            }
+            
             // Set state to reconnecting
             s_provisioning_state = WIFI_PROV_STATE_STA_RECONNECTING;
             if (s_event_callback)
             {
                 s_event_callback(s_provisioning_state, NULL);
+            }
+            
+            // Final check before attempting reconnection
+            wifi_ap_record_t final_ap_info;
+            esp_err_t final_wifi_status = esp_wifi_sta_get_ap_info(&final_ap_info);
+            if (final_wifi_status == ESP_OK)
+            {
+                LOG_INFO(TAG, "WiFi connected during reconnection attempt, stopping");
+                s_provisioning_state = WIFI_PROV_STATE_STA_CONNECTED;
+                if (s_event_callback)
+                {
+                    s_event_callback(s_provisioning_state, NULL);
+                }
+                break; // Exit reconnection loop
             }
             
             // Attempt to reconnect
