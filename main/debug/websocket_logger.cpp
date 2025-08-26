@@ -265,6 +265,12 @@ void ws_cleanup_task(void *arg)
 
 void websocket_logger_install()
 {
+    if (log_ringbuf != nullptr)
+    {
+        return; // Already installed
+        LOG_INFO(TAG, "WebSocket logger already installed");
+    }
+    
     log_ringbuf = xRingbufferCreate(1024, RINGBUF_TYPE_NOSPLIT);
     assert(log_ringbuf);
 
