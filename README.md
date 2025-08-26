@@ -44,7 +44,7 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   BLE Mesh     │    │  BleMesh2MQTT    │    │  Home Assistant │
+│   BLE Mesh      │    │  BleMesh2MQTT    │    │  Home Assistant │
 │   Devices       │◄──►│     Bridge       │◄──►│   via MQTT      │
 │  (Lights, etc.) │    │    (ESP32)       │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
