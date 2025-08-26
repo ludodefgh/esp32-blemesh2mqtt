@@ -56,7 +56,10 @@
       "Bash(. /workspace/setup-idf-env.sh)",
       "Bash(. /opt/esp/idf/export.sh)",
       "Bash(git restore:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebSearch"
     ],
     "deny": []
   }
