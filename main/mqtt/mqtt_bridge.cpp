@@ -83,7 +83,6 @@ static cJSON *create_bridge_device_object()
     
     // Add detailed version info
     const esp_app_desc_t* app_desc = esp_app_get_description();
-    cJSON_AddStringToObject(device, "git_version", app_desc->version);
     cJSON_AddStringToObject(device, "build_date", app_desc->date);
     cJSON_AddStringToObject(device, "idf_version", app_desc->idf_ver);
 
