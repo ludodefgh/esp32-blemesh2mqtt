@@ -81,13 +81,9 @@ static cJSON *create_bridge_device_object()
     cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);
     
-    // Add detailed version info
-    const esp_app_desc_t* app_desc = esp_app_get_description();
-    cJSON_AddStringToObject(device, "build_date", app_desc->date);
-    cJSON_AddStringToObject(device, "idf_version", app_desc->idf_ver);
-
     return device;
 }
+
 const char *get_bridge_provisioning_state_topic()
 {
     static const std::string topic{get_bridge_base_topic() + "/bridge/provisioning/state"};
