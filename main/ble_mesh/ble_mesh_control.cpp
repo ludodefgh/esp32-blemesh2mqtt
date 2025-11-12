@@ -1045,6 +1045,25 @@ bool ble_mesh_get_auto_provisioning_enabled(void)
     return enable_auto_provisioning;
 }
 
+void ble_mesh_republish_all_nodes_to_mqtt(void)
+{
+    LOG_INFO(TAG, "Republishing all nodes to MQTT");
+    node_manager().for_each_node([](std::shared_ptr<bm2mqtt_node_info>& node)
+    {
+        message_queue().enqueue(node, message_payload{
+            .send = [](std::shared_ptr<bm2mqtt_node_info> &node)
+            {
+                mqtt_subscribe_node(mqtt_get_client(), node);
+                mqtt_send_discovery(node);
+                mqtt_node_send_status(node);
+            },
+            .opcode = 0x0000,
+            .retries_left = 0,
+            .type = message_type_t::mqtt_message,
+        });
+    });
+}
+
 int ble_mesh_set_provisioning_enabled(int argc, char **argv)
 {
     int nerrors = arg_parse(argc, argv, (void **)&ctl_bool_set_args);

@@ -484,6 +484,7 @@ void on_home_assistant_restart_timer(void *arg)
         send_bridge_discovery();
         esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         publish_bridge_info();
+        ble_mesh_republish_all_nodes_to_mqtt();
     }
     else
     {

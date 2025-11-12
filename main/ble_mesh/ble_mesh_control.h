@@ -27,6 +27,9 @@ bool ble_mesh_get_provisioning_enabled(void);
 void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
 bool ble_mesh_get_auto_provisioning_enabled(void);
 
+// MQTT republish functions
+void ble_mesh_republish_all_nodes_to_mqtt(void);
+
 // Function declarations from main.cpp
 esp_err_t bluetooth_init(void);
 void ble_mesh_get_dev_uuid(uint8_t *dev_uuid);
