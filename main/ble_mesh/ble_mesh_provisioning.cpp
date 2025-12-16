@@ -103,7 +103,7 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
              node_idx, unicast, elem_num, net_idx);
     LOG_INFO(TAG, "device uuid: %s", bt_hex(uuid128.raw(), 16));
 
-    sprintf(name, "%s%d", "NODE-", node_idx);
+    snprintf(name, sizeof(name), "%s%d", "NODE-", node_idx);
     err = esp_ble_mesh_provisioner_set_node_name(node_idx, name);
     if (err)
     {
@@ -278,7 +278,14 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT:
 
         ble2mqtt_unprovisioned_device new_entry;
-        memcpy(&new_entry, &param->provisioner_recv_unprov_adv_pkt, sizeof(decltype(param->provisioner_recv_unprov_adv_pkt)));
+        // Manual field copy to handle optimized structure layout
+        memcpy(new_entry.dev_uuid, param->provisioner_recv_unprov_adv_pkt.dev_uuid, 16);
+        new_entry.bearer = param->provisioner_recv_unprov_adv_pkt.bearer;
+        memcpy(new_entry.addr, param->provisioner_recv_unprov_adv_pkt.addr, 6);
+        new_entry.oob_info = param->provisioner_recv_unprov_adv_pkt.oob_info;
+        new_entry.addr_type = param->provisioner_recv_unprov_adv_pkt.addr_type;
+        new_entry.adv_type = param->provisioner_recv_unprov_adv_pkt.adv_type;
+        new_entry.rssi = param->provisioner_recv_unprov_adv_pkt.rssi;
 
         recv_unprov_adv_pkt(new_entry);
         break;

@@ -334,7 +334,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                         s_scan_count = max_aps;
                         for (int i = 0; i < max_aps; i++)
                         {
-                            strcpy(s_scan_results[i].ssid, (char *)ap_records[i].ssid);
+                            strlcpy(s_scan_results[i].ssid, (char *)ap_records[i].ssid, sizeof(s_scan_results[i].ssid));
                             s_scan_results[i].rssi = ap_records[i].rssi;
                             s_scan_results[i].authmode = ap_records[i].authmode;
                         }
@@ -454,9 +454,9 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
              CAPTIVE_PORTAL_SSID_PREFIX, base_mac[3], base_mac[4], base_mac[5]);
 
     wifi_config_t ap_config = {};
-    strcpy((char *)ap_config.ap.ssid, ap_ssid);
+    strlcpy((char *)ap_config.ap.ssid, ap_ssid, sizeof(ap_config.ap.ssid));
     ap_config.ap.ssid_len = strlen(ap_ssid);
-    strcpy((char *)ap_config.ap.password, CAPTIVE_PORTAL_PASSWORD);
+    strlcpy((char *)ap_config.ap.password, CAPTIVE_PORTAL_PASSWORD, sizeof(ap_config.ap.password));
     ap_config.ap.channel = CAPTIVE_PORTAL_CHANNEL;
     ap_config.ap.max_connection = CAPTIVE_PORTAL_MAX_CONNECTIONS;
     ap_config.ap.authmode = strlen(CAPTIVE_PORTAL_PASSWORD) == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
@@ -884,7 +884,7 @@ esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t s
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_SIZE;
     }
-    strcpy(ssid, decrypted_ssid.c_str());
+    strlcpy(ssid, decrypted_ssid.c_str(), ssid_len);
     delete[] encrypted_ssid_buf;
 
     // Get encrypted password
@@ -925,7 +925,7 @@ esp_err_t wifi_provisioning_get_credentials(char *ssid, char *password, size_t s
         nvs_close(nvs_handle);
         return ESP_ERR_INVALID_SIZE;
     }
-    strcpy(password, decrypted_password.c_str());
+    strlcpy(password, decrypted_password.c_str(), password_len);
 
     // Clear sensitive data from memory
     memset(encrypted_password_buf, 0, required_size);
@@ -1116,8 +1116,8 @@ esp_err_t wifi_provisioning_try_connect_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     wifi_config_t sta_config = {};
-    strcpy((char *)sta_config.sta.ssid, ssid);
-    strcpy((char *)sta_config.sta.password, password);
+    strlcpy((char *)sta_config.sta.ssid, ssid, sizeof(sta_config.sta.ssid));
+    strlcpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password));
     sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
