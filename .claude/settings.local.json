@@ -59,7 +59,11 @@
       "Bash(git checkout:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto diff)",
+      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto log --oneline -5)",
+      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto diff --staged)",
+      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto status)"
     ],
     "deny": []
   }

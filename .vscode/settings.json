@@ -1,7 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.pythonInstallPath": "/usr/bin/python3",
-  "idf.port": "/dev/ttyUSB0",
+  "idf.port": "/dev/ttyACM2",
   "idf.flashType": "UART",
   "files.associations": {
     "COMMIT_EDITMSG": "plaintext",

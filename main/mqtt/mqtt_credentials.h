@@ -16,13 +16,17 @@ enum class mqtt_connection_state_t : uint8_t
     ERROR_TIMEOUT
 };
 
+// Optimized memory layout: group std::string members together, then smaller types
+// Reduces padding from 5 bytes to 1 byte
 struct mqtt_credentials_t
 {
-    std::string broker_host;
-    uint16_t broker_port;
-    std::string username;
-    std::string password;
-    bool use_ssl;
+    std::string broker_host;    // 24 bytes (std::string on ESP32)
+    std::string username;       // 24 bytes
+    std::string password;       // 24 bytes
+    uint16_t broker_port;       // 2 bytes
+    bool use_ssl;               // 1 byte
+    // 1 byte padding to align to 4-byte boundary
+    // Total: 24 + 24 + 24 + 4 = 76 bytes (vs 80+ bytes with poor alignment)
 
     mqtt_credentials_t() : broker_port(1883), use_ssl(false) {}
 

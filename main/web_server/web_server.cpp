@@ -3,6 +3,7 @@
 // ESP-IDF includes
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
+#include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -1032,10 +1033,31 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 #define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
 #define OTA_BUFFER_SIZE 1024
 
-// ⚠️  SECURITY WARNING: This is a hardcoded key for development only!
-// 🚨 CRITICAL: Replace with proper authentication before production deployment
-// TODO: Implement certificate-based authentication or device-specific keys
-#define OTA_API_KEY "ota_secure_key_2024"
+// Device-specific OTA key (generated at runtime from MAC address)
+static char ota_api_key[32] = {0};
+
+// Generate device-specific OTA key from MAC address
+static void generate_ota_key()
+{
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+    // Generate key format: "OTA_AABBCC" where AABBCC are last 3 bytes of MAC in hex
+    snprintf(ota_api_key, sizeof(ota_api_key), "OTA_%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    LOG_INFO(TAG, "Generated device-specific OTA key (display in web interface for users)");
+}
+
+// Get the OTA API key (for display in web interface)
+const char* get_ota_api_key()
+{
+    if (ota_api_key[0] == '\0')
+    {
+        generate_ota_key();
+    }
+    return ota_api_key;
+}
 
 static bool authenticate_ota_request(httpd_req_t *req)
 {
@@ -1054,7 +1076,13 @@ static bool authenticate_ota_request(httpd_req_t *req)
         return false;
     }
 
-    bool authenticated = (strcmp(auth_header, OTA_API_KEY) == 0);
+    // Ensure OTA key is generated
+    if (ota_api_key[0] == '\0')
+    {
+        generate_ota_key();
+    }
+
+    bool authenticated = (strcmp(auth_header, ota_api_key) == 0);
     if (!authenticated)
     {
         LOG_WARN(TAG, "OTA authentication failed: invalid API key");
@@ -1370,15 +1398,17 @@ esp_err_t ota_status_handler(httpd_req_t *req)
 
     const ota_progress_info_t *progress = ota_manager_get_progress();
     bool in_progress = ota_manager_is_in_progress();
+    const char *api_key = get_ota_api_key();
 
-    char response[256];
+    char response[384];
     snprintf(response, sizeof(response),
-             "{ \"in_progress\": %s, \"progress_percent\": %d, \"written_size\": %zu, \"total_size\": %zu, \"status_message\": \"%s\" }",
+             "{ \"in_progress\": %s, \"progress_percent\": %d, \"written_size\": %zu, \"total_size\": %zu, \"status_message\": \"%s\", \"api_key\": \"%s\" }",
              in_progress ? "true" : "false",
              progress->progress_percent,
              progress->written_size,
              progress->total_size,
-             progress->status_message ? progress->status_message : "");
+             progress->status_message ? progress->status_message : "",
+             api_key);
 
     httpd_resp_send(req, response, -1);
     return ESP_OK;

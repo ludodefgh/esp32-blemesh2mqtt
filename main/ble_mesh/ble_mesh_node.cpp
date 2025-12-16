@@ -313,6 +313,11 @@ struct node_info_version_type<2>
 {
     using type = bm2mqtt_node_info_v2;
 };
+template <>
+struct node_info_version_type<3>
+{
+    using type = bm2mqtt_node_info_v3;
+};
 
 template <uint32_t Start>
 auto Converter_worker(std::vector<typename node_info_version_type<Start>::type> &&from)

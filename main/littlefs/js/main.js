@@ -1466,6 +1466,37 @@ function loadFirmwareInfo() {
       console.error('Failed to load firmware info:', err);
       document.getElementById('current-version').textContent = 'Unknown';
     });
+
+  // Load OTA API key
+  fetch('/api/ota/status')
+    .then(res => res.json())
+    .then(data => {
+      if (data.api_key) {
+        document.getElementById('ota-api-key').textContent = data.api_key;
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load OTA API key:', err);
+      document.getElementById('ota-api-key').textContent = 'Error loading key';
+    });
+}
+
+function copyOtaKey() {
+  const key = document.getElementById('ota-api-key').textContent;
+  if (key && key !== 'Loading...' && key !== 'Error loading key') {
+    navigator.clipboard.writeText(key).then(() => {
+      // Visual feedback
+      const el = document.getElementById('ota-api-key');
+      const originalText = el.textContent;
+      el.textContent = '✓ Copied!';
+      setTimeout(() => {
+        el.textContent = originalText;
+      }, 2000);
+    }).catch(err => {
+      console.error('Failed to copy:', err);
+      alert('Failed to copy key. Please copy manually: ' + key);
+    });
+  }
 }
 
 function showFirmwareError(message) {

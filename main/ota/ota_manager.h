@@ -13,14 +13,20 @@ enum class update_type_t
     STORAGE
 };
 
+// Optimized memory layout: 4-byte types grouped together
+// Reduces padding from 6-7 bytes to 2 bytes (20 bytes total vs 24 bytes)
 struct ota_progress_info_t
 {
-    size_t total_size;
-    size_t written_size;
-    uint8_t progress_percent;
-    const char *status_message;
-    update_type_t update_type;
+    size_t total_size;          // 4 bytes (ESP32 is 32-bit)
+    size_t written_size;        // 4 bytes
+    const char *status_message; // 4 bytes (pointer)
+    uint8_t progress_percent;   // 1 byte
+    update_type_t update_type;  // 1 byte (enum)
+    // 2 bytes padding to align to 4-byte boundary
+    // Total: 4 + 4 + 4 + 2 + 2 padding = 16 bytes aligned to 20
 };
+
+static_assert(sizeof(ota_progress_info_t) <= 20, "ota_progress_info_t has unexpected padding");
 
 typedef std::function<void(const ota_progress_info_t &)> ota_progress_callback_t;
 

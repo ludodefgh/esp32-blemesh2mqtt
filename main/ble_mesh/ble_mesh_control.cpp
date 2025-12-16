@@ -146,14 +146,15 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
     LOG_INFO(TAG, "Node composition - CID: 0x%04X (%s), PID: 0x%04X, VID: 0x%04X, CRPL: %d, Features: 0x%04X",
              cid, company_name, pid, vid, crpl, features);
     char feature_str[256] = {0};
+    size_t pos = 0;
     if (features & BIT(0))
-        strcat(feature_str, "Relay ");
+        pos += snprintf(feature_str + pos, sizeof(feature_str) - pos, "Relay ");
     if (features & BIT(1))
-        strcat(feature_str, "Proxy ");
+        pos += snprintf(feature_str + pos, sizeof(feature_str) - pos, "Proxy ");
     if (features & BIT(2))
-        strcat(feature_str, "Friend ");
+        pos += snprintf(feature_str + pos, sizeof(feature_str) - pos, "Friend ");
     if (features & BIT(3))
-        strcat(feature_str, "LowPower ");
+        pos += snprintf(feature_str + pos, sizeof(feature_str) - pos, "LowPower ");
     if (strlen(feature_str) > 0)
     {
         LOG_INFO(TAG, "Supported features: %s", feature_str);
