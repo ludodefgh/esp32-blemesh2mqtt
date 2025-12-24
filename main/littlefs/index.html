@@ -321,7 +321,13 @@
                 </div>
                 <div class="info-item">
                   <span class="info-label">OTA API Key</span>
-                  <span class="info-value" id="ota-api-key" style="font-family: monospace; color: #4CAF50; cursor: pointer;" title="Click to copy" onclick="copyOtaKey()">Loading...</span>
+                  <span class="info-value" id="ota-api-key" style="font-family: monospace; color: #4CAF50; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyOtaKey()">Loading...</span>
+                </div>
+                <div class="info-item" style="background-color: #fff3cd; padding: 8px; border-radius: 4px; border-left: 4px solid #ffc107;">
+                  <span style="font-size: 0.85em; color: #856404;">
+                    ⚠️ <strong>Security Notice:</strong> This is a cryptographically secure random key generated at first boot.
+                    Keep it safe - you'll need it for OTA updates. It's stored securely on the device.
+                  </span>
                 </div>
               </div>
             </div>

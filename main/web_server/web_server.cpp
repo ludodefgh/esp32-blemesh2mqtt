@@ -4,9 +4,12 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_mac.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_netif.h"
 #include <esp_app_desc.h>
 #include <esp_ble_mesh_networking_api.h>
@@ -1032,21 +1035,94 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 #define OTA_MIN_FIRMWARE_SIZE (32 * 1024)       // 32KB minimum
 #define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
 #define OTA_BUFFER_SIZE 1024
+#define OTA_API_KEY_LENGTH 32  // 32 characters for base64-like encoding
+#define OTA_NVS_NAMESPACE "ota_config"
+#define OTA_NVS_KEY "api_key"
 
-// Device-specific OTA key (generated at runtime from MAC address)
-static char ota_api_key[32] = {0};
+// Cryptographically secure OTA API key (generated once at first boot)
+static char ota_api_key[OTA_API_KEY_LENGTH + 1] = {0};  // +1 for null terminator
 
-// Generate device-specific OTA key from MAC address
-static void generate_ota_key()
+// Base64-like character set (URL-safe variant without padding)
+static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+// Generate cryptographically secure random OTA API key
+static esp_err_t generate_secure_ota_key()
 {
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    // Generate random bytes using hardware RNG
+    uint8_t random_bytes[24];  // 24 bytes = 32 base64 characters
+    esp_fill_random(random_bytes, sizeof(random_bytes));
 
-    // Generate key format: "OTA_AABBCC" where AABBCC are last 3 bytes of MAC in hex
-    snprintf(ota_api_key, sizeof(ota_api_key), "OTA_%02X%02X%02X%02X%02X%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    // Convert to base64-like string (URL-safe)
+    for (int i = 0; i < OTA_API_KEY_LENGTH; i++)
+    {
+        // Use random bytes to select characters from base64_chars
+        int byte_idx = (i * 3) / 4;  // Map 32 chars to 24 bytes
+        int bit_offset = ((i * 3) % 4) * 2;
+        uint8_t index = (random_bytes[byte_idx] >> bit_offset) & 0x3F;  // 6 bits = 0-63
+        ota_api_key[i] = base64_chars[index % 64];
+    }
+    ota_api_key[OTA_API_KEY_LENGTH] = '\0';
 
-    LOG_INFO(TAG, "Generated device-specific OTA key (display in web interface for users)");
+    // Store in NVS for persistence
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to open NVS for OTA key storage: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_str(nvs_handle, OTA_NVS_KEY, ota_api_key);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to write OTA key to NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+
+    err = nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+
+    if (err == ESP_OK)
+    {
+        LOG_INFO(TAG, "Generated new cryptographically secure OTA API key");
+        LOG_WARN(TAG, "IMPORTANT: Save this OTA key from the web interface - it cannot be recovered!");
+    }
+
+    return err;
+}
+
+// Load OTA API key from NVS or generate new one if not exists
+static esp_err_t load_or_generate_ota_key()
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to open NVS for OTA key: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    // Try to load existing key
+    size_t required_size = sizeof(ota_api_key);
+    err = nvs_get_str(nvs_handle, OTA_NVS_KEY, ota_api_key, &required_size);
+    nvs_close(nvs_handle);
+
+    if (err == ESP_OK)
+    {
+        LOG_INFO(TAG, "Loaded existing OTA API key from NVS");
+        return ESP_OK;
+    }
+    else if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
+        LOG_INFO(TAG, "No existing OTA key found, generating new one...");
+        return generate_secure_ota_key();
+    }
+    else
+    {
+        LOG_ERROR(TAG, "Failed to read OTA key from NVS: %s", esp_err_to_name(err));
+        return err;
+    }
 }
 
 // Get the OTA API key (for display in web interface)
@@ -1054,7 +1130,7 @@ const char* get_ota_api_key()
 {
     if (ota_api_key[0] == '\0')
     {
-        generate_ota_key();
+        load_or_generate_ota_key();
     }
     return ota_api_key;
 }
@@ -1076,10 +1152,10 @@ static bool authenticate_ota_request(httpd_req_t *req)
         return false;
     }
 
-    // Ensure OTA key is generated
+    // Ensure OTA key is loaded/generated
     if (ota_api_key[0] == '\0')
     {
-        generate_ota_key();
+        load_or_generate_ota_key();
     }
 
     bool authenticated = (strcmp(auth_header, ota_api_key) == 0);
