@@ -12,7 +12,7 @@
 
 #define TAG "COMPANY_MAP_FS"
 #define COMPANY_MAP_FILE "/littlefs/company_map.bin"
-#define CACHE_SIZE 32 // LRU cache for most accessed companies
+#define CACHE_SIZE 12 // LRU cache for most accessed companies
 
 // LRU Cache entry
 struct cache_entry_t

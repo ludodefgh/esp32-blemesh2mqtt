@@ -16,6 +16,10 @@ if(NOT GIT_VERSION)
 endif()
 set(PROJECT_VER ${GIT_VERSION})
 
+# Capture build date and time
+string(TIMESTAMP BUILD_DATE "%b %d %Y" UTC)
+string(TIMESTAMP BUILD_TIME "%H:%M:%S" UTC)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
