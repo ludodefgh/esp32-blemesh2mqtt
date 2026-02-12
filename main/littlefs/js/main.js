@@ -4,6 +4,7 @@ let lastSend = 0;
 let pending = {};
 let logAutoScroll = true;
 let currentSection = 'bridge';
+let otaApiKey = null; // Store OTA API key
 
 // Navigation functions
 function switchSection(sectionId) {
@@ -1411,10 +1412,14 @@ function uploadFirmware() {
   // Set upload endpoint based on update type
   const uploadUrl = updateType === 'storage' ? '/api/storage/upload' : '/api/ota/upload';
   xhr.open('POST', uploadUrl);
-  
-  // Add authentication header
-  // ⚠️ SECURITY: Hardcoded key - replace with proper authentication in production
-  xhr.setRequestHeader('X-OTA-Key', 'ota_secure_key_2024');
+
+  // Add authentication header with the API key from the server
+  if (!otaApiKey) {
+    showFirmwareError('OTA API key not loaded. Please refresh the page.');
+    resetUploadUI();
+    return;
+  }
+  xhr.setRequestHeader('X-OTA-Key', otaApiKey);
   xhr.send(selectedFirmwareFile);
 }
 
@@ -1472,6 +1477,7 @@ function loadFirmwareInfo() {
     .then(res => res.json())
     .then(data => {
       if (data.api_key) {
+        otaApiKey = data.api_key; // Store the key globally
         document.getElementById('ota-api-key').textContent = data.api_key;
       }
     })
