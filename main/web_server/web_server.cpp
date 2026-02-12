@@ -1605,16 +1605,35 @@ esp_err_t static_handler(httpd_req_t *req)
     wifi_provisioning_state_t state = wifi_provisioning_get_state();
     LOG_DEBUG(TAG, "Static handler: URI=%s, WiFi state=%d", req->uri, state);
 
-    if (state == WIFI_PROV_STATE_AP_STARTED)
+    // Check if we're in captive portal mode (AP or APSTA mode)
+    // We serve the setup page if:
+    // - State is AP_STARTED (normal captive portal)
+    // - State is STA_FAILED/STA_CONNECTING but WiFi mode is AP/APSTA (captive portal with invalid credentials)
+    wifi_mode_t wifi_mode;
+    esp_wifi_get_mode(&wifi_mode);
+    bool is_captive_portal = (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_APSTA) &&
+                             (state == WIFI_PROV_STATE_AP_STARTED ||
+                              state == WIFI_PROV_STATE_STA_FAILED ||
+                              state == WIFI_PROV_STATE_STA_CONNECTING ||
+                              state == WIFI_PROV_STATE_IDLE);
+
+    if (is_captive_portal)
     {
-        // In AP mode, redirect everything to setup page except API calls
-        if (strncmp(req->uri, "/api/", 5) == 0)
+        // In captive portal mode, let API/backend endpoints return 404 if they don't exist
+        // Only redirect HTML pages to the setup page
+        if (strncmp(req->uri, "/api/", 5) == 0 ||
+            strncmp(req->uri, "/mqtt/", 6) == 0 ||
+            strncmp(req->uri, "/node/", 6) == 0 ||
+            strncmp(req->uri, "/bridge/", 8) == 0 ||
+            strncmp(req->uri, "/ws/", 4) == 0 ||
+            strncmp(req->uri, "/nodes", 6) == 0)
         {
-            // Let API calls through
-            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
+            // Let these endpoints through - they will return 404 if handler not registered
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Endpoint not available in captive portal mode");
             return ESP_FAIL;
         }
-        LOG_INFO(TAG, "Serving setup page in AP mode for URI: %s", req->uri);
+        LOG_INFO(TAG, "Serving setup page in captive portal mode (WiFi mode=%d, state=%d) for URI: %s",
+                 wifi_mode, state, req->uri);
         return setup_handler(req);
     }
 
