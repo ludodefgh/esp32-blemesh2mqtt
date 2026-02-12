@@ -311,6 +311,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
         case WIFI_EVENT_SCAN_DONE:
         {
+            // Ignore duplicate SCAN_DONE events (can happen in APSTA mode)
+            if (!s_scan_in_progress)
+            {
+                LOG_DEBUG(TAG, "Ignoring duplicate WIFI_EVENT_SCAN_DONE");
+                break;
+            }
+
             LOG_INFO(TAG, "WiFi scan completed");
             s_scan_in_progress = false;
 
@@ -470,34 +477,46 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
         wifi_initialized = true;
     }
 
-    if (s_ap_netif == NULL)
+    // CRITICAL: Always destroy and recreate the AP netif to clear DHCP leases
+    // This fixes the issue where phones don't get IP after WiFi credential reset
+    if (s_ap_netif != NULL)
     {
-        s_ap_netif = esp_netif_create_default_wifi_ap();
+        LOG_INFO(TAG, "Destroying existing AP netif to clear DHCP leases...");
+
+        // Stop DHCP server first
+        esp_netif_dhcps_stop(s_ap_netif);
+
+        // Destroy the netif to clear all state including DHCP leases
+        esp_netif_destroy(s_ap_netif);
+        s_ap_netif = NULL;
+
+        // Small delay to ensure clean state
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    esp_netif_ip_info_t ip_info;
-    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.ip);
-    esp_netif_str_to_ip4("255.255.255.0", &ip_info.netmask);
-    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.gw);
+    LOG_INFO(TAG, "Creating fresh AP netif with clean DHCP state...");
+    s_ap_netif = esp_netif_create_default_wifi_ap();
 
-    // Force clean DHCP server state
-    LOG_INFO(TAG, "Stopping any existing DHCP server...");
+    // CRITICAL: Stop DHCP server BEFORE configuring IP to ensure clean state
+    LOG_INFO(TAG, "Stopping DHCP server before IP configuration...");
     esp_err_t stop_err = esp_netif_dhcps_stop(s_ap_netif);
-    if (stop_err == ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED)
+    if (stop_err != ESP_OK && stop_err != ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED)
     {
-        LOG_WARN(TAG, "DHCP server was not running");
-    }
-    else if (stop_err != ESP_OK)
-    {
-        LOG_WARN(TAG, "DHCP stop failed: %s", esp_err_to_name(stop_err));
+        LOG_WARN(TAG, "DHCP stop failed: %s (continuing anyway)", esp_err_to_name(stop_err));
     }
     else
     {
         LOG_INFO(TAG, "DHCP server stopped successfully");
     }
 
-    // Small delay to ensure clean state
+    // Small delay to ensure DHCP server fully terminates before IP reconfiguration
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Configure IP information
+    esp_netif_ip_info_t ip_info;
+    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.ip);
+    esp_netif_str_to_ip4("255.255.255.0", &ip_info.netmask);
+    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.gw);
 
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
 
@@ -546,22 +565,30 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     LOG_INFO(TAG, "Starting DHCP server with IP range: 192.168.4.2-192.168.4.254");
     LOG_INFO(TAG, "Gateway: 192.168.4.1, DNS: 192.168.4.1");
 
-    esp_err_t dhcps_start_err = esp_netif_dhcps_start(s_ap_netif);
-    if (dhcps_start_err != ESP_OK)
+    // Check current DHCP status before starting
+    esp_netif_dhcp_status_t current_status;
+    esp_netif_dhcps_get_status(s_ap_netif, &current_status);
+
+    if (current_status == ESP_NETIF_DHCP_STARTED)
     {
-        LOG_ERROR(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
-        return dhcps_start_err;
+        LOG_INFO(TAG, "DHCP server already started (this is expected after esp_netif_create_default_wifi_ap)");
     }
     else
     {
-        LOG_INFO(TAG, "DHCP server started successfully");
-
-        // Verify DHCP server is actually running
-        esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
-        LOG_INFO(TAG, "DHCP server status after start: %s",
-                 dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED"
-                                                                                                           : "UNKNOWN");
+        LOG_INFO(TAG, "DHCP server not started, starting it now...");
+        esp_err_t dhcps_start_err = esp_netif_dhcps_start(s_ap_netif);
+        if (dhcps_start_err != ESP_OK && dhcps_start_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
+        {
+            LOG_ERROR(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
+            return dhcps_start_err;
+        }
     }
+
+    // Verify final DHCP server status
+    esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
+    LOG_INFO(TAG, "DHCP server final status: %s",
+             dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED"
+                                                                                                       : "UNKNOWN");
 
     // Add delay to ensure DHCP server fully initializes
     LOG_INFO(TAG, "Waiting 2 seconds for DHCP server to fully initialize...");
@@ -631,6 +658,14 @@ esp_err_t wifi_provisioning_stop_captive_portal(void)
     if (err != ESP_OK)
     {
         LOG_WARN(TAG, "WiFi mode set failed: %s", esp_err_to_name(err));
+    }
+
+    // Destroy the AP netif to ensure clean state on next captive portal start
+    if (s_ap_netif != NULL)
+    {
+        LOG_INFO(TAG, "Destroying AP netif to clear all DHCP lease data...");
+        esp_netif_destroy(s_ap_netif);
+        s_ap_netif = NULL;
     }
 
     s_provisioning_state = WIFI_PROV_STATE_IDLE;
