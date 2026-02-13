@@ -1600,42 +1600,20 @@ esp_err_t setup_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Static file handler for captive portal mode - serves setup page for all non-API requests
+esp_err_t static_handler_captive_portal(httpd_req_t *req)
+{
+    LOG_DEBUG(TAG, "Captive portal static handler: URI=%s", req->uri);
+
+    // Serve setup page for all requests (captive portal redirects everything to setup)
+    LOG_INFO(TAG, "Serving setup page in captive portal mode for URI: %s", req->uri);
+    return setup_handler(req);
+}
+
+// Static file handler for bridge mode - serves files from LittleFS
 esp_err_t static_handler(httpd_req_t *req)
 {
-    wifi_provisioning_state_t state = wifi_provisioning_get_state();
-    LOG_DEBUG(TAG, "Static handler: URI=%s, WiFi state=%d", req->uri, state);
-
-    // Check if we're in captive portal mode (AP or APSTA mode)
-    // We serve the setup page if:
-    // - State is AP_STARTED (normal captive portal)
-    // - State is STA_FAILED/STA_CONNECTING but WiFi mode is AP/APSTA (captive portal with invalid credentials)
-    wifi_mode_t wifi_mode;
-    esp_wifi_get_mode(&wifi_mode);
-    bool is_captive_portal = (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_APSTA) &&
-                             (state == WIFI_PROV_STATE_AP_STARTED ||
-                              state == WIFI_PROV_STATE_STA_FAILED ||
-                              state == WIFI_PROV_STATE_STA_CONNECTING ||
-                              state == WIFI_PROV_STATE_IDLE);
-
-    if (is_captive_portal)
-    {
-        // In captive portal mode, let API/backend endpoints return 404 if they don't exist
-        // Only redirect HTML pages to the setup page
-        if (strncmp(req->uri, "/api/", 5) == 0 ||
-            strncmp(req->uri, "/mqtt/", 6) == 0 ||
-            strncmp(req->uri, "/node/", 6) == 0 ||
-            strncmp(req->uri, "/bridge/", 8) == 0 ||
-            strncmp(req->uri, "/ws/", 4) == 0 ||
-            strncmp(req->uri, "/nodes", 6) == 0)
-        {
-            // Let these endpoints through - they will return 404 if handler not registered
-            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Endpoint not available in captive portal mode");
-            return ESP_FAIL;
-        }
-        LOG_INFO(TAG, "Serving setup page in captive portal mode (WiFi mode=%d, state=%d) for URI: %s",
-                 wifi_mode, state, req->uri);
-        return setup_handler(req);
-    }
+    LOG_DEBUG(TAG, "Bridge static handler: URI=%s", req->uri);
 
     char filepath[640];
     if (strcmp(req->uri, "/") == 0)
@@ -1650,12 +1628,8 @@ esp_err_t static_handler(httpd_req_t *req)
     FILE *file = fopen(filepath, "r");
     if (!file)
     {
-        if (wifi_provisioning_get_state() == WIFI_PROV_STATE_AP_STARTED)
-        {
-            return setup_handler(req);
-        }
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
-        LOG_INFO(TAG, "Failed to open file: %s", filepath);
+        LOG_DEBUG(TAG, "Failed to open file: %s", filepath);
         return ESP_FAIL;
     }
 
@@ -1673,7 +1647,14 @@ esp_err_t static_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-httpd_uri_t static_uri = {
+// Static file handlers - separate for captive portal and bridge modes
+static httpd_uri_t captive_portal_static_uri = {
+    .uri = "/*",
+    .method = HTTP_GET,
+    .handler = static_handler_captive_portal,
+};
+
+static httpd_uri_t bridge_static_uri = {
     .uri = "/*",
     .method = HTTP_GET,
     .handler = static_handler,
@@ -1791,6 +1772,7 @@ void start_webserver(void)
         LOG_INFO(TAG, "Starting web server in state: %d", current_state);
 
         // Register handlers based on current state
+        // Each mode (captive portal or bridge) registers its own static file handler
         if (current_state == WIFI_PROV_STATE_AP_STARTED)
         {
             register_captive_portal_handlers(server);
@@ -1799,9 +1781,6 @@ void start_webserver(void)
         {
             register_bridge_handlers(server);
         }
-
-        // Static file handler is always registered (handles both modes)
-        httpd_register_uri_handler(server, &static_uri);
 
         // Store server handle for dynamic registration
         g_server = server;
@@ -1836,6 +1815,8 @@ void register_captive_portal_handlers(httpd_handle_t server)
     LOG_INFO(TAG, "Registering captive portal handlers");
     wifi_provisioning_register_captive_portal_handlers(server);
     httpd_register_uri_handler(server, &setup_uri);
+    httpd_register_uri_handler(server, &captive_portal_static_uri);
+    LOG_INFO(TAG, "Captive portal static file handler registered");
 }
 
 namespace
@@ -1902,6 +1883,10 @@ void unregister_captive_portal_handlers(httpd_handle_t server)
 
     // Unregister setup page
     httpd_unregister_uri_handler(server, "/setup", HTTP_GET);
+
+    // Unregister captive portal static file handler
+    httpd_unregister_uri_handler(server, "/*", HTTP_GET);
+    LOG_INFO(TAG, "Captive portal static file handler unregistered");
 }
 
 void register_bridge_handlers(httpd_handle_t server)
@@ -1928,6 +1913,10 @@ void register_bridge_handlers(httpd_handle_t server)
     // Register websocket logger separately as it's not in the array
     websocket_logger_register_uri(server);
     websocket_logger_install();
+
+    // Register bridge static file handler (must be last - wildcard catch-all)
+    httpd_register_uri_handler(server, &bridge_static_uri);
+    LOG_INFO(TAG, "Bridge static file handler registered");
 }
 
 void unregister_bridge_handlers(httpd_handle_t server)
@@ -1950,6 +1939,10 @@ void unregister_bridge_handlers(httpd_handle_t server)
                      bridge_handlers[i].uri, esp_err_to_name(err));
         }
     }
+
+    // Unregister bridge static file handler
+    httpd_unregister_uri_handler(server, "/*", HTTP_GET);
+    LOG_INFO(TAG, "Bridge static file handler unregistered");
 
     // Note: websocket_logger handlers are managed separately and don't need manual unregistration
 }
