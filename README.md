@@ -74,8 +74,8 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
 
 ### 1. Clone Repository
 ```bash
-git clone --recursive https://github.com/ludodefgh/ESPIDFSengledB11N1EProto.git
-cd ESPIDFSengledB11N1EProto
+git clone --recursive https://github.com/ludodefgh/esp32-blemesh2mqtt.git
+cd esp32-blemesh2mqtt
 ```
 
 ### 2. Setup Development Environment
