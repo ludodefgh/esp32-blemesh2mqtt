@@ -14,7 +14,7 @@
       "Bash(git -C /home/ludovic/esp/esp-idf remote add fork https://github.com/ludodefgh/esp-idf.git)",
       "Bash(git -C /home/ludovic/esp/esp-idf checkout -b ble-mesh-fixes)",
       "Bash(git -C /home/ludovic/esp/esp-idf add components/bt/esp_ble_mesh/core/net.h components/bt/esp_ble_mesh/core/prov_pvnr.c)",
-      "Bash(git -C /home/ludovic/esp/esp-idf commit -m \"$(cat <<''EOF''\nFix BLE mesh compatibility issues for C99 and disable OOB authentication\n\n- Fix C99 initialization in net.h for bt_mesh_net_rx structure\n- Disable OOB authentication support in prov_pvnr.c to force NO_OOB method\n- These changes ensure compatibility with strict C99 builds and simplify provisioning\n\nThis is a custom fork for ESPIDFSengledB11N1EProto project requirements.\nEOF\n)\")",
+      "Bash(git -C /home/ludovic/esp/esp-idf commit -m \"$(cat <<''EOF''\nFix BLE mesh compatibility issues for C99 and disable OOB authentication\n\n- Fix C99 initialization in net.h for bt_mesh_net_rx structure\n- Disable OOB authentication support in prov_pvnr.c to force NO_OOB method\n- These changes ensure compatibility with strict C99 builds and simplify provisioning\n\nThis is a custom fork for esp32-blemesh2mqtt project requirements.\nEOF\n)\")",
       "Bash(git -C /home/ludovic/esp/esp-idf push fork ble-mesh-fixes)",
       "Bash(git submodule add:*)",
       "Bash(. ./esp-idf/export.sh)",
@@ -60,10 +60,14 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
       "WebSearch",
-      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto diff)",
-      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto log --oneline -5)",
-      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto diff --staged)",
-      "Bash(git -C /workspaces/ESPIDFSengledB11N1EProto status)"
+      "Bash(git -C /workspaces/esp32-blemesh2mqtt diff)",
+      "Bash(git -C /workspaces/esp32-blemesh2mqtt log --oneline -5)",
+      "Bash(git -C /workspaces/esp32-blemesh2mqtt diff --staged)",
+      "Bash(git -C /workspaces/esp32-blemesh2mqtt status)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh:*)",
+      "Bash(git remote set-url:*)"
     ],
     "deny": []
   }

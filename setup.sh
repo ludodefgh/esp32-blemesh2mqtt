@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# ESP-IDF Sengled B11N1E Prototype Setup Script
+# ESP-IDF esp32-blemesh2mqtt Setup Script
 # This script sets up the development environment with our custom ESP-IDF
 
 set -e
 
-echo "🚀 Setting up ESP-IDF Sengled B11N1E Prototype development environment..."
+echo "🚀 Setting up ESP-IDF esp32-blemesh2mqtt development environment..."
 
 # Check if we're in the right directory
 if [ ! -f "main/main.cpp" ]; then
