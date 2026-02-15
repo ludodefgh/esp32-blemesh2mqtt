@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html><head>
+<meta charset='UTF-8'>
 <title>ESP32 WiFi Setup</title>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <style>
@@ -23,7 +24,7 @@ button:disabled { background: #6c757d; cursor: not-allowed; }
 <div class='container'>
 <h1>ESP32 WiFi Setup</h1>
 <div class='notice' style='background: #e3f2fd; padding: 15px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #2196F3;'>
-<h3>📱 Setup Instructions:</h3>
+<h3>Setup Instructions:</h3>
 <p>1. <strong>Stay connected</strong> to this WiFi network during setup<br>
 2. If your phone shows "No Internet" - that's normal, <strong>stay connected</strong><br>
 3. Select your home WiFi network below and enter the password<br>
@@ -76,7 +77,9 @@ function scanNetworks() {
       data.forEach(network => {
         const option = document.createElement('option');
         option.value = network.ssid;
-        option.textContent = network.ssid + ' (' + getSignalStrength(network.rssi) + ')';
+        const strength = getSignalStrength(network.rssi);
+        option.textContent = network.ssid + ' (' + strength.text + ')';
+        option.style.color = strength.color;
         networkSelect.appendChild(option);
       });
 
@@ -89,10 +92,10 @@ function scanNetworks() {
 }
 
 function getSignalStrength(rssi) {
-  if (rssi >= -50) return '📶 Excellent';
-  if (rssi >= -60) return '📶 Good';
-  if (rssi >= -70) return '📶 Fair';
-  return '📶 Weak';
+  if (rssi >= -50) return { text: '🟢', color: '#28a745' };  // Green
+  if (rssi >= -60) return { text: '🟢', color: '#28a745' };       // Green
+  if (rssi >= -70) return { text: '🟡', color: '#ffc107' };       // Yellow
+  return { text: '🔴', color: '#dc3545' };                       // Red
 }
 
 function selectNetwork() {
