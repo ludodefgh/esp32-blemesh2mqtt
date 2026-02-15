@@ -1557,18 +1557,18 @@ esp_err_t root_handler(httpd_req_t *req)
 const char *get_content_type(const char *filename)
 {
     if (strstr(filename, ".html"))
-        return "text/html";
+        return "text/html; charset=UTF-8";
     if (strstr(filename, ".js"))
-        return "application/javascript";
+        return "application/javascript; charset=UTF-8";
     if (strstr(filename, ".css"))
-        return "text/css";
+        return "text/css; charset=UTF-8";
     if (strstr(filename, ".png"))
         return "image/png";
     if (strstr(filename, ".ico"))
         return "image/x-icon";
     if (strstr(filename, ".json"))
-        return "application/json";
-    return "text/plain";
+        return "application/json; charset=UTF-8";
+    return "text/plain; charset=UTF-8";
 }
 
 esp_err_t setup_handler(httpd_req_t *req)
@@ -1588,7 +1588,7 @@ esp_err_t setup_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_type(req, "text/html; charset=UTF-8");
     char chunk[512];
     size_t read_bytes;
     while ((read_bytes = fread(chunk, 1, sizeof(chunk), file)) > 0)
