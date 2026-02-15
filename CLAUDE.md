@@ -1,4 +1,4 @@
-# Claude Code Instructions for ESPIDFSengledB11N1EProto
+# Claude Code Instructions for esp32-blemesh2mqtt
 
 ## Git Workflow
 
@@ -7,7 +7,7 @@
 
 ```bash
 # Remote should be configured as:
-git remote set-url origin git@github.com:ludodefgh/ESPIDFSengledB11N1EProto.git
+git remote set-url origin git@github.com:ludodefgh/esp32-blemesh2mqtt.git
 
 # Verify with:
 git remote -v
