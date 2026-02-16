@@ -1,0 +1,8 @@
+# Name,         Type,   SubType,    Offset,     Size,   Flags
+# Single OTA partition table for RISC-V targets (ESP32-C3, C6, H2)
+# No rollback, but allows larger binaries (~2.7MB)
+nvs,            data,   nvs,        0x9000,     16k
+otadata,        data,   ota,        0xd000,     8k
+phy_init,       data,   phy,        0xf000,     4k
+ota_0,          app,    ota_0,      0x10000,    2752K
+storage,        data,   littlefs,   0x2C0000,   1216K

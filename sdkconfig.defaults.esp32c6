@@ -1,0 +1,14 @@
+# ESP32-C6-specific configuration overrides
+# Applied after sdkconfig.defaults when building for ESP32-C6
+
+# ESP32-C6 balanced resources
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=5
+
+# RISC-V specific - 160MHz CPU frequency
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# Flash frequency - 40MHz
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+
+# Partition table - Single OTA (no rollback) for larger RISC-V binaries
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/single-ota.csv"

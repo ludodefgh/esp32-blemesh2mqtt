@@ -1,0 +1,17 @@
+# ESP32-specific configuration overrides
+# Applied after sdkconfig.defaults when building for ESP32
+
+# ESP32 has more resources - can support more connections
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=7
+
+# ESP32-specific optimizations
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+
+# ESP32 Memory Optimization (Use SRAM1 as IRAM) - Xtensa only
+CONFIG_ESP_SYSTEM_ESP32_SRAM1_REGION_AS_IRAM=y
+
+# MODEM SLEEP Options (Bluedroid/ESP32 specific)
+# CONFIG_BTDM_CTRL_MODEM_SLEEP is not set
+
+# Flash frequency - 40MHz
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
