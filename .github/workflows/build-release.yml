@@ -82,6 +82,20 @@ jobs:
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
 
+          # Create merged binary for easy web-based flashing
+          cd ${PACKAGE_NAME}
+          python3 -m esptool --chip ${{ matrix.target }} merge_bin \
+            -o BleMesh2Mqtt-${VERSION}-${{ matrix.target }}-merged.bin \
+            --flash_mode dio \
+            --flash_freq 40m \
+            --flash_size 4MB \
+            0x1000 bootloader.bin \
+            0x8000 partition-table.bin \
+            0xd000 ota_data_initial.bin \
+            0x10000 BleMesh2Mqtt.bin \
+            ${STORAGE_OFFSET} storage.bin
+          cd ..
+
           # Create flash instructions
           cat > ${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << EOF
           ==========================================
@@ -102,8 +116,17 @@ jobs:
           METHOD 1: Using esptool.py (Linux/Mac/Windows)
           ------------------------------------------------
 
-          esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
-            --chip ${TARGET} write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
+          esptool.py --chip ${TARGET} -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+            write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
+            0x1000 bootloader.bin \\
+            0x8000 partition-table.bin \\
+            0xd000 ota_data_initial.bin \\
+            0x10000 BleMesh2Mqtt.bin \\
+            ${STORAGE_OFFSET} storage.bin
+
+          Or using auto-detect (recommended):
+          esptool.py --chip auto -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+            write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
             0x1000 bootloader.bin \\
             0x8000 partition-table.bin \\
             0xd000 ota_data_initial.bin \\
@@ -119,23 +142,38 @@ jobs:
           - Mac: /dev/cu.usbserial-*
           - Windows: COM3, COM4, etc.
 
-          METHOD 2: Web-based Flash (Chrome/Edge only)
-          ---------------------------------------------
+          METHOD 2: Web-based Flash - Single File (Chrome/Edge only) **RECOMMENDED**
+          ----------------------------------------------------------------------------
 
           1. Visit: https://web.esphome.io/
           2. Click "Connect"
           3. Select your device
           4. Click "Install" and choose "Manual Installation"
-          5. Upload the files in this order:
+          5. Upload the merged binary:
+             - 0x0: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin
+
+          This single file contains all partitions at the correct offsets.
+
+          METHOD 3: Web-based Flash - Multiple Files (Chrome/Edge only)
+          --------------------------------------------------------------
+
+          If the web tool supports multiple files, upload in this order:
              - 0x1000: bootloader.bin
              - 0x8000: partition-table.bin
              - 0xd000: ota_data_initial.bin
              - 0x10000: BleMesh2Mqtt.bin
              - ${STORAGE_OFFSET}: storage.bin
 
-          METHOD 3: ESP Flash Download Tool (Windows)
+          METHOD 4: ESP Flash Download Tool (Windows)
           --------------------------------------------
 
+          Option A - Single merged file (recommended):
+          1. Download tool from: https://www.espressif.com/en/support/download/other-tools
+          2. Select chip type: ${TARGET}
+          3. Add file: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin @ 0x0
+          4. Set COM port and click START
+
+          Option B - Multiple files:
           1. Download tool from: https://www.espressif.com/en/support/download/other-tools
           2. Select chip type: ${TARGET}
           3. Add files with addresses:
