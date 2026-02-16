@@ -1,0 +1,190 @@
+name: Build Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [esp32, esp32s3, esp32c3, esp32c6]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
+      - name: Clone ESP-IDF fork with BLE Mesh fixes
+        run: |
+          mkdir -p ~/esp
+          cd ~/esp
+          git clone --recursive -b ble-mesh-fixes https://github.com/ludodefgh/esp-idf.git
+          cd esp-idf
+          ./install.sh ${{ matrix.target }}
+
+      - name: Build firmware
+        run: |
+          cd ~/esp/esp-idf
+          . ./export.sh
+          cd $GITHUB_WORKSPACE
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
+
+      - name: Prepare release package
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.version }}"
+          PACKAGE_NAME="BleMesh2Mqtt-${VERSION}-${{ matrix.target }}"
+
+          mkdir -p ${PACKAGE_NAME}
+
+          # Copy binaries
+          cp build/BleMesh2Mqtt.bin ${PACKAGE_NAME}/
+          cp build/bootloader/bootloader.bin ${PACKAGE_NAME}/
+          cp build/partition_table/partition-table.bin ${PACKAGE_NAME}/
+          cp build/ota_data_initial.bin ${PACKAGE_NAME}/
+          cp build/storage.bin ${PACKAGE_NAME}/
+
+          # Detect storage offset from build log (differs by architecture)
+          # ESP32/ESP32-S3 (dual-ota): 0x3b0000, ESP32-C3/C6 (single-ota): 0x2c0000
+          STORAGE_OFFSET=$(grep "storage.bin" build/log/idf_py_stdout_output_* 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=\s+build/storage\.bin)' | tail -1)
+          if [ -z "$STORAGE_OFFSET" ]; then
+            # Fallback: detect from target
+            if [ "${{ matrix.target }}" = "esp32" ] || [ "${{ matrix.target }}" = "esp32s3" ]; then
+              STORAGE_OFFSET="0x3b0000"
+            else
+              STORAGE_OFFSET="0x2c0000"
+            fi
+          fi
+          echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
+
+          # Create flash instructions
+          cat > ${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << 'EOF'
+          ==========================================
+          BleMesh2MQTT Flash Instructions
+          ==========================================
+
+          Target: ${{ matrix.target }}
+          Version: ${VERSION}
+
+          IMPORTANT: This firmware uses a custom ESP-IDF fork with BLE Mesh fixes.
+          Source: https://github.com/ludodefgh/esp-idf (branch: ble-mesh-fixes)
+
+          PREREQUISITES:
+          - Install esptool.py: pip install esptool
+          - Or use ESP Flash Download Tool (Windows): https://www.espressif.com/en/support/download/other-tools
+
+          METHOD 1: Using esptool.py (Linux/Mac/Windows)
+          ------------------------------------------------
+
+          esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \
+            --chip ${{ matrix.target }} write_flash --flash_mode dio --flash_size detect --flash_freq 40m \
+            0x1000 bootloader.bin \
+            0x8000 partition-table.bin \
+            0xd000 ota_data_initial.bin \
+            0x10000 BleMesh2Mqtt.bin \
+            \${STORAGE_OFFSET} storage.bin
+
+          Note: Storage offset varies by target:
+          - ESP32, ESP32-S3: 0x3b0000 (dual OTA with rollback)
+          - ESP32-C3, ESP32-C6: 0x2c0000 (single OTA, larger binary)
+
+          Note: Replace /dev/ttyUSB0 with your serial port:
+          - Linux: /dev/ttyUSB0 or /dev/ttyACM0
+          - Mac: /dev/cu.usbserial-*
+          - Windows: COM3, COM4, etc.
+
+          METHOD 2: Web-based Flash (Chrome/Edge only)
+          ---------------------------------------------
+
+          1. Visit: https://web.esphome.io/
+          2. Click "Connect"
+          3. Select your device
+          4. Click "Install" and choose "Manual Installation"
+          5. Upload the files in this order:
+             - 0x1000: bootloader.bin
+             - 0x8000: partition-table.bin
+             - 0xd000: ota_data_initial.bin
+             - 0x10000: BleMesh2Mqtt.bin
+             - See storage offset note below: storage.bin
+
+          Note: Storage offset varies:
+          - ESP32, ESP32-S3: 0x3b0000
+          - ESP32-C3, ESP32-C6: 0x2c0000
+
+          METHOD 3: ESP Flash Download Tool (Windows)
+          --------------------------------------------
+
+          1. Download tool from: https://www.espressif.com/en/support/download/other-tools
+          2. Select chip type: ${{ matrix.target }}
+          3. Add files with addresses:
+             bootloader.bin @ 0x1000
+             partition-table.bin @ 0x8000
+             ota_data_initial.bin @ 0xd000
+             BleMesh2Mqtt.bin @ 0x10000
+             storage.bin @ (see offset note below)
+
+          Note: Storage offset varies:
+          - ESP32, ESP32-S3: 0x3b0000
+          - ESP32-C3, ESP32-C6: 0x2c0000
+          4. Set COM port and click START
+
+          AFTER FLASHING:
+          ---------------
+
+          1. Device will create WiFi AP: "BleMesh2MQTT-Setup-XX:XX:XX"
+          2. Connect to this AP (no password)
+          3. Navigate to: http://192.168.4.1
+          4. Configure WiFi and MQTT settings
+          5. Device will reboot and connect to your network
+
+          TROUBLESHOOTING:
+          ----------------
+
+          - If flash fails, try lower baud rate: -b 115200
+          - Hold BOOT button while connecting for some boards
+          - Verify correct COM port with: ls /dev/tty* (Linux/Mac) or Device Manager (Windows)
+          - Erase flash first if upgrading: esptool.py --chip ${{ matrix.target }} erase_flash
+
+          For more help: https://github.com/ludodefgh/esp32-blemesh2mqtt/issues
+          EOF
+
+          # Create archive
+          zip -r ${PACKAGE_NAME}.zip ${PACKAGE_NAME}/
+
+          echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.PACKAGE_NAME }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact (manual workflow)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE_NAME }}.zip
+          retention-days: 30

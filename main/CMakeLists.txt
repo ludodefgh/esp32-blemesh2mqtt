@@ -1,8 +1,15 @@
 set(CMAKE_CXX_STANDARD 23)
 
-set(CMAKE_CXX_FLAGS "-Wno-missing-field-initializers -Wno-unused-value -mlongcalls")
+# Base compiler flags for all targets
+set(CMAKE_CXX_FLAGS "-Wno-missing-field-initializers -Wno-unused-value")
+set(CMAKE_C_FLAGS "-Wno-missing-field-initializers -Wno-implicit-fallthrough -Wno-unused-value")
 
-set(CMAKE_C_FLAGS "-Wno-missing-field-initializers -Wno-implicit-fallthrough -Wno-unused-value -mlongcalls")
+# Add -mlongcalls for Xtensa targets (ESP32, ESP32-S3) - needed for large binaries
+# RISC-V targets (C3, C6) don't support this flag
+if(CONFIG_IDF_TARGET_ESP32 OR CONFIG_IDF_TARGET_ESP32S3)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mlongcalls")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mlongcalls")
+endif()
 
 file(GLOB_RECURSE SRC_FILES "web_server/*.cpp" "debug/*.cpp" "ble_mesh/*.cpp" "wifi/*.cpp" "sig_models/*.cpp" "sig_companies/*.cpp" "mqtt/*.cpp" "ota/*.cpp" "security/*.cpp")
 

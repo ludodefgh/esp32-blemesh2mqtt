@@ -1,8 +1,79 @@
-# Prerequisites
+# ESP-IDF Build Artifacts
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock.old
+
+# Keep default configurations (multi-target support)
+!sdkconfig.defaults
+!sdkconfig.defaults.*
+
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE and Editor files
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Claude Code
+.claude/settings.local.json
+.claude/memory/
+
+# Build and Release
+releases/
+*.zip
+*.tar.gz
+
+# Logs and temporary files
+*.log
+logs/
+*.tmp
+*.temp
+
+# NVS encryption keys (CRITICAL - never commit these!)
+nvs_keys/
+*.nvs
+*.key
+
+# Credentials and secrets
+credentials.json
+secrets.h
+wifi_config.h
+mqtt_config.h
+.env
+.env.local
+
+# ESP-IDF specific
+*.o
 *.d
+*.a
+*.so
+*.ld
+managed_components/.cache/
+managed_components/.component_hash
+_config.h
 
 # Object files
-*.o
 *.ko
 *.obj
 *.elf
@@ -18,13 +89,11 @@
 
 # Libraries
 *.lib
-*.a
 *.la
 *.lo
 
 # Shared objects (inc. Windows DLLs)
 *.dll
-*.so
 *.so.*
 *.dylib
 
@@ -51,11 +120,48 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# esp-idf build output dir
-build/
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
 
-!sdkconfig.ci.model
-_config.h
+# System files
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+
+# Package managers
+node_modules/
+package-lock.json
+yarn.lock
 
 # Devcontainer artifacts
 .devcontainer/.vscode-server/
+
+# Keep these important files
+!.gitignore
+!.gitmodules
+!LICENSE
+!README.md
+!CHANGELOG.md
+!CLAUDE.md
+!RELEASE_PROCESS.md
+!sdkconfig.ci.model
+
+# Partition tables (keep them)
+!partitions/
+!partitions/*.csv
