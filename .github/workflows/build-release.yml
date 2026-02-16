@@ -66,7 +66,7 @@ jobs:
 
           # Detect storage offset from build log (differs by architecture)
           # ESP32/ESP32-S3 (dual-ota): 0x3b0000, ESP32-C3/C6 (single-ota): 0x2c0000
-          STORAGE_OFFSET=$(grep "storage.bin" build/log/idf_py_stdout_output_* 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=\s+build/storage\.bin)' | tail -1)
+          STORAGE_OFFSET=$(grep -r "storage.bin" build/ 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=.*storage\.bin)' | head -1)
           if [ -z "$STORAGE_OFFSET" ]; then
             # Fallback: detect from target
             if [ "${{ matrix.target }}" = "esp32" ] || [ "${{ matrix.target }}" = "esp32s3" ]; then
@@ -75,16 +75,19 @@ jobs:
               STORAGE_OFFSET="0x2c0000"
             fi
           fi
+          echo "Detected storage offset: $STORAGE_OFFSET"
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
+          echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
 
           # Create flash instructions
-          cat > ${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << 'EOF'
+          cat > ${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << EOF
           ==========================================
           BleMesh2MQTT Flash Instructions
           ==========================================
 
-          Target: ${{ matrix.target }}
+          Target: ${TARGET}
           Version: ${VERSION}
+          Storage Offset: ${STORAGE_OFFSET}
 
           IMPORTANT: This firmware uses a custom ESP-IDF fork with BLE Mesh fixes.
           Source: https://github.com/ludodefgh/esp-idf (branch: ble-mesh-fixes)
@@ -96,13 +99,13 @@ jobs:
           METHOD 1: Using esptool.py (Linux/Mac/Windows)
           ------------------------------------------------
 
-          esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \
-            --chip ${{ matrix.target }} write_flash --flash_mode dio --flash_size detect --flash_freq 40m \
-            0x1000 bootloader.bin \
-            0x8000 partition-table.bin \
-            0xd000 ota_data_initial.bin \
-            0x10000 BleMesh2Mqtt.bin \
-            \${STORAGE_OFFSET} storage.bin
+          esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+            --chip ${TARGET} write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
+            0x1000 bootloader.bin \\
+            0x8000 partition-table.bin \\
+            0xd000 ota_data_initial.bin \\
+            0x10000 BleMesh2Mqtt.bin \\
+            ${STORAGE_OFFSET} storage.bin
 
           Note: Storage offset varies by target:
           - ESP32, ESP32-S3: 0x3b0000 (dual OTA with rollback)
@@ -125,27 +128,19 @@ jobs:
              - 0x8000: partition-table.bin
              - 0xd000: ota_data_initial.bin
              - 0x10000: BleMesh2Mqtt.bin
-             - See storage offset note below: storage.bin
-
-          Note: Storage offset varies:
-          - ESP32, ESP32-S3: 0x3b0000
-          - ESP32-C3, ESP32-C6: 0x2c0000
+             - ${STORAGE_OFFSET}: storage.bin
 
           METHOD 3: ESP Flash Download Tool (Windows)
           --------------------------------------------
 
           1. Download tool from: https://www.espressif.com/en/support/download/other-tools
-          2. Select chip type: ${{ matrix.target }}
+          2. Select chip type: ${TARGET}
           3. Add files with addresses:
              bootloader.bin @ 0x1000
              partition-table.bin @ 0x8000
              ota_data_initial.bin @ 0xd000
              BleMesh2Mqtt.bin @ 0x10000
-             storage.bin @ (see offset note below)
-
-          Note: Storage offset varies:
-          - ESP32, ESP32-S3: 0x3b0000
-          - ESP32-C3, ESP32-C6: 0x2c0000
+             storage.bin @ ${STORAGE_OFFSET}
           4. Set COM port and click START
 
           AFTER FLASHING:
@@ -163,7 +158,7 @@ jobs:
           - If flash fails, try lower baud rate: -b 115200
           - Hold BOOT button while connecting for some boards
           - Verify correct COM port with: ls /dev/tty* (Linux/Mac) or Device Manager (Windows)
-          - Erase flash first if upgrading: esptool.py --chip ${{ matrix.target }} erase_flash
+          - Erase flash first if upgrading: esptool.py --chip ${TARGET} erase_flash
 
           For more help: https://github.com/ludodefgh/esp32-blemesh2mqtt/issues
           EOF
