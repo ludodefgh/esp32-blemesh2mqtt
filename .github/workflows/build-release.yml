@@ -83,8 +83,13 @@ jobs:
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
 
           # Create merged binary for easy web-based flashing
+          # Source ESP-IDF environment to get esptool.py in PATH
+          cd ~/esp/esp-idf
+          . ./export.sh
+          cd $GITHUB_WORKSPACE
+
           cd ${PACKAGE_NAME}
-          python3 -m esptool --chip ${{ matrix.target }} merge_bin \
+          esptool.py --chip ${{ matrix.target }} merge_bin \
             -o BleMesh2Mqtt-${VERSION}-${{ matrix.target }}-merged.bin \
             --flash_mode dio \
             --flash_freq 40m \
