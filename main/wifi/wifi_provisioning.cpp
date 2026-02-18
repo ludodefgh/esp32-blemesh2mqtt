@@ -469,6 +469,21 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     ap_config.ap.authmode = strlen(CAPTIVE_PORTAL_PASSWORD) == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
     ap_config.ap.beacon_interval = 100; // Default beacon interval for faster detection
 
+    // -----------------------------------------------------------------------
+    // Initialisation order matters: netif BEFORE esp_wifi_init().
+    // The WiFi driver attaches to the netif packet-input function during init;
+    // if the netif doesn't exist yet, DHCP DISCOVER frames from stations never
+    // reach lwIP. This mirrors the official ESP-IDF captive portal example.
+    // -----------------------------------------------------------------------
+    if (s_ap_netif != NULL)
+    {
+        LOG_INFO(TAG, "Destroying existing AP netif to clear DHCP leases...");
+        esp_netif_dhcps_stop(s_ap_netif);
+        esp_netif_destroy(s_ap_netif);
+        s_ap_netif = NULL;
+    }
+    s_ap_netif = esp_netif_create_default_wifi_ap(); // MUST come before esp_wifi_init()
+
     static bool wifi_initialized = false;
     if (!wifi_initialized)
     {
@@ -477,133 +492,55 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
         wifi_initialized = true;
     }
 
-    // CRITICAL: Always destroy and recreate the AP netif to clear DHCP leases
-    // This fixes the issue where phones don't get IP after WiFi credential reset
-    if (s_ap_netif != NULL)
-    {
-        LOG_INFO(TAG, "Destroying existing AP netif to clear DHCP leases...");
-
-        // Stop DHCP server first
-        esp_netif_dhcps_stop(s_ap_netif);
-
-        // Destroy the netif to clear all state including DHCP leases
-        esp_netif_destroy(s_ap_netif);
-        s_ap_netif = NULL;
-
-        // Small delay to ensure clean state
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    LOG_INFO(TAG, "Creating fresh AP netif with clean DHCP state...");
-    s_ap_netif = esp_netif_create_default_wifi_ap();
-
-    // CRITICAL: Stop DHCP server BEFORE configuring IP to ensure clean state
-    LOG_INFO(TAG, "Stopping DHCP server before IP configuration...");
-    esp_err_t stop_err = esp_netif_dhcps_stop(s_ap_netif);
-    if (stop_err != ESP_OK && stop_err != ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED)
-    {
-        LOG_WARN(TAG, "DHCP stop failed: %s (continuing anyway)", esp_err_to_name(stop_err));
-    }
-    else
-    {
-        LOG_INFO(TAG, "DHCP server stopped successfully");
-    }
-
-    // Small delay to ensure DHCP server fully terminates before IP reconfiguration
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // Configure IP information
-    esp_netif_ip_info_t ip_info;
-    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.ip);
-    esp_netif_str_to_ip4("255.255.255.0", &ip_info.netmask);
-    esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &ip_info.gw);
-
-    ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
-
-    // Keep DHCP configuration simple - let ESP-IDF handle defaults
-    LOG_INFO(TAG, "Using default DHCP server configuration for maximum compatibility");
-
-    // Set DHCP Option 114 for modern captive portal detection (RFC 8910)
-    char captive_portal_uri[] = "http://192.168.4.1/setup";
-    esp_err_t dhcp_opt_err = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
-                                                    ESP_NETIF_CAPTIVEPORTAL_URI,
-                                                    captive_portal_uri,
-                                                    strlen(captive_portal_uri));
-    if (dhcp_opt_err == ESP_OK)
-    {
-        LOG_INFO(TAG, "DHCP Option 114 (Captive Portal URI) set successfully");
-    }
-    else
-    {
-        LOG_WARN(TAG, "Failed to set DHCP Option 114: %s", esp_err_to_name(dhcp_opt_err));
-        LOG_WARN(TAG, "Fallback to DNS-based captive portal detection");
-    }
-
-    // Start in AP-only mode for faster client connections
-    LOG_INFO(TAG, "Starting in AP mode for faster client connections");
+    // No DHCP/IP manipulation before esp_wifi_start(). Let the netif
+    // auto-start DHCP via WIFI_EVENT_AP_START → esp_netif_action_start().
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    // Force HT20: without this the C3 advertises HT40, causing phones to
+    // fail auth/assoc (rm mis) on the first connection attempt.
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // Wait for WiFi AP to be fully started before configuring DHCP
-    LOG_INFO(TAG, "Waiting for WiFi AP to fully start...");
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // -----------------------------------------------------------------------
+    // DHCP option 114 — set AFTER esp_wifi_start(), same as the example's
+    // dhcp_set_captiveportal_url(). Use non-fatal checks: stop may fail if
+    // auto-start hasn't fired yet; start may fail if it already ran. Both
+    // outcomes leave the server running with the option correctly applied.
+    // -----------------------------------------------------------------------
+    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    esp_netif_ip_info_t ap_ip_info;
+    esp_netif_get_ip_info(ap_netif, &ap_ip_info);
+    char captive_portal_uri[32];
+    snprintf(captive_portal_uri, sizeof(captive_portal_uri),
+             "http://" IPSTR, IP2STR(&ap_ip_info.ip));
 
-    // Debug network interface state before starting DHCP
-    esp_netif_ip_info_t current_ip;
-    esp_netif_get_ip_info(s_ap_netif, &current_ip);
-    LOG_INFO(TAG, "AP interface IP: " IPSTR ", Gateway: " IPSTR ", Netmask: " IPSTR,
-             IP2STR(&current_ip.ip), IP2STR(&current_ip.gw), IP2STR(&current_ip.netmask));
-
-    // Check if DHCP server is already running
-    esp_netif_dhcp_status_t dhcp_status;
-    esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
-    LOG_INFO(TAG, "DHCP server status before start: %s",
-             dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED"
-                                                                                                       : "UNKNOWN");
-
-    LOG_INFO(TAG, "Starting DHCP server with IP range: 192.168.4.2-192.168.4.254");
-    LOG_INFO(TAG, "Gateway: 192.168.4.1, DNS: 192.168.4.1");
-
-    // Check current DHCP status before starting
-    esp_netif_dhcp_status_t current_status;
-    esp_netif_dhcps_get_status(s_ap_netif, &current_status);
-
-    if (current_status == ESP_NETIF_DHCP_STARTED)
+    esp_netif_dhcps_stop(ap_netif); // non-fatal
+    esp_err_t dhcp_opt_err = esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
+                                                     ESP_NETIF_CAPTIVEPORTAL_URI,
+                                                     captive_portal_uri,
+                                                     strlen(captive_portal_uri));
+    if (dhcp_opt_err != ESP_OK)
     {
-        LOG_INFO(TAG, "DHCP server already started (this is expected after esp_netif_create_default_wifi_ap)");
+        LOG_WARN(TAG, "DHCP option 114 failed: %s (DNS detection still active)",
+                 esp_err_to_name(dhcp_opt_err));
     }
     else
     {
-        LOG_INFO(TAG, "DHCP server not started, starting it now...");
-        esp_err_t dhcps_start_err = esp_netif_dhcps_start(s_ap_netif);
-        if (dhcps_start_err != ESP_OK && dhcps_start_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
-        {
-            LOG_ERROR(TAG, "Failed to start DHCP server: %s", esp_err_to_name(dhcps_start_err));
-            return dhcps_start_err;
-        }
+        LOG_INFO(TAG, "DHCP option 114 set: %s", captive_portal_uri);
     }
+    esp_netif_dhcps_start(ap_netif); // non-fatal
 
-    // Verify final DHCP server status
-    esp_netif_dhcps_get_status(s_ap_netif, &dhcp_status);
-    LOG_INFO(TAG, "DHCP server final status: %s",
-             dhcp_status == ESP_NETIF_DHCP_STARTED ? "STARTED" : dhcp_status == ESP_NETIF_DHCP_STOPPED ? "STOPPED"
-                                                                                                       : "UNKNOWN");
+    LOG_INFO(TAG, "Captive portal started: SSID=%s IP=" IPSTR,
+             ap_ssid, IP2STR(&ap_ip_info.ip));
 
-    // Add delay to ensure DHCP server fully initializes
-    LOG_INFO(TAG, "Waiting 2 seconds for DHCP server to fully initialize...");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    // Re-enable DNS server now that DHCP is working reliably
     esp_ip4_addr_t captive_ip;
     esp_netif_str_to_ip4(CAPTIVE_PORTAL_IP, &captive_ip);
-
     dns_server_config_t dns_config = {
         .num_of_entries = 2,
         .item = {
-            {.name = "*", .ip = captive_ip},                  // Wildcard catch-all
-            {.name = "captiveportal.local", .ip = captive_ip} // Common portal domain
+            {.name = "*", .ip = captive_ip},
+            {.name = "captiveportal.local", .ip = captive_ip}
         }};
-
     esp_err_t dns_start_err = dns_server_start_with_config(&dns_config);
     if (dns_start_err != ESP_OK)
     {
@@ -611,10 +548,9 @@ esp_err_t wifi_provisioning_start_captive_portal(void)
     }
     else
     {
-        LOG_INFO(TAG, "DNS server started successfully for captive portal detection");
+        LOG_INFO(TAG, "DNS server started");
     }
 
-    LOG_INFO(TAG, "Captive portal started with SSID: %s", ap_ssid);
     return ESP_OK;
 }
 

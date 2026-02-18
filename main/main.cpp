@@ -175,13 +175,6 @@ extern "C" void app_main()
         return;
     }
 
-    err = bluetooth_init();
-    if (err)
-    {
-        LOG_ERROR(TAG, "esp32_bluetooth_init failed (err %d)", err);
-        return;
-    }
-
     mount_littlefs();
 
     size_t total = 0, used = 0;
@@ -198,13 +191,6 @@ extern "C" void app_main()
     register_wifi_commands();
     debug_command_registry::run_all();
 
-    /* Initialize the Bluetooth Mesh Subsystem */
-    err = ble_mesh_init();
-    if (err)
-    {
-        LOG_ERROR(TAG, "Bluetooth mesh init failed (err %d)", err);
-    }
-
     if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL)
     {
         esp_log_level_set("wifi", static_cast<esp_log_level_t>(CONFIG_LOG_MAXIMUM_LEVEL));
@@ -217,11 +203,34 @@ extern "C" void app_main()
 
     if (wifi_provisioning_should_start_captive_portal())
     {
-        LOG_INFO(TAG, "Starting captive portal for WiFi setup");
+        // On ESP32-C3, BLE and WiFi share the same physical radio. If BLE Mesh
+        // is active (scanning advertisements) while the captive portal runs,
+        // radio contention prevents phones from completing WiFi auth/assoc
+        // (seen as "rm mis" in logs). Skip BT init entirely in captive portal
+        // mode — BLE Mesh is not needed for WiFi provisioning. After credentials
+        // are saved the device reboots, re-entering this function in bridge mode
+        // where BT is initialized normally.
+        LOG_INFO(TAG, "Starting captive portal for WiFi setup (BLE skipped to avoid radio contention)");
         ESP_ERROR_CHECK(wifi_provisioning_start_captive_portal());
     }
     else
     {
+        // Bridge mode: WiFi credentials exist and connection succeeded.
+        // Safe to initialize BT and BLE Mesh now.
+        err = bluetooth_init();
+        if (err)
+        {
+            LOG_ERROR(TAG, "esp32_bluetooth_init failed (err %d)", err);
+            return;
+        }
+
+        /* Initialize the Bluetooth Mesh Subsystem */
+        err = ble_mesh_init();
+        if (err)
+        {
+            LOG_ERROR(TAG, "Bluetooth mesh init failed (err %d)", err);
+        }
+
         LOG_INFO(TAG, "WiFi already connected via provisioning - reconnect task will be started automatically");
     }
 
