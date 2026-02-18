@@ -10,7 +10,7 @@
 
 > **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**. ESP32-H2 is not supported as it lacks WiFi.
 
-A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling seamless integration with Home Assistant and other home automation platforms. This project transforms your ESP32 into a comprehensive IoT gateway with professional-grade features.
+A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling seamless integration with Home Assistant and other home automation platforms. This project transforms your ESP32 into a comprehensive IoT gateway.
 
 ## 🌟 Key Features
 
@@ -49,9 +49,6 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
 
 ### 📊 **Comprehensive Monitoring**
 - **Real-time Logging**: Live system logs via WebSocket connection
-- **Performance Metrics**: Memory usage, network statistics, and system health
-- **Debug Console**: Full ESP-IDF console access for advanced troubleshooting
-- **Device Diagnostics**: Per-device status monitoring and error reporting
 
 ## 🏗️ Architecture Overview
 
@@ -76,7 +73,7 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
 - **Web Server**: Embedded HTTP server with WebSocket support for real-time updates
 - **Storage System**: LittleFS-based file system for web assets and configuration
 - **Security Layer**: Encrypted credential storage and secure communications
-- **OTA Manager**: Advanced over-the-air update system with rollback protection
+- **OTA Manager**: Over-the-air update system with rollback protection
 
 ## 🚀 Quick Start
 
@@ -175,9 +172,6 @@ Access the web interface at your device's IP address after WiFi setup:
 
 ### **Debug Console** 🐛
 - Live system logs
-- Execute ESP-IDF commands
-- Advanced troubleshooting tools
-- Performance monitoring
 
 ## ⚙️ Configuration
 
