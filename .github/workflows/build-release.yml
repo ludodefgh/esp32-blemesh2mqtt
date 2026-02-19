@@ -50,8 +50,9 @@ jobs:
           cd ~/esp/esp-idf
           . ./export.sh
           cd $GITHUB_WORKSPACE
-          idf.py set-target ${{ matrix.target }}
-          idf.py build
+          PREVIEW_FLAG=$([ "${{ matrix.target }}" = "esp32c5" ] && echo "--preview" || echo "")
+          idf.py $PREVIEW_FLAG set-target ${{ matrix.target }}
+          idf.py $PREVIEW_FLAG build
 
       - name: Prepare release package
         run: |
