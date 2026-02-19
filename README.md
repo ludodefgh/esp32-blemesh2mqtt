@@ -8,9 +8,11 @@
 | Supported Targets | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
 | ----------------- | ----- | -------- | -------- | -------- |
 
-> **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**. ESP32-H2 is not supported as it lacks WiFi.
+> **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**.
 
 A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling seamless integration with Home Assistant and other home automation platforms. This project transforms your ESP32 into a comprehensive IoT gateway.
+
+📖 **[User Guide — Web Interface & Home Assistant Integration](documentation/USER_GUIDE.md)**
 
 ## 🌟 Key Features
 
@@ -96,40 +98,35 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
    - Connect and navigate to `192.168.4.1`
    - Configure WiFi and MQTT settings
 
-### Option B: Build from Source (For Developers) 🛠️
+### Option B: Build from Source (Dev Container) 🛠️
+
+The recommended development environment uses a **Dev Container** that includes all tools pre-configured (custom ESP-IDF with BLE Mesh fixes, compilers, VS Code extensions).
 
 ### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [VS Code](https://code.visualstudio.com/) with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 - ESP32 development board with **4MB+ flash** and **WiFi** (ESP32, ESP32-S3, ESP32-C3, or ESP32-C6)
 - Home Assistant instance with MQTT broker
-- Development machine with Git and Python
-- ~500MB free disk space for ESP-IDF
 
 ### 1. Clone Repository
 ```bash
-git clone --recursive https://github.com/ludodefgh/esp32-blemesh2mqtt.git
+git clone https://github.com/ludodefgh/esp32-blemesh2mqtt.git
 cd esp32-blemesh2mqtt
 ```
 
-### 2. Setup Development Environment
-```bash
-# Run the automated setup script (downloads ~500MB ESP-IDF)
-./setup.sh
+### 2. Open in Dev Container
+- Open the folder in VS Code
+- When prompted, click **"Reopen in Container"** — or use the Command Palette: `Dev Containers: Reopen in Container`
+- Wait for the container to build (first time only, ~5-10 minutes — downloads the custom ESP-IDF image)
 
-# Or manually setup ESP-IDF
-cd esp-idf
-./install.sh
-source export.sh
-cd ..
-```
-
-> **Note**: The initial setup downloads the custom ESP-IDF (~500MB) with BLE Mesh fixes. This is a one-time operation.
+> **Note**: The container automatically includes the custom ESP-IDF fork with BLE Mesh fixes. No manual ESP-IDF installation is needed.
 
 ### 3. Configure and Build
 ```bash
 # Set your target device (ESP32, ESP32-C3, etc.)
 idf.py set-target esp32
 
-# Configure project (optional - use defaults for quick start)
+# Configure project (optional - defaults work for most cases)
 idf.py menuconfig
 
 # Build the project
@@ -138,7 +135,7 @@ idf.py build
 
 ### 4. Flash and Monitor
 ```bash
-# Flash to device (replace with your port)
+# Flash to device (connected via USB to the host machine)
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
@@ -226,15 +223,17 @@ blemesh2mqtt_<MAC>/
 │   ├── security/         # Credential encryption and security
 │   ├── littlefs/         # Web interface static files
 │   └── common/           # Shared utilities and definitions
-├── esp-idf/              # Custom ESP-IDF with BLE Mesh fixes
-└── tutorial/             # Development guides and examples
+├── .devcontainer/        # Dev Container config (Docker + VS Code)
+└── documentation/        # User guides and screenshots
 ```
 
 ### Custom ESP-IDF
-This project includes a modified ESP-IDF with essential BLE Mesh fixes:
+This project uses a forked ESP-IDF (`ludodefgh/esp-idf`, branch `ble-mesh-fixes`) with essential BLE Mesh fixes:
 - **C99 Compatibility**: Resolved initialization issues in mesh core
 - **Provisioning Stability**: Fixed OOB authentication problems
 - **Enhanced Reliability**: Improved error handling and recovery
+
+The forked ESP-IDF is automatically included in the Dev Container image — no manual installation required.
 
 ### Building Custom Features
 The modular architecture allows easy extension:
@@ -247,16 +246,16 @@ The modular architecture allows easy extension:
 
 ### Common Issues
 
-**Submodule/ESP-IDF Issues**
+**Dev Container / ESP-IDF Issues**
 ```bash
-# If you get "esp-idf not found" or similar errors:
-git submodule update --init --recursive
+# If the ESP-IDF environment is not sourced:
+source /opt/esp/idf/export.sh
 
-# If ESP-IDF installation fails:
-cd esp-idf
-./install.sh esp32,esp32s3,esp32c3,esp32c6
-source export.sh
-cd ..
+# If the container needs to be rebuilt (Command Palette in VS Code):
+# Dev Containers: Rebuild Container
+
+# Verify ESP-IDF is available:
+idf.py --version
 ```
 
 **Build Errors**
