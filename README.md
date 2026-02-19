@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5-blue.svg)](https://github.com/espressif/esp-idf)
-[![Version](https://img.shields.io/badge/version-0.1.3-green.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
+[![Version](https://img.shields.io/badge/version-0.1.4-green.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
 [![GitHub issues](https://img.shields.io/github/issues/ludodefgh/esp32-blemesh2mqtt.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues)
 
 | Supported Targets | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
