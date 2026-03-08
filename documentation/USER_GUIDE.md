@@ -53,6 +53,8 @@ Displays the bridge's network connection information:
 - **IP ADDRESS**: the bridge's IP address on your local network.
 - **SUBNET MASK / GATEWAY**: standard network parameters.
 - **MAC ADDRESS**: unique identifier of the bridge (also used as its identifier in HA).
+- **RSSI**: received signal strength from the WiFi access point (in dBm — the closer to 0, the stronger the signal). Useful for diagnosing connectivity issues.
+- **TX POWER**: current WiFi transmit power (in dBm). Can be adjusted via the interface to reduce interference or improve range.
 - **Reset WiFi**: clears saved WiFi credentials and restarts in captive portal mode to reconfigure the network.
 
 #### MQTT Configuration
