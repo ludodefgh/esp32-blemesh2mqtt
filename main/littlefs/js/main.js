@@ -611,9 +611,9 @@ function createNodeElement(node) {
     
     <div class="lightness-control">
       <span>💡</span>
-      <input type="range" min="0" max="65535" step="500" value="0"
+      <input type="range" min="0" max="${node.max_lightness || 65535}" step="500" value="${node.hsl_l || 0}"
         onchange="onSliderInput('${node.uuid}', this)">
-      <output>0</output>
+      <output>${node.hsl_l || 0}</output>
     </div>
     
     <div class="controls">

@@ -725,8 +725,10 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         char unicast_str[6];
         sprintf(unicast_str, "%04X", node->unicast_addr);
 
-        // Get company name from node manager
+        // Get company name and lightness from node manager
         const char *company_name = "Unknown";
+        uint16_t hsl_l = 0;
+        uint16_t max_lightness = 65535;
         if (auto node_info = node_manager().get_node(device_uuid128{node->dev_uuid}))
         {
             if (node_info->company_id != 0)
@@ -735,12 +737,14 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
                 if (!company_name)
                     company_name = "Unknown";
             }
+            hsl_l = node_info->hsl_l;
+            max_lightness = node_info->max_lightness;
         }
 
         char buf[512];
         snprintf(buf, sizeof(buf),
-                 "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\" }",
-                 i > 0 ? "," : "", uuid_str, node->name, unicast_str, company_name);
+                 "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\", \"hsl_l\": %u, \"max_lightness\": %u }",
+                 i > 0 ? "," : "", uuid_str, node->name, unicast_str, company_name, hsl_l, max_lightness);
         httpd_resp_sendstr_chunk(req, buf);
     }
 
