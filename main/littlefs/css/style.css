@@ -1328,6 +1328,39 @@ body.sidebar-open {
   color: var(--danger);
 }
 
+/* WiFi TX Power Slider */
+.wifi-power-control {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.power-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.power-slider-row input[type="range"] {
+  flex: 1;
+  min-width: 120px;
+}
+
+.power-min, .power-max {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.power-preview {
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 60px;
+  text-align: right;
+}
+
 /* WiFi Controls Styles */
 .wifi-controls {
   margin-top: 1rem;

@@ -423,12 +423,89 @@ esp_err_t wifi_info_handler(httpd_req_t *req)
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
-    char buf[512];
+    // RSSI (only valid when connected)
+    int rssi = -999;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        rssi = ap_info.rssi;
+    }
+
+    // TX power (in 0.25 dBm units; divide by 4 for dBm)
+    int8_t tx_power_quarter = 0;
+    esp_wifi_get_max_tx_power(&tx_power_quarter);
+    int tx_power_dbm = tx_power_quarter / 4;
+
+    char buf[600];
     snprintf(buf, sizeof(buf),
-             "{ \"status\": \"%s\", \"ssid\": \"%s\", \"ip\": \"%s\", \"netmask\": \"%s\", \"gateway\": \"%s\", \"mac\": \"%s\" }",
-             status, ssid, ip_str, netmask_str, gateway_str, mac_str);
+             "{ \"status\": \"%s\", \"ssid\": \"%s\", \"ip\": \"%s\", \"netmask\": \"%s\", \"gateway\": \"%s\", \"mac\": \"%s\", \"rssi\": %d, \"tx_power\": %d }",
+             status, ssid, ip_str, netmask_str, gateway_str, mac_str, rssi, tx_power_dbm);
 
     httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t wifi_power_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+
+    int8_t tx_power_quarter = 0;
+    esp_wifi_get_max_tx_power(&tx_power_quarter);
+    int tx_power_dbm = tx_power_quarter / 4;
+
+    wifi_ap_record_t ap_info;
+    int rssi = -999;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        rssi = ap_info.rssi;
+    }
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{ \"tx_power\": %d, \"rssi\": %d }", tx_power_dbm, rssi);
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t wifi_power_set_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    // Parse JSON: { "tx_power": <dBm> }
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *tx_power_item = cJSON_GetObjectItemCaseSensitive(root, "tx_power");
+    if (!cJSON_IsNumber(tx_power_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing tx_power field");
+        return ESP_FAIL;
+    }
+
+    int dbm = tx_power_item->valueint;
+    cJSON_Delete(root);
+
+    // Clamp to valid ESP-IDF range (2–20 dBm → 8–80 in quarter-dBm units)
+    if (dbm < 2) dbm = 2;
+    if (dbm > 20) dbm = 20;
+    int8_t quarter_dbm = (int8_t)(dbm * 4);
+    esp_err_t err = esp_wifi_set_max_tx_power(quarter_dbm);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "esp_wifi_set_max_tx_power(%d dBm) failed: %s", dbm, esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
+        return ESP_FAIL;
+    }
+    LOG_INFO(TAG, "WiFi TX power set to %d dBm", dbm);
+
+    httpd_resp_set_type(req, "application/json");
+    char resp[64];
+    snprintf(resp, sizeof(resp), "{ \"tx_power\": %d }", dbm);
+    httpd_resp_send(req, resp, -1);
     return ESP_OK;
 }
 
@@ -442,6 +519,22 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/wifi_info"))
     {
         return wifi_info_handler(req);
+    }
+    else if (strstr(req->uri, "/api/wifi_power"))
+    {
+        if (req->method == HTTP_GET)
+        {
+            return wifi_power_get_handler(req);
+        }
+        else if (req->method == HTTP_POST)
+        {
+            return wifi_power_set_handler(req);
+        }
+        else
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
     }
     else if (strstr(req->uri, "/api/console_commands"))
     {

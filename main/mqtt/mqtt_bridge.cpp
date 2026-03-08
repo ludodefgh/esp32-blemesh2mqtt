@@ -285,6 +285,30 @@ CJsonPtr create_ip_json()
     return root;
 }
 
+CJsonPtr create_rssi_json()
+{
+    CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
+
+    cJSON_AddStringToObject(root.get(), "name", "Bridge WiFi RSSI");
+    std::string unique_id = get_bridge_mac_identifier();
+    unique_id += "_rssi";
+    cJSON_AddStringToObject(root.get(), "unique_id", unique_id.c_str());
+    cJSON_AddStringToObject(root.get(), "state_topic", get_bridge_state_topic());
+    cJSON_AddStringToObject(root.get(), "unit_of_measurement", "dBm");
+    cJSON_AddStringToObject(root.get(), "value_template", "{{ value_json.rssi }}");
+    cJSON_AddStringToObject(root.get(), "entity_category", "diagnostic");
+    cJSON_AddStringToObject(root.get(), "device_class", "signal_strength");
+    cJSON_AddStringToObject(root.get(), "availability_topic", get_bridge_availability_topic());
+    cJSON_AddStringToObject(root.get(), "payload_available", "on");
+    cJSON_AddStringToObject(root.get(), "payload_not_available", "offline");
+    cJSON_AddStringToObject(root.get(), "icon", "mdi:wifi");
+
+    cJSON *device = create_bridge_device_object();
+    cJSON_AddItemToObject(root.get(), "device", device);
+
+    return root;
+}
+
 CJsonPtr create_bridge_info_json()
 {
     CJsonPtr root(cJSON_CreateObject(), cJSON_Delete);
@@ -297,6 +321,13 @@ CJsonPtr create_bridge_info_json()
     cJSON_AddNumberToObject(root.get(), "heap_free", esp_get_free_heap_size() / 1024); // Convert to KB
     // IP address
     cJSON_AddStringToObject(root.get(), "ip_address", get_ip_address());
+    // WiFi RSSI
+    wifi_ap_record_t ap_info;
+    int rssi = -999;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        rssi = ap_info.rssi;
+    }
+    cJSON_AddNumberToObject(root.get(), "rssi", rssi);
 
     cJSON_AddStringToObject(root.get(), "version", FIRMWARE_VERSION);
 
@@ -402,7 +433,7 @@ void send_bridge_discovery()
         }
     }
 
-    for (const auto sensor_json_func : {create_uptime_json, create_mem_json, create_ip_json})
+    for (const auto sensor_json_func : {create_uptime_json, create_mem_json, create_ip_json, create_rssi_json})
     {
         CJsonPtr sensor_json = sensor_json_func();
         if (cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(sensor_json.get(), "unique_id"))

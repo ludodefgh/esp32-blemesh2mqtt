@@ -171,8 +171,29 @@
                 <span class="info-label">MAC Address:</span>
                 <span class="info-value" id="wifi-mac">--</span>
               </div>
+              <div class="info-row">
+                <span class="info-label">RSSI:</span>
+                <span class="info-value" id="wifi-rssi">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">TX Power:</span>
+                <span class="info-value" id="wifi-tx-power">--</span>
+              </div>
             </div>
-            
+
+            <!-- TX Power control -->
+            <div class="wifi-power-control">
+              <label for="wifi-tx-power-slider" class="info-label">Set TX Power (dBm):</label>
+              <div class="power-slider-row">
+                <span class="power-min">2</span>
+                <input type="range" id="wifi-tx-power-slider" min="2" max="20" step="1" value="20"
+                       oninput="document.getElementById('wifi-tx-power-preview').textContent = this.value + ' dBm'">
+                <span class="power-max">20</span>
+                <span id="wifi-tx-power-preview" class="power-preview">20 dBm</span>
+                <button class="btn btn-primary btn-small" onclick="setWifiTxPower()">Apply</button>
+              </div>
+            </div>
+
             <div class="wifi-controls">
               <button class="btn btn-danger" onclick="resetWifi()">
                 <span class="icon">🔄</span>

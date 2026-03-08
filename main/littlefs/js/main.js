@@ -812,6 +812,45 @@ function updateWifiStatus(wifiData) {
   if (macElement) {
     macElement.textContent = wifiData.mac || '--';
   }
+
+  // Update RSSI
+  const rssiElement = document.getElementById('wifi-rssi');
+  if (rssiElement) {
+    rssiElement.textContent = (wifiData.rssi !== undefined && wifiData.rssi !== -999)
+      ? `${wifiData.rssi} dBm`
+      : '--';
+  }
+
+  // Update TX power display and sync slider
+  if (wifiData.tx_power !== undefined) {
+    const txPowerEl = document.getElementById('wifi-tx-power');
+    if (txPowerEl) txPowerEl.textContent = `${wifiData.tx_power} dBm`;
+
+    const slider = document.getElementById('wifi-tx-power-slider');
+    const preview = document.getElementById('wifi-tx-power-preview');
+    if (slider) slider.value = wifiData.tx_power;
+    if (preview) preview.textContent = `${wifiData.tx_power} dBm`;
+  }
+}
+
+function setWifiTxPower() {
+  const slider = document.getElementById('wifi-tx-power-slider');
+  if (!slider) return;
+  const dbm = parseInt(slider.value, 10);
+
+  fetch('/api/wifi_power', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tx_power: dbm })
+  })
+    .then(res => res.json())
+    .then(data => {
+      const txPowerEl = document.getElementById('wifi-tx-power');
+      if (txPowerEl) txPowerEl.textContent = `${data.tx_power} dBm`;
+      const preview = document.getElementById('wifi-tx-power-preview');
+      if (preview) preview.textContent = `${data.tx_power} dBm`;
+    })
+    .catch(err => console.error('Failed to set TX power:', err));
 }
 
 function capitalizeFirst(str) {
