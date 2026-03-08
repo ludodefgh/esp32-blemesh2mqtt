@@ -805,6 +805,7 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, "{ \"provisioned\": [");
 
     // List provisioned nodes
+    bool first_node = true;
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -837,8 +838,9 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         char buf[512];
         snprintf(buf, sizeof(buf),
                  "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\", \"hsl_l\": %u, \"max_lightness\": %u }",
-                 i > 0 ? "," : "", uuid_str, node->name, unicast_str, company_name, hsl_l, max_lightness);
+                 first_node ? "" : ",", uuid_str, node->name, unicast_str, company_name, hsl_l, max_lightness);
         httpd_resp_sendstr_chunk(req, buf);
+        first_node = false;
     }
 
     httpd_resp_sendstr_chunk(req, "], \"unprovisioned\": [");
