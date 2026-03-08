@@ -106,7 +106,12 @@ void ble_mesh_light_hsl_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
                                     node_info->color_mode = color_mode_t::hs;
                                     set_state.hsl_set.hsl_hue = node_info->hsl_h;
                                     set_state.hsl_set.hsl_saturation = node_info->hsl_s;
-                                    set_state.hsl_set.hsl_lightness = node_info->hsl_l;
+                                    // In HSL color space, L=0.5 (half of max) is the pure saturated color.
+                                    // Scale HA range [0, max_lightness] → [0, max_lightness/2] at send time.
+                                    // CTL mode sends hsl_l as-is and gets the full brightness range.
+                                    set_state.hsl_set.hsl_lightness = node_info->max_lightness > 0
+                                        ? (uint16_t)((uint32_t)node_info->hsl_l * (node_info->max_lightness / 2) / node_info->max_lightness)
+                                        : node_info->hsl_l;
                                     set_state.hsl_set.op_en = false;
                                     set_state.hsl_set.delay = 0;
                                     set_state.hsl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)

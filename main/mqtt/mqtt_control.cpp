@@ -457,11 +457,13 @@ std::unique_ptr<cJSON> make_status_message(const std::shared_ptr<bm2mqtt_node_in
         else if (node_info->color_mode == color_mode_t::color_temp)
         {
             cJSON_AddStringToObject(root, "color_mode", "color_temp");
+            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
             cJSON_AddNumberToObject(root, "color_temp", node_info->curr_temp);
         }
         else if (node_info->color_mode == color_mode_t::hs)
         {
             cJSON_AddStringToObject(root, "color_mode", "hs");
+            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
             cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
             cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, node_info->min_hue, node_info->max_hue, 0, 360));
             cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));
@@ -618,7 +620,6 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         {
                             if (cJSON_IsNumber(brightness))
                             {
-                                current_mode = color_mode_t::brightness;
                                 uint16_t filteredValue = MAX(0, MIN(node_info->max_lightness, (uint16_t)brightness->valuedouble));
                                 node_info->hsl_l = filteredValue;
                                 light_value_changed = true;
@@ -661,7 +662,9 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         {
                             if (cJSON_IsNumber(color_temp))
                             {
-                                uint16_t filteredValue = (uint16_t)map(color_temp->valuedouble, 2000, 6535, node_info->min_temp, node_info->max_temp);
+                                // Discovery uses color_temp_kelvin=true with min_kelvin/max_kelvin, so HA sends
+                                // color_temp directly in Kelvin, matching the BLE Mesh CTL temperature unit.
+                                uint16_t filteredValue = (uint16_t)MAX((double)node_info->min_temp, MIN((double)node_info->max_temp, color_temp->valuedouble));
                                 node_info->curr_temp = filteredValue;
                                 current_mode = color_mode_t::color_temp;
                                 light_value_changed = true;

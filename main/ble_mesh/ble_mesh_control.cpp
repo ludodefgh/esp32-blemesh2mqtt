@@ -669,8 +669,6 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     switch (event)
     {
     case ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT:
-        message_queue().handle_ack(node, opcode);
-
         switch (opcode)
         {
         case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET:
@@ -714,12 +712,6 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 
             node->min_lightness = param->status_cb.lightness_range_status.range_min;
             node->max_lightness = param->status_cb.lightness_range_status.range_max;
-
-            if ((node->features & FEATURE_LIGHT_HSL) || (node->features & FEATURE_LIGHT_CTL))
-            {
-                // FIX-ME : this is the case for my sengled bulb.
-                node->max_lightness /= 2; // HSL and CTL use half of the lightness range
-            }
         }
         break;
 
@@ -757,6 +749,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
             break;
         }
 
+        message_queue().handle_ack(node, opcode);
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
