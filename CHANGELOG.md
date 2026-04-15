@@ -18,12 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Bootloader flash offset corrected for RISC-V targets: ESP32-C3, C6, and H2
   use `0x0`; ESP32-C5 uses `0x2000`; Xtensa targets (ESP32, S2, S3) keep `0x1000`.
-  Using the wrong offset caused a download-mode boot loop after flashing.
+  Using the wrong offset caused a download-mode boot loop after flashing. (Fixes #31)
 - ESP32-C6 now uses `--after watchdog-reset` when flashing via its native
   USB-Serial/JTAG port, preventing the chip from staying stuck in download mode
   (same fix already applied to ESP32-C3 in v0.1.5).
 - Added per-target troubleshooting notes in generated `FLASH_INSTRUCTIONS.txt`
   for ESP32-C3 and ESP32-C6.
+- Bridge not reconnecting after power loss: WiFi connection timeout at boot
+  increased from 10 s to 2 minutes so the bridge waits for the router to come
+  back up, avoiding a spurious captive portal that blocked MQTT initialization.
+  Also fixed a periodic publish timer leak on MQTT reconnections. (Fixes #34)
 
 ## [0.1.5] - 2026-03-08
 
