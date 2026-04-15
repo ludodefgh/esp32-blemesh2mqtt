@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] Performance optimizations
 - [ ] SSL/TLS support for MQTT
 
+## [0.1.6] - 2026-04-15
+
+### Fixed
+- Bootloader flash offset corrected for RISC-V targets: ESP32-C3, C6, and H2
+  use `0x0`; ESP32-C5 uses `0x2000`; Xtensa targets (ESP32, S2, S3) keep `0x1000`.
+  Using the wrong offset caused a download-mode boot loop after flashing.
+- ESP32-C6 now uses `--after watchdog-reset` when flashing via its native
+  USB-Serial/JTAG port, preventing the chip from staying stuck in download mode
+  (same fix already applied to ESP32-C3 in v0.1.5).
+- Added per-target troubleshooting notes in generated `FLASH_INSTRUCTIONS.txt`
+  for ESP32-C3 and ESP32-C6.
+
 ## [0.1.5] - 2026-03-08
 
 ### Added
