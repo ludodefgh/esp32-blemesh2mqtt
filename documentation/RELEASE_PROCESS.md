@@ -76,6 +76,18 @@ for target in $TARGETS; do
   cp build/ota_data_initial.bin releases/${PACKAGE_NAME}/
   cp build/storage.bin releases/${PACKAGE_NAME}/
 
+  # Bootloader offset by chip family:
+  #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
+  #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
+  #   ESP32-C5 (RISC-V, special case)    → 0x2000
+  if [ "$target" = "esp32c5" ]; then
+    BOOTLOADER_OFFSET="0x2000"
+  elif [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ] || [ "$target" = "esp32h2" ]; then
+    BOOTLOADER_OFFSET="0x0"
+  else
+    BOOTLOADER_OFFSET="0x1000"
+  fi
+
   # Create flash instructions
   cat > releases/${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << EOF
 ==========================================
@@ -89,7 +101,7 @@ QUICK START - Using esptool.py:
 -------------------------------
 
 esptool.py -p /dev/ttyUSB0 -b 460800 --chip ${target} write_flash \\
-  0x1000 bootloader.bin \\
+  ${BOOTLOADER_OFFSET} bootloader.bin \\
   0x8000 partition-table.bin \\
   0xd000 ota_data_initial.bin \\
   0x10000 BleMesh2Mqtt.bin \\

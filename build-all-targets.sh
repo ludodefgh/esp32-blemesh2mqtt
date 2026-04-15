@@ -104,11 +104,34 @@ for target in $TARGETS; do
     cp build/storage.bin "$PACKAGE_DIR/"
 
     # Get partition addresses
-    BOOTLOADER_OFFSET="0x1000"
+    # Bootloader offset by chip family:
+    #   Xtensa (esp32, esp32s2, esp32s3)  → 0x1000
+    #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
+    #   ESP32-C5 (RISC-V, special case)    → 0x2000
+    if [ "$target" = "esp32c5" ]; then
+        BOOTLOADER_OFFSET="0x2000"
+    elif [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ] || [ "$target" = "esp32h2" ]; then
+        BOOTLOADER_OFFSET="0x0"
+    else
+        BOOTLOADER_OFFSET="0x1000"
+    fi
     PARTITION_OFFSET="0x8000"
     OTA_DATA_OFFSET="0xd000"
     APP_OFFSET="0x10000"
     STORAGE_OFFSET="0x3B0000"
+
+    # When flashing via the native USB-Serial/JTAG port (not an external UART
+    # adapter), ESP32-C3 and ESP32-C6 need --after watchdog-reset instead of
+    # hard_reset. A USB-triggered reset is only a core reset and does not
+    # re-sample the strapping pins, so the chip stays in download mode.
+    # A watchdog reset forces a full system reset that re-samples the BOOT pin.
+    # Note: ESP32-H2 has the same USB-JTAG peripheral and would need the same
+    # treatment if added as a supported target.
+    if [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ]; then
+        AFTER_RESET="watchdog-reset"
+    else
+        AFTER_RESET="hard_reset"
+    fi
 
     # Create flash instructions
     cat > "$PACKAGE_DIR/FLASH_INSTRUCTIONS.txt" << EOF
@@ -128,7 +151,7 @@ PREREQUISITES:
 METHOD 1: Using esptool.py (Linux/Mac/Windows)
 -----------------------------------------------
 
-esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+esptool.py -p /dev/ttyUSB0 -b 460800 --before default_reset --after ${AFTER_RESET} \\
   --chip ${target} write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
   ${BOOTLOADER_OFFSET} bootloader.bin \\
   ${PARTITION_OFFSET} partition-table.bin \\
@@ -179,6 +202,38 @@ Flash fails:
 - Hold BOOT button while connecting
 - Verify correct COM port
 - Erase flash first: esptool.py --chip ${target} erase_flash
+$([ "$target" = "esp32c3" ] && cat << 'ESP32C3'
+
+ESP32-C3 stays in download mode after flashing:
+- This is expected behaviour with the built-in USB-Serial/JTAG peripheral.
+  A core reset does NOT re-sample the strapping pins (GPIO9/BOOT), so the
+  chip remains in download mode even after the flash command completes.
+- The flash command above already uses --after watchdog-reset which triggers
+  a full system reset that re-evaluates GPIO9 and boots normally.
+- If the device still does not boot, exit download mode manually:
+    1. Hold the BOOT button (GPIO9)
+    2. Press and release the RESET (EN) button
+    3. Release the BOOT button — the chip will now sample GPIO9 as HIGH
+       and enter normal SPI boot mode.
+- Ensure no external circuitry or capacitor is holding GPIO9 LOW.
+ESP32C3
+)
+$([ "$target" = "esp32c6" ] && cat << 'ESP32C6'
+
+ESP32-C6 stays in download mode after flashing:
+- The ESP32-C6 bootloader is located at address 0x0 (not 0x1000 as on the
+  classic ESP32). Using the wrong offset will cause the chip to appear to
+  flash successfully but fail to boot (download mode loop).
+- The flash command above already uses --after watchdog-reset and the correct
+  bootloader offset (0x0) for this chip.
+- If the device still does not boot, exit download mode manually:
+    1. Hold the BOOT button (GPIO9)
+    2. Press and release the RESET button
+    3. Release the BOOT button — the chip will sample GPIO9 as HIGH
+       and enter normal SPI boot mode.
+- Ensure no external circuitry or capacitor is holding GPIO9 LOW.
+ESP32C6
+)
 
 Captive portal doesn't appear:
 - Wait 30-60 seconds
