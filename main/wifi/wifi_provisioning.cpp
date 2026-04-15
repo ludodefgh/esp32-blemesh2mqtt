@@ -1100,7 +1100,7 @@ esp_err_t wifi_provisioning_try_connect_sta(void)
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                                            pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(10000));
+                                           pdMS_TO_TICKS(120000));
 
     if (bits & WIFI_CONNECTED_BIT)
     {

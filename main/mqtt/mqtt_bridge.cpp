@@ -480,6 +480,13 @@ void periodic_publish_callback(void *arg)
 
 void start_periodic_publish_timer()
 {
+    if (publish_timer)
+    {
+        esp_timer_stop(publish_timer);
+        esp_timer_delete(publish_timer);
+        publish_timer = nullptr;
+    }
+
     const esp_timer_create_args_t timer_args = {
         .callback = &periodic_publish_callback,
         .arg = NULL,
