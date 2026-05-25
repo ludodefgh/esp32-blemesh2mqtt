@@ -10,6 +10,7 @@ typedef enum
     FEATURE_LIGHT_LIGHTNESS = 1 << 1,
     FEATURE_LIGHT_HSL = 1 << 2,
     FEATURE_LIGHT_CTL = 1 << 3,
+    FEATURE_GENERIC_LEVEL = 1 << 4,
 } node_supported_features_t;
 
 long map(long x, long in_min, long in_max, long out_min, long out_max);
@@ -26,6 +27,8 @@ bool ble_mesh_get_provisioning_enabled(void);
 
 void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
 bool ble_mesh_get_auto_provisioning_enabled(void);
+
+void ble_mesh_subscribe_group_addr(uint16_t group_addr);
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

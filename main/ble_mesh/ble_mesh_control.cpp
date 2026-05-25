@@ -13,6 +13,7 @@
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_ble_mesh_local_data_operation_api.h"
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
@@ -23,6 +24,7 @@
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
 #include "common/log_common.h"
+#include "wifi/mesh_config.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
 #include "debug_console_common.h"
@@ -39,7 +41,6 @@
 #define MSG_ROLE ROLE_PROVISIONER
 
 #define APP_KEY_IDX 0x0000
-#define APP_KEY_OCTET 0x12
 
 #define APP_USE_ONOFF_CLIENT
 
@@ -187,6 +188,10 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
             {
                 info.features |= FEATURE_GENERIC_ONOFF;
             }
+            else if (model_id == ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV)
+            {
+                info.features |= FEATURE_GENERIC_LEVEL;
+            }
             else if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV)
             {
                 info.features |= FEATURE_LIGHT_LIGHTNESS;
@@ -241,6 +246,31 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info>& node)
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV;
+                                              set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+                                              esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+                                              if (err)
+                                              {
+                                                  LOG_ERROR(TAG, "call to esp_ble_mesh_config_client_set_state failed");
+                                              }
+                                          },
+                                          .opcode = ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND,
+                                          .retries_left = 3,
+                                      });
+    }
+
+    if ((node->features_to_bind & FEATURE_GENERIC_LEVEL) != 0)
+    {
+        node->features_to_bind &= ~FEATURE_GENERIC_LEVEL;
+        message_queue().enqueue(node, message_payload{
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node)
+                                          {
+                                              LOG_INFO(TAG, "Generic Level model for node 0x%04X", node->unicast);
+                                              esp_ble_mesh_client_common_param_t common = {0};
+                                              esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              set_state.model_app_bind.element_addr = node->unicast;
+                                              set_state.model_app_bind.model_app_idx = store.app_idx;
+                                              set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
                                               set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
                                               esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                               if (err)
@@ -573,7 +603,8 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
 
         case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_GET:
         {
-            LOG_INFO(TAG, "Level Status (Get): %d", param->status_cb.level_status.present_level);
+            node->level = param->status_cb.level_status.present_level;
+            LOG_INFO(TAG, "Level Status (Get): %d", node->level);
         }
         break;
 
@@ -790,16 +821,42 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 bool enable_provisioning = true;
 bool enable_auto_provisioning = false;
 
+void ble_mesh_subscribe_group_addr(uint16_t group_addr)
+{
+    if (group_addr == 0) return;
+
+    static const uint16_t models[] = {
+        ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI,
+        ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI,
+        ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI,
+        ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_CLI,
+        ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI,
+    };
+
+    for (size_t i = 0; i < sizeof(models) / sizeof(models[0]); i++) {
+        esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
+            PROV_OWN_ADDR, ESP_BLE_MESH_CID_NVAL, models[i], group_addr);
+        if (err != ESP_OK) {
+            LOG_WARN(TAG, "Failed to subscribe model 0x%04X to group 0x%04X: %s",
+                     models[i], group_addr, esp_err_to_name(err));
+        } else {
+            LOG_INFO(TAG, "Subscribed model 0x%04X to group 0x%04X", models[i], group_addr);
+        }
+    }
+}
+
 esp_err_t ble_mesh_init(void)
 {
     ble_mesh_get_dev_uuid(dev_uuid);
 
-    // uint8_t match[2] = {0xdd, 0xdd};
     esp_err_t err = ESP_OK;
+
+    mesh_config_t mesh_cfg = {};
+    mesh_config_load(&mesh_cfg);
 
     store.net_idx = ESP_BLE_MESH_KEY_PRIMARY;
     store.app_idx = APP_KEY_IDX;
-    memset(prov_key.app_key, APP_KEY_OCTET, sizeof(prov_key.app_key));
+    memcpy(prov_key.app_key, mesh_cfg.app_key, sizeof(prov_key.app_key));
 
     esp_ble_mesh_register_prov_callback(ble_mesh_provisioning_cb);
     esp_ble_mesh_register_config_client_callback(ble_mesh_config_client_cb);
@@ -813,11 +870,21 @@ esp_err_t ble_mesh_init(void)
         return err;
     }
 
-    // err = esp_ble_mesh_provisioner_set_dev_uuid_match(match, sizeof(match), 0x0, false);
-    // if (err != ESP_OK) {
-    //     LOG_ERROR(TAG, "Failed to set matching device uuid (err %d)", err);
-    //     return err;
-    // }
+    if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
+    {
+        LOG_INFO(TAG, "Joining existing mesh — setting primary NetKey");
+        err = esp_ble_mesh_provisioner_add_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Failed to add NetKey (err %d), trying update", err);
+            err = esp_ble_mesh_provisioner_update_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
+            if (err != ESP_OK)
+            {
+                LOG_ERROR(TAG, "Failed to set NetKey for existing mesh (err %d)", err);
+                return err;
+            }
+        }
+    }
 
     err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
     if (err != ESP_OK)
@@ -829,11 +896,19 @@ esp_err_t ble_mesh_init(void)
     err = esp_ble_mesh_provisioner_add_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
     if (err != ESP_OK)
     {
-        LOG_ERROR(TAG, "Failed to add local AppKey (err %d)", err);
-        return err;
+        LOG_WARN(TAG, "Failed to add local AppKey (err %d), trying update", err);
+        err = esp_ble_mesh_provisioner_update_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to set AppKey (err %d)", err);
+            return err;
+        }
     }
 
-    LOG_INFO(TAG, "BLE Mesh Provisioner initialized");
+    ble_mesh_subscribe_group_addr(mesh_cfg.group_addr);
+
+    LOG_INFO(TAG, "BLE Mesh Provisioner initialized (mode=%s)",
+             mesh_cfg.mode == MESH_MODE_JOIN_EXISTING ? "join_existing" : "standalone");
 
     return err;
 }

@@ -25,6 +25,7 @@
 // Project includes
 #include "common/log_common.h"
 #include "dns_server.h"
+#include "mesh_config.h"
 #include "security/credential_encryption.h"
 #include "wifi_provisioning.h"
 
@@ -1440,20 +1441,86 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     free(response_string);
     cJSON_Delete(response);
 
-    // Schedule restart to allow HTTP response to be sent
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    return ESP_OK;
+}
 
-    // Stop captive portal cleanly before restart
+static bool hex_to_bytes(const char *hex, uint8_t *out, size_t out_len)
+{
+    size_t hex_len = strlen(hex);
+    if (hex_len != out_len * 2) return false;
+    for (size_t i = 0; i < out_len; i++) {
+        char byte_str[3] = {hex[i * 2], hex[i * 2 + 1], '\0'};
+        char *end;
+        unsigned long val = strtoul(byte_str, &end, 16);
+        if (*end != '\0') return false;
+        out[i] = (uint8_t)val;
+    }
+    return true;
+}
+
+static esp_err_t mesh_config_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0 || ret >= (int)sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
+    if (cJSON_IsString(mode_item)) {
+        cfg.mode = (strcmp(mode_item->valuestring, "existing") == 0)
+                       ? MESH_MODE_JOIN_EXISTING
+                       : MESH_MODE_STANDALONE;
+    }
+
+    if (cfg.mode == MESH_MODE_JOIN_EXISTING) {
+        cJSON *net_key_item = cJSON_GetObjectItem(json, "net_key");
+        cJSON *app_key_item = cJSON_GetObjectItem(json, "app_key");
+
+        if (!cJSON_IsString(net_key_item) || !cJSON_IsString(app_key_item) ||
+            !hex_to_bytes(net_key_item->valuestring, cfg.net_key, 16) ||
+            !hex_to_bytes(app_key_item->valuestring, cfg.app_key, 16)) {
+            cJSON_Delete(json);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                "Invalid net_key or app_key (32 hex chars each required)");
+            return ESP_FAIL;
+        }
+    }
+
+    cJSON_Delete(json);
+
+    esp_err_t err = mesh_config_save(&cfg);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save mesh config");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
+}
+
+static esp_err_t setup_restart_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"restarting\"}");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
     wifi_provisioning_stop_captive_portal();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // Additional delay to ensure all NVS operations are fully completed
-    LOG_INFO(TAG, "Final synchronization before restart...");
     vTaskDelay(pdMS_TO_TICKS(500));
-
-    LOG_INFO(TAG, "Restarting ESP32 to connect with new credentials...");
+    LOG_INFO(TAG, "Restarting ESP32 after setup completion...");
     esp_restart();
-
     return ESP_OK;
 }
 
@@ -1523,7 +1590,9 @@ constexpr httpd_uri_t captive_uris[] = {
         // API endpoints
         {.uri = "/api/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_handler},
         {.uri = "/api/wifi/connect", .method = HTTP_POST, .handler = wifi_connect_handler},
-        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler}};
+        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler},
+        {.uri = "/api/mesh/config", .method = HTTP_POST, .handler = mesh_config_handler},
+        {.uri = "/api/setup/restart", .method = HTTP_POST, .handler = setup_restart_handler}};
 }
 void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
 {

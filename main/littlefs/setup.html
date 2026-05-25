@@ -7,53 +7,93 @@
 body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
 .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
 h1 { text-align: center; color: #333; }
+h2 { color: #444; margin-top: 0; }
 .form-group { margin: 15px 0; }
 label { display: block; margin-bottom: 5px; font-weight: bold; }
 input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
 select { background: white; cursor: pointer; }
 select:disabled { background: #f5f5f5; cursor: not-allowed; }
-button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }
+button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 8px; }
 button:hover { background: #0056b3; }
 button:disabled { background: #6c757d; cursor: not-allowed; }
+.btn-secondary { background: #6c757d; }
+.btn-secondary:hover { background: #545b62; }
 .status { padding: 10px; margin: 10px 0; border-radius: 4px; display: none; }
 .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
 .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
 .loading { text-align: center; margin: 20px 0; }
+.step { display: none; }
+.step.active { display: block; }
+.radio-group { margin: 10px 0; }
+.radio-group label { font-weight: normal; display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; }
+.radio-group input[type=radio] { width: auto; }
+.key-fields { margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6; }
+.key-hint { font-size: 12px; color: #6c757d; margin-top: 4px; }
+input.mono { font-family: monospace; letter-spacing: 1px; }
 </style>
 </head><body>
 <div class='container'>
-<h1>ESP32 WiFi Setup</h1>
-<div class='notice' style='background: #e3f2fd; padding: 15px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #2196F3;'>
-<h3>Setup Instructions:</h3>
-<p>1. <strong>Stay connected</strong> to this WiFi network during setup<br>
-2. If your phone shows "No Internet" - that's normal, <strong>stay connected</strong><br>
-3. Select your home WiFi network below and enter the password<br>
-4. The device will restart and connect to your network</p>
+<h1>ESP32 Setup</h1>
+
+<!-- Step 1: WiFi -->
+<div id='step1' class='step active'>
+  <h2>Step 1 — WiFi</h2>
+  <div class='notice' style='background: #e3f2fd; padding: 15px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #2196F3;'>
+    <p style='margin:0'>1. <strong>Stay connected</strong> to this WiFi network during setup<br>
+    2. If your phone shows "No Internet" — that's normal, <strong>stay connected</strong><br>
+    3. Select your home WiFi network below and enter the password</p>
+  </div>
+  <div id='status1' class='status'></div>
+  <button onclick='scanNetworks()'>Scan for Networks</button>
+  <div class='loading' id='loading' style='display:none;'>Scanning...</div>
+  <form id='wifiForm' style='display:none;'>
+    <div class='form-group'>
+      <label for='networkSelect'>Available Networks:</label>
+      <select id='networkSelect' name='networkSelect' onchange='selectNetwork()'>
+        <option value=''>-- Select a WiFi network --</option>
+      </select>
+    </div>
+    <div class='form-group'>
+      <label for='password'>Password:</label>
+      <input type='password' id='password' name='password' placeholder='Enter WiFi Password'>
+    </div>
+    <button type='submit'>Next &rarr;</button>
+  </form>
 </div>
-<div id='status' class='status'></div>
-<button onclick='scanNetworks()'>Scan for Networks</button>
-<div class='loading' id='loading' style='display:none;'>Scanning...</div>
-<form id='wifiForm' style='display:none;'>
-<div class='form-group'>
-<label for='networkSelect'>Available Networks:</label>
-<select id='networkSelect' name='networkSelect' onchange='selectNetwork()'>
-<option value=''>-- Select a WiFi network --</option>
-</select>
+
+<!-- Step 2: Mesh -->
+<div id='step2' class='step'>
+  <h2>Step 2 — Mesh Network</h2>
+  <div id='status2' class='status'></div>
+  <div class='radio-group'>
+    <label><input type='radio' name='meshMode' value='standalone' checked onchange='onMeshModeChange()'> Create a new mesh (default)</label>
+    <label><input type='radio' name='meshMode' value='existing' onchange='onMeshModeChange()'> Join an existing mesh</label>
+  </div>
+  <div id='existingKeyFields' class='key-fields' style='display:none;'>
+    <div class='form-group'>
+      <label for='netKey'>NetKey (hex, 32 chars):</label>
+      <input class='mono' type='text' id='netKey' maxlength='32' placeholder='0011223344556677889aabbccddeeff'>
+      <div class='key-hint'>16 bytes as hexadecimal, no spaces</div>
+    </div>
+    <div class='form-group'>
+      <label for='appKey'>AppKey (hex, 32 chars):</label>
+      <input class='mono' type='text' id='appKey' maxlength='32' placeholder='0011223344556677889aabbccddeeff'>
+      <div class='key-hint'>16 bytes as hexadecimal, no spaces</div>
+    </div>
+  </div>
+  <button id='saveMeshBtn' onclick='saveMeshAndRestart()'>Save &amp; Restart</button>
+  <button class='btn-secondary' onclick='triggerRestart()' style='margin-top:6px;'>Skip (use defaults)</button>
 </div>
-<div class='form-group'>
-<label for='password'>Password:</label>
-<input type='password' id='password' name='password' placeholder='Enter WiFi Password'>
-</div>
-<button type='submit'>Connect</button>
-</form>
+
 </div>
 <script>
-function showStatus(message, isError) {
-  const status = document.getElementById('status');
+function showStatus(id, message, isError) {
+  const status = document.getElementById(id);
   status.textContent = message;
   status.className = 'status ' + (isError ? 'error' : 'success');
   status.style.display = 'block';
 }
+
 function scanNetworks() {
   document.getElementById('loading').style.display = 'block';
   document.getElementById('wifiForm').style.display = 'none';
@@ -61,89 +101,125 @@ function scanNetworks() {
   networkSelect.innerHTML = '<option value="">-- Select a WiFi network --</option>';
 
   fetch('/api/wifi/scan')
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
       document.getElementById('loading').style.display = 'none';
-
       if (data.length === 0) {
-        showStatus('No networks found. Click "Scan for Networks" to try again.', true);
+        showStatus('status1', 'No networks found. Click "Scan for Networks" to try again.', true);
         return;
       }
-
-      // Sort networks by signal strength (RSSI)
       data.sort((a, b) => b.rssi - a.rssi);
-
-      // Populate dropdown
       data.forEach(network => {
         const option = document.createElement('option');
         option.value = network.ssid;
-        const strength = getSignalStrength(network.rssi);
-        option.textContent = network.ssid + ' (' + strength.text + ')';
-        option.style.color = strength.color;
+        const s = getSignalStrength(network.rssi);
+        option.textContent = network.ssid + ' (' + s.text + ')';
+        option.style.color = s.color;
         networkSelect.appendChild(option);
       });
-
       document.getElementById('wifiForm').style.display = 'block';
     })
     .catch(error => {
       document.getElementById('loading').style.display = 'none';
-      showStatus('Failed to scan networks: ' + error.message, true);
+      showStatus('status1', 'Failed to scan networks: ' + error.message, true);
     });
 }
 
 function getSignalStrength(rssi) {
-  if (rssi >= -50) return { text: '🟢', color: '#28a745' };  // Green
-  if (rssi >= -60) return { text: '🟢', color: '#28a745' };       // Green
-  if (rssi >= -70) return { text: '🟡', color: '#ffc107' };       // Yellow
-  return { text: '🔴', color: '#dc3545' };                       // Red
+  if (rssi >= -60) return { text: 'Strong', color: '#28a745' };
+  if (rssi >= -70) return { text: 'Medium', color: '#ffc107' };
+  return { text: 'Weak', color: '#dc3545' };
 }
 
 function selectNetwork() {
-  const networkSelect = document.getElementById('networkSelect');
-  const passwordField = document.getElementById('password');
-
-  if (networkSelect.value) {
-    passwordField.focus();
-  }
+  const sel = document.getElementById('networkSelect');
+  if (sel.value) document.getElementById('password').focus();
 }
 
 document.getElementById('wifiForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const ssid = document.getElementById('networkSelect').value;
   const password = document.getElementById('password').value;
+  if (!ssid) { showStatus('status1', 'Please select a network', true); return; }
 
-  if (!ssid) {
-    showStatus('Please select a network', true);
-    return;
-  }
-
-  const submitBtn = e.target.querySelector('button');
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Connecting...';
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
 
   fetch('/api/wifi/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ssid: ssid, password: password })
+    body: JSON.stringify({ ssid, password })
   })
-  .then(response => response.json())
+  .then(r => r.json())
   .then(data => {
-    showStatus(data.message, data.status !== 'success');
     if (data.status === 'success') {
-      setTimeout(() => {
-        showStatus('Restarting ESP32...', false);
-        setTimeout(() => window.location.href = 'http://' + window.location.hostname, 3000);
-      }, 2000);
+      document.getElementById('step1').classList.remove('active');
+      document.getElementById('step2').classList.add('active');
+    } else {
+      showStatus('status1', data.message || 'Error saving WiFi credentials', true);
+      btn.disabled = false;
+      btn.textContent = 'Next →';
     }
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Connect';
   })
   .catch(error => {
-    showStatus('Connection failed: ' + error.message, true);
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Connect';
+    showStatus('status1', 'Connection failed: ' + error.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Next →';
   });
 });
+
+function onMeshModeChange() {
+  const mode = document.querySelector('input[name="meshMode"]:checked').value;
+  document.getElementById('existingKeyFields').style.display = mode === 'existing' ? 'block' : 'none';
+}
+
+function isValidHex32(s) {
+  return /^[0-9a-fA-F]{32}$/.test(s);
+}
+
+function saveMeshAndRestart() {
+  const mode = document.querySelector('input[name="meshMode"]:checked').value;
+  const btn = document.getElementById('saveMeshBtn');
+
+  const body = { mode };
+
+  if (mode === 'existing') {
+    const netKey = document.getElementById('netKey').value.trim();
+    const appKey = document.getElementById('appKey').value.trim();
+    if (!isValidHex32(netKey) || !isValidHex32(appKey)) {
+      showStatus('status2', 'NetKey and AppKey must each be 32 hex characters', true);
+      return;
+    }
+    body.net_key = netKey.toLowerCase();
+    body.app_key = appKey.toLowerCase();
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  fetch('/api/mesh/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  .then(r => r.json())
+  .then(() => triggerRestart())
+  .catch(error => {
+    showStatus('status2', 'Failed to save mesh config: ' + error.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Save & Restart';
+  });
+}
+
+function triggerRestart() {
+  showStatus('status2', 'Restarting device...', false);
+  fetch('/api/setup/restart', { method: 'POST' })
+    .catch(() => {});
+  setTimeout(() => {
+    showStatus('status2', 'Device restarted. You can now connect to your WiFi network and access the bridge.', false);
+  }, 3000);
+}
 
 window.onload = () => scanNetworks();
 </script>

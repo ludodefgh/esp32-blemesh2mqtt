@@ -1100,6 +1100,9 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Load auto-provisioning state
   loadAutoProvisioningState();
+
+  // Load mesh group address
+  loadMeshGroupAddr();
   
   // Refresh system info every 5 seconds for real-time uptime display
   setInterval(loadSystemInfo, 5000);
@@ -1696,4 +1699,40 @@ function toggleAutoProvisioning(enabled) {
   .finally(() => {
     toggle.disabled = false;
   });
+}
+
+function loadMeshGroupAddr() {
+  fetch('/api/mesh/settings')
+    .then(r => r.json())
+    .then(data => {
+      const input = document.getElementById('group-addr-input');
+      if (input && data.group_addr) {
+        input.value = data.group_addr === '0x0000' ? '' : data.group_addr;
+      }
+    })
+    .catch(err => console.error('Error loading mesh settings:', err));
+}
+
+function saveMeshGroupAddr() {
+  const input = document.getElementById('group-addr-input');
+  const raw = (input ? input.value.trim() : '') || '0x0000';
+  const parsed = parseInt(raw, 16);
+  if (isNaN(parsed) || parsed < 0 || parsed > 0xFFFF) {
+    showToast('Invalid group address — use hex format like 0xC000', 'error');
+    return;
+  }
+  fetch('/api/mesh/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: parsed })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      showToast('Group address saved. Restart bridge to apply.', 'success');
+    } else {
+      showToast('Failed to save group address', 'error');
+    }
+  })
+  .catch(err => showToast('Error saving group address: ' + err.message, 'error'));
 }

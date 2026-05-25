@@ -16,5 +16,5 @@ dependencies:
 direct_dependencies:
 - joltwallet/littlefs
 manifest_hash: 3e9c06cdc54164c29f5f4b0429923d5153065da16d7eebbb2aa162804a5964e6
-target: esp32
+target: esp32c3
 version: 2.0.0

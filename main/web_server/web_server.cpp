@@ -31,6 +31,7 @@
 #include "mqtt/mqtt_credentials.h"
 #include "ota/ota_manager.h"
 #include "sig_companies/company_map.h"
+#include "wifi/mesh_config.h"
 #include "wifi/wifi_provisioning.h"
 
 #define TAG "WEB_SERVER"
@@ -355,6 +356,11 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t auto_provisioning_get_handler(httpd_req_t *req);
+esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
+esp_err_t mesh_settings_get_handler(httpd_req_t *req);
+esp_err_t mesh_settings_set_handler(httpd_req_t *req);
+
 esp_err_t system_info_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
@@ -575,6 +581,22 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/reset_wifi"))
     {
         return reset_wifi_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/settings"))
+    {
+        if (req->method == HTTP_GET)
+        {
+            return mesh_settings_get_handler(req);
+        }
+        else if (req->method == HTTP_POST)
+        {
+            return mesh_settings_set_handler(req);
+        }
+        else
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
     }
     else
     {
@@ -999,6 +1021,59 @@ esp_err_t auto_provisioning_set_handler(httpd_req_t *req)
     }
     
     cJSON_Delete(json);
+    return ESP_OK;
+}
+
+esp_err_t mesh_settings_get_handler(httpd_req_t *req)
+{
+    uint16_t group_addr = 0;
+    mesh_config_load_group_addr(&group_addr);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"group_addr\":\"0x%04X\"}", group_addr);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t mesh_settings_set_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *addr_item = cJSON_GetObjectItem(json, "group_addr");
+    uint16_t group_addr = 0;
+
+    if (cJSON_IsString(addr_item)) {
+        char *end;
+        group_addr = (uint16_t)strtoul(addr_item->valuestring, &end, 16);
+    } else if (cJSON_IsNumber(addr_item)) {
+        group_addr = (uint16_t)addr_item->valuedouble;
+    } else {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid group_addr");
+        return ESP_FAIL;
+    }
+    cJSON_Delete(json);
+
+    mesh_config_save_group_addr(group_addr);
+    ble_mesh_subscribe_group_addr(group_addr);
+
+    char resp[64];
+    snprintf(resp, sizeof(resp), "{\"success\":true,\"group_addr\":\"0x%04X\"}", group_addr);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, -1);
     return ESP_OK;
 }
 
@@ -1954,7 +2029,9 @@ namespace
         // API endpoints
         {"/api/wifi/scan", HTTP_GET},
         {"/api/wifi/connect", HTTP_POST},
-        {"/api/wifi/status", HTTP_GET}};
+        {"/api/wifi/status", HTTP_GET},
+        {"/api/mesh/config", HTTP_POST},
+        {"/api/setup/restart", HTTP_POST}};
 
     constexpr size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);
 }

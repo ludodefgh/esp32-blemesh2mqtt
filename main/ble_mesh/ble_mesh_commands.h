@@ -4,6 +4,7 @@
 void register_blemesh_action_commands();
 
 void ble_mesh_gen_onoff_set(const std::shared_ptr<bm2mqtt_node_info>& node_info);
+void ble_mesh_gen_level_set(const std::shared_ptr<bm2mqtt_node_info>& node_info);
 
 void ble_mesh_ctl_lightness_set(int lightness_value, const device_uuid128 &uuid);
 void ble_mesh_hsl_range_get(const std::shared_ptr<bm2mqtt_node_info>& node_info);

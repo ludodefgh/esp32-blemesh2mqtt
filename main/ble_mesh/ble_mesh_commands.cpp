@@ -154,6 +154,34 @@ void ble_mesh_gen_onoff_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
                             });
 }
 
+void ble_mesh_gen_level_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
+{
+    if (!node_info)
+        return;
+
+    message_queue().enqueue(node_info,
+                            message_payload{
+                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                {
+                                    LOG_INFO(TAG, "[gen_level_set] Generic Level for node 0x%04X: %d", node_info->unicast, node_info->level);
+                                    esp_ble_mesh_client_common_param_t common = {0};
+                                    esp_ble_mesh_generic_client_set_state_t set_state = {0};
+
+                                    node_manager().ble_mesh_set_msg_common(&common, node_info, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
+                                    set_state.level_set.op_en = false;
+                                    set_state.level_set.level = node_info->level;
+                                    set_state.level_set.tid = store.tid++;
+                                    esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+                                    if (err)
+                                    {
+                                        LOG_ERROR(TAG, "ble_mesh_gen_level_set failed: %d", err);
+                                    }
+                                },
+                                .opcode = ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET,
+                                .retries_left = 3,
+                            });
+}
+
 typedef struct
 {
     struct arg_int *temperature;
