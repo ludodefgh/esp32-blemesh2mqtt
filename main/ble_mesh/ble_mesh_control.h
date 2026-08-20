@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <memory>
 
 #include "esp_err.h"
@@ -29,6 +30,23 @@ void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
 bool ble_mesh_get_auto_provisioning_enabled(void);
 
 void ble_mesh_subscribe_group_addr(uint16_t group_addr);
+bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,
+                                  char *app_key_hex, size_t app_key_hex_len);
+
+// External mesh nodes: devices on a joined existing mesh that this bridge never
+// provisioned itself (no DevKey/composition data available) — discovered by
+// sending a Generic OnOff Get to the configured group address and recording
+// whichever unicast addresses reply.
+struct external_mesh_node_t
+{
+    uint16_t unicast;
+    uint8_t onoff;
+    int64_t last_seen_us;
+};
+
+esp_err_t ble_mesh_discover_external_nodes();
+esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff);
+void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

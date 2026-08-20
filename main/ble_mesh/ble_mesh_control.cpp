@@ -3,8 +3,10 @@
 // Standard C/C++ libraries
 #include <inttypes.h>
 #include <memory>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
+#include <vector>
 
 // ESP-IDF includes
 #include "argtable3/argtable3.h"
@@ -17,6 +19,7 @@
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 // Project includes
@@ -47,6 +50,24 @@
 static uint8_t dev_uuid[16];
 
 extern struct mesh_network_info_store store;
+
+static std::mutex external_nodes_mutex;
+static std::vector<external_mesh_node_t> external_nodes;
+
+static void upsert_external_node(uint16_t addr, uint8_t onoff)
+{
+    std::lock_guard<std::mutex> lock(external_nodes_mutex);
+    for (auto &n : external_nodes)
+    {
+        if (n.unicast == addr)
+        {
+            n.onoff = onoff;
+            n.last_seen_us = esp_timer_get_time();
+            return;
+        }
+    }
+    external_nodes.push_back({addr, onoff, esp_timer_get_time()});
+}
 
 static struct esp_ble_mesh_key
 {
@@ -581,7 +602,13 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     auto node = node_manager().get_node(addr);
     if (!node)
     {
-        LOG_ERROR(TAG, "Get node info failed");
+        // Not a node we provisioned — could be a reply from an external mesh node
+        // (see ble_mesh_discover_external_nodes) responding to a Get sent to the group address.
+        if ((event == ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET) ||
+            (event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET))
+        {
+            upsert_external_node(addr, param->status_cb.onoff_status.present_onoff);
+        }
         return;
     }
 
@@ -872,25 +899,34 @@ esp_err_t ble_mesh_init(void)
 
     if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
     {
-        LOG_INFO(TAG, "Joining existing mesh — setting primary NetKey");
-        err = esp_ble_mesh_provisioner_add_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
-        if (err != ESP_OK)
-        {
-            LOG_WARN(TAG, "Failed to add NetKey (err %d), trying update", err);
-            err = esp_ble_mesh_provisioner_update_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
-            if (err != ESP_OK)
-            {
-                LOG_ERROR(TAG, "Failed to set NetKey for existing mesh (err %d)", err);
-                return err;
-            }
-        }
+        // prov_enable() below starts accepting provisioning links immediately, so if
+        // auto-provisioning were already on, a device could be provisioned with the
+        // SDK's auto-generated NetKey in the instant before update_local_net_key()
+        // below replaces it with the target mesh's key. Auto-provisioning always
+        // starts off after boot (see `enable_auto_provisioning` default), but keep
+        // this explicit so that invariant can't be silently broken later.
+        enable_auto_provisioning = false;
     }
 
-    err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+    err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
     if (err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to enable mesh provisioner (err %d)", err);
         return err;
+    }
+
+    if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
+    {
+        // The primary subnet doesn't exist until prov_enable() auto-creates it, so this
+        // must run after prov_enable(), not before. add_local_net_key() also always fails
+        // for the primary NetKey index (rejected by the SDK) — update is the only path.
+        LOG_INFO(TAG, "Joining existing mesh — setting primary NetKey");
+        err = esp_ble_mesh_provisioner_update_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to set NetKey for existing mesh (err %d)", err);
+            return err;
+        }
     }
 
     err = esp_ble_mesh_provisioner_add_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
@@ -911,6 +947,97 @@ esp_err_t ble_mesh_init(void)
              mesh_cfg.mode == MESH_MODE_JOIN_EXISTING ? "join_existing" : "standalone");
 
     return err;
+}
+
+bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,
+                                  char *app_key_hex, size_t app_key_hex_len)
+{
+    net_key_hex[0] = '\0';
+    app_key_hex[0] = '\0';
+
+    const uint8_t *net_key = esp_ble_mesh_provisioner_get_local_net_key(store.net_idx);
+    if (net_key == NULL)
+    {
+        return false;
+    }
+    strlcpy(net_key_hex, bt_hex(net_key, 16), net_key_hex_len);
+
+    const uint8_t *app_key = esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx);
+    if (app_key == NULL)
+    {
+        return false;
+    }
+    strlcpy(app_key_hex, bt_hex(app_key, 16), app_key_hex_len);
+    return true;
+}
+
+void for_each_external_node(std::function<void(const external_mesh_node_t &)> func)
+{
+    std::lock_guard<std::mutex> lock(external_nodes_mutex);
+    for (const auto &n : external_nodes)
+    {
+        func(n);
+    }
+}
+
+esp_err_t ble_mesh_discover_external_nodes()
+{
+    uint16_t group_addr = 0;
+    mesh_config_load_group_addr(&group_addr);
+    if (group_addr == 0)
+    {
+        LOG_WARN(TAG, "Cannot discover external nodes: no group address configured");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_generic_client_get_state_t get_state = {0};
+    common.opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET;
+    common.model = onoff_client.model;
+    common.ctx.net_idx = store.net_idx;
+    common.ctx.app_idx = store.app_idx;
+    common.ctx.addr = group_addr;
+    common.ctx.send_ttl = MSG_SEND_TTL;
+    common.msg_timeout = MSG_TIMEOUT;
+
+    esp_err_t err = esp_ble_mesh_generic_client_get_state(&common, &get_state);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to send discovery Get to group 0x%04X (err %d)", group_addr, err);
+    }
+    else
+    {
+        LOG_INFO(TAG, "Sent external node discovery Get to group 0x%04X", group_addr);
+    }
+    return err;
+}
+
+esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Multiple elements may reply to an acknowledged Set sent to a group address, which
+    // the Mesh spec discourages — use the unacknowledged opcode for anything non-unicast.
+    bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_generic_client_set_state_t set_state = {0};
+    common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET : ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK;
+    common.model = onoff_client.model;
+    common.ctx.net_idx = store.net_idx;
+    common.ctx.app_idx = store.app_idx;
+    common.ctx.addr = addr;
+    common.ctx.send_ttl = MSG_SEND_TTL;
+    common.msg_timeout = MSG_TIMEOUT;
+
+    set_state.onoff_set.op_en = false;
+    set_state.onoff_set.onoff = onoff ? 1 : 0;
+    set_state.onoff_set.tid = store.tid++;
+
+    return esp_ble_mesh_generic_client_set_state(&common, &set_state);
 }
 
 void ble_mesh_refresh_all_nodes()
@@ -1072,19 +1199,19 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
 
         if (enable_provisioning)
         {
-            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
+                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV | PB-GATT enabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }
         else if (!enable_provisioning)
         {
-            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
+                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV | PB-GATT disabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }

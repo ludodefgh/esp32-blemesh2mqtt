@@ -360,6 +360,10 @@ esp_err_t auto_provisioning_get_handler(httpd_req_t *req);
 esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
 esp_err_t mesh_settings_get_handler(httpd_req_t *req);
 esp_err_t mesh_settings_set_handler(httpd_req_t *req);
+esp_err_t mesh_keys_get_handler(httpd_req_t *req);
+esp_err_t mesh_external_discover_handler(httpd_req_t *req);
+esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
+esp_err_t mesh_external_command_handler(httpd_req_t *req);
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -597,6 +601,22 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
             return ESP_FAIL;
         }
+    }
+    else if (strstr(req->uri, "/api/mesh/keys"))
+    {
+        return mesh_keys_get_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/external/discover"))
+    {
+        return mesh_external_discover_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/external/nodes"))
+    {
+        return mesh_external_nodes_get_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/external/command"))
+    {
+        return mesh_external_command_handler(req);
     }
     else
     {
@@ -1074,6 +1094,132 @@ esp_err_t mesh_settings_set_handler(httpd_req_t *req)
     snprintf(resp, sizeof(resp), "{\"success\":true,\"group_addr\":\"0x%04X\"}", group_addr);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, -1);
+    return ESP_OK;
+}
+
+esp_err_t mesh_keys_get_handler(httpd_req_t *req)
+{
+    char net_key_hex[33];
+    char app_key_hex[33];
+
+    if (!ble_mesh_get_local_keys_hex(net_key_hex, sizeof(net_key_hex), app_key_hex, sizeof(app_key_hex)))
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mesh keys not available yet");
+        return ESP_FAIL;
+    }
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"net_key\":\"%s\",\"app_key\":\"%s\"}", net_key_hex, app_key_hex);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_discover_handler(httpd_req_t *req)
+{
+    esp_err_t err = ble_mesh_discover_external_nodes();
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                             err == ESP_ERR_INVALID_STATE
+                                 ? "No group address configured — set one first"
+                                 : "Failed to send discovery request");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"discovering\"}");
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
+{
+    cJSON *arr = cJSON_CreateArray();
+    for_each_external_node([&arr](const external_mesh_node_t &node)
+                            {
+        cJSON *item = cJSON_CreateObject();
+        char addr_hex[8];
+        snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
+        cJSON_AddStringToObject(item, "addr", addr_hex);
+        cJSON_AddBoolToObject(item, "onoff", node.onoff != 0);
+        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        cJSON_AddItemToArray(arr, item); });
+
+    char *json_str = cJSON_PrintUnformatted(arr);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(arr);
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_command_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *onoff_item = cJSON_GetObjectItem(json, "onoff");
+    if (!cJSON_IsBool(onoff_item))
+    {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid onoff field");
+        return ESP_FAIL;
+    }
+    bool onoff = cJSON_IsTrue(onoff_item);
+
+    uint16_t addr = 0;
+    cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
+    if (cJSON_IsString(addr_item))
+    {
+        // Explicit target must be a single unicast node — group/broadcast addresses
+        // (0xC000-0xFFFF) are only reachable via the configured group address below,
+        // never directly from client input, to avoid a request accidentally (or
+        // maliciously) commanding every device on the mesh at once.
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end == addr_item->valuestring || *end != '\0' || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw) || raw > 0xFFFF)
+        {
+            cJSON_Delete(json);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "addr must be a valid unicast address (0x0001-0x7FFF)");
+            return ESP_FAIL;
+        }
+        addr = (uint16_t)raw;
+    }
+    else
+    {
+        // No specific address: broadcast to the configured group address instead.
+        mesh_config_load_group_addr(&addr);
+    }
+    cJSON_Delete(json);
+
+    if (addr == 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No target address (specify addr or configure a group address)");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = ble_mesh_send_external_command(addr, onoff);
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send command");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
     return ESP_OK;
 }
 

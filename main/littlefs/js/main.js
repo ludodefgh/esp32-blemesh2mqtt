@@ -553,15 +553,51 @@ function resetWiFi() {
   }
 }
 
+function loadDevices() {
+  return fetch("/nodes.json")
+    .then(res => res.json())
+    .then(data => {
+      const nodesContainer = document.getElementById("nodes");
+      const unprovisionedContainer = document.getElementById("unprovisioned");
+
+      nodesContainer.innerHTML = '';
+      unprovisionedContainer.innerHTML = '';
+
+      if (data.provisioned && data.provisioned.length > 0) {
+        data.provisioned.forEach(node => {
+          nodesContainer.appendChild(createNodeElement(node));
+        });
+        toggleEmptyState('nodes', 'no-nodes', true);
+      } else {
+        toggleEmptyState('nodes', 'no-nodes', false);
+      }
+
+      updateNodeCount(data.provisioned ? data.provisioned.length : 0);
+
+      if (data.unprovisioned && data.unprovisioned.length > 0) {
+        data.unprovisioned.forEach(device => {
+          unprovisionedContainer.appendChild(createDeviceElement(device));
+        });
+        toggleEmptyState('unprovisioned', 'no-devices', true);
+      } else {
+        toggleEmptyState('unprovisioned', 'no-devices', false);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load nodes:', err);
+      showToast('Failed to load device data', 'error');
+    });
+}
+
 function refreshDevices() {
   const button = event.target;
-  const originalText = button.innerHTML;
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Refreshing...';
-  
-  setTimeout(() => {
-    location.reload();
-  }, 1000);
+
+  Promise.all([loadDevices(), loadExternalNodes()]).finally(() => {
+    button.disabled = false;
+    button.innerHTML = '<span class="icon">🔄</span> Refresh';
+  });
 }
 
 // Log management functions
@@ -660,6 +696,117 @@ function createDeviceElement(device) {
   `;
   
   return el;
+}
+
+function loadExternalNodes() {
+  return fetch("/api/mesh/external/nodes")
+    .then(res => res.json())
+    .then(data => {
+      const container = document.getElementById("external-nodes");
+      container.innerHTML = '';
+
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach(node => {
+          container.appendChild(createExternalNodeElement(node));
+        });
+        toggleEmptyState('external-nodes', 'no-external-nodes', true);
+      } else {
+        toggleEmptyState('external-nodes', 'no-external-nodes', false);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load external nodes:', err);
+    });
+}
+
+function createExternalNodeElement(node) {
+  const el = document.createElement("div");
+  el.className = "device";
+
+  const ageSec = Math.round((node.last_seen_ms_ago || 0) / 1000);
+
+  el.innerHTML = `
+    <div class="node-info">
+      <div class="info-item">
+        <span class="info-label">Address</span>
+        <span class="info-value">${node.addr}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">State</span>
+        <span class="info-value">${node.onoff ? 'ON' : 'OFF'}</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Last seen</span>
+        <span class="info-value">${ageSec}s ago</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-primary btn-small" onclick="sendExternalNodeCommand('${node.addr}', true)">On</button>
+      <button class="btn btn-warning btn-small" onclick="sendExternalNodeCommand('${node.addr}', false)">Off</button>
+    </div>
+  `;
+
+  return el;
+}
+
+function discoverExternalNodes() {
+  const button = event.target.closest('button');
+  button.disabled = true;
+  button.innerHTML = '<span class="icon">⏳</span> Discovering...';
+
+  fetch("/api/mesh/external/discover", { method: "POST" })
+    .then(res => {
+      if (!res.ok) throw new Error('Discovery request failed');
+      showToast('Discovery sent — refreshing in a moment', 'info');
+      setTimeout(loadExternalNodes, 1500);
+    })
+    .catch(err => {
+      console.error('Failed to discover external nodes:', err);
+      showToast('Failed to send discovery request', 'error');
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = '<span class="icon">📡</span> Discover';
+    });
+}
+
+function sendExternalNodeCommand(addr, onoff) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, onoff: onoff })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external node command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function sendExternalGroupCommand(onoff) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ onoff: onoff })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      showToast('Sent to group', 'success');
+      // Group Set is unacknowledged (BLE Mesh spec), so there's no per-node ack to
+      // update the cache with — re-discover to see each node's new state.
+      setTimeout(() => {
+        fetch("/api/mesh/external/discover", { method: "POST" })
+          .then(() => setTimeout(loadExternalNodes, 1500));
+      }, 300);
+    })
+    .catch(err => {
+      console.error('Failed to send group command:', err);
+      showToast('Failed to send group command', 'error');
+    });
 }
 
 function createCommandElement(command) {
@@ -888,6 +1035,42 @@ function loadSystemInfo() {
         connectionStatus.style.color = 'var(--danger)';
       }
     });
+
+  loadMeshKeys();
+}
+
+function loadMeshKeys() {
+  fetch("/api/mesh/keys")
+    .then(res => res.json())
+    .then(data => {
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
+      if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
+    })
+    .catch(err => {
+      console.error('Failed to load mesh keys:', err);
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl) netKeyEl.textContent = 'Unavailable';
+      if (appKeyEl) appKeyEl.textContent = 'Unavailable';
+    });
+}
+
+function copyMeshKey(elementId) {
+  const el = document.getElementById(elementId);
+  const key = el.textContent;
+  if (!key || key === 'Loading...' || key === 'Unavailable') return;
+  navigator.clipboard.writeText(key).then(() => {
+    const originalText = el.textContent;
+    el.textContent = '✓ Copied!';
+    setTimeout(() => {
+      el.textContent = originalText;
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+    alert('Failed to copy key. Please copy manually: ' + key);
+  });
 }
 
 function updateVersionInfo(data) {
@@ -954,9 +1137,12 @@ function loadMqttStatus() {
         // Don't populate password for security
       }
       
-      // Show error if any
-      if (data.last_error) {
+      // Only show last_error when not currently connected — errors are stale once connected
+      if (data.last_error && data.state !== 'connected') {
         showMqttError(data.last_error);
+      } else {
+        const errorEl = document.getElementById("mqtt-error");
+        if (errorEl) errorEl.style.display = 'none';
       }
     })
     .catch(err => {
@@ -1114,43 +1300,8 @@ document.addEventListener("DOMContentLoaded", function () {
   setInterval(loadMqttStatus, 10000);
   
   // Load nodes data
-  fetch("/nodes.json")
-    .then(res => res.json())
-    .then(data => {
-      const nodesContainer = document.getElementById("nodes");
-      const unprovisionedContainer = document.getElementById("unprovisioned");
-      
-      // Clear containers
-      nodesContainer.innerHTML = '';
-      unprovisionedContainer.innerHTML = '';
-      
-      // Render provisioned nodes
-      if (data.provisioned && data.provisioned.length > 0) {
-        data.provisioned.forEach(node => {
-          nodesContainer.appendChild(createNodeElement(node));
-        });
-        toggleEmptyState('nodes', 'no-nodes', true);
-      } else {
-        toggleEmptyState('nodes', 'no-nodes', false);
-      }
-      
-      // Update node count
-      updateNodeCount(data.provisioned ? data.provisioned.length : 0);
-      
-      // Render unprovisioned devices
-      if (data.unprovisioned && data.unprovisioned.length > 0) {
-        data.unprovisioned.forEach(device => {
-          unprovisionedContainer.appendChild(createDeviceElement(device));
-        });
-        toggleEmptyState('unprovisioned', 'no-devices', true);
-      } else {
-        toggleEmptyState('unprovisioned', 'no-devices', false);
-      }
-    })
-    .catch(err => {
-      console.error('Failed to load nodes:', err);
-      showToast('Failed to load device data', 'error');
-    });
+  loadDevices();
+  loadExternalNodes();
 
   // Load console commands
   fetch("/api/console_commands")

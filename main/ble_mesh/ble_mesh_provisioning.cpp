@@ -181,30 +181,42 @@ void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned
 
 void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
 {
-    bool already_registered = false;
     for (auto index = 0; index < unprovisioned_devices.size(); ++index)
     {
         if (memcmp(unprovisioned_devices[index].dev_uuid, unprov_device.dev_uuid, 16) == 0)
         {
-            already_registered = true;
-            break;
+            // Device already known via PB-GATT — upgrade to PB-ADV if we now see it on that bearer.
+            // PB-ADV is preferred: it is connectionless and more reliable for provisioning.
+            if (unprovisioned_devices[index].bearer == ESP_BLE_MESH_PROV_GATT &&
+                unprov_device.bearer == ESP_BLE_MESH_PROV_ADV)
+            {
+                LOG_INFO(TAG, "Upgrading device %s from PB-GATT to PB-ADV",
+                         bt_hex(unprov_device.dev_uuid, 16));
+                unprovisioned_devices[index] = unprov_device;
+                // Re-trigger auto-provisioning with the better bearer.
+                if (ble_mesh_get_auto_provisioning_enabled())
+                {
+                    ble_mesh_provision_device(unprov_device.dev_uuid);
+                }
+            }
+            return;
         }
     }
 
-    if (!already_registered)
+    LOG_INFO(TAG, "Received unprovisioned device: %s, address: %s, bearer: %s",
+             bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
+             (unprov_device.bearer & ESP_BLE_MESH_PROV_ADV) ? "PB-ADV" : "PB-GATT");
+    unprovisioned_devices.emplace_back(unprov_device);
+
+    // Auto-provision immediately for PB-ADV devices.
+    // For PB-GATT devices, wait: if this device also supports PB-ADV, it will advertise that
+    // beacon shortly and we'll upgrade above, avoiding a double-provision attempt.
+    // PB-GATT-only devices must be provisioned manually from the web UI.
+    if (ble_mesh_get_auto_provisioning_enabled() && (unprov_device.bearer & ESP_BLE_MESH_PROV_ADV))
     {
-        LOG_INFO(TAG, "Received unprovisioned device: %s, address: %s, address type: %d, adv type: %d",
-                 bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
-                 unprov_device.addr_type, unprov_device.adv_type);
-        unprovisioned_devices.emplace_back(unprov_device);
-        
-        // Auto-provision if enabled
-        if (ble_mesh_get_auto_provisioning_enabled())
-        {
-            LOG_INFO(TAG, "Auto-provisioning enabled - automatically provisioning device: %s", 
-                     bt_hex(unprov_device.dev_uuid, 16));
-            ble_mesh_provision_device(unprov_device.dev_uuid);
-        }
+        LOG_INFO(TAG, "Auto-provisioning device via PB-ADV: %s",
+                 bt_hex(unprov_device.dev_uuid, 16));
+        ble_mesh_provision_device(unprov_device.dev_uuid);
     }
 }
 

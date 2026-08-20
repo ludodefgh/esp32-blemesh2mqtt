@@ -306,6 +306,25 @@
               </div>
             </div>
           </section>
+
+          <!-- Mesh Keys -->
+          <section class="card mesh-keys-section">
+            <div class="section-header">
+              <h2>Mesh Keys</h2>
+            </div>
+
+            <div class="version-info-grid">
+              <div class="info-row">
+                <span class="info-label">NetKey:</span>
+                <span class="info-value" id="mesh-net-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-net-key')">Loading...</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">AppKey:</span>
+                <span class="info-value" id="mesh-app-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-app-key')">Loading...</span>
+              </div>
+            </div>
+            <span style="font-size:0.8em;color:#666;">Used to join this mesh from a second bridge ("Join an existing mesh"). Click a value to copy it.</span>
+          </section>
         </div>
       </div>
 
@@ -333,6 +352,34 @@
             </div>
             <div id="unprovisioned" class="devices-grid"></div>
             <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
+          </section>
+
+          <!-- External Mesh Nodes (joined existing mesh, no DevKey) -->
+          <section class="card external-nodes-section">
+            <div class="section-header">
+              <h2>External Mesh Nodes</h2>
+              <button class="btn btn-primary" onclick="discoverExternalNodes()">
+                <span class="icon">📡</span>
+                Discover
+              </button>
+            </div>
+            <span style="font-size:0.8em;color:#666;">
+              Nodes on a joined existing mesh that this bridge did not provision itself.
+              Discovery sends a Generic OnOff Get to the group address configured above
+              (Group Address Subscription) and lists whichever nodes reply.
+            </span>
+            <div class="controls-grid" style="margin-top:12px;">
+              <button class="btn btn-primary" onclick="sendExternalGroupCommand(true)">
+                <span class="icon">💡</span>
+                Turn Group ON
+              </button>
+              <button class="btn btn-warning" onclick="sendExternalGroupCommand(false)">
+                <span class="icon">🌙</span>
+                Turn Group OFF
+              </button>
+            </div>
+            <div id="external-nodes" class="devices-grid" style="margin-top:12px;"></div>
+            <div id="no-external-nodes" class="empty-state">No external nodes discovered yet</div>
           </section>
         </div>
       </div>
