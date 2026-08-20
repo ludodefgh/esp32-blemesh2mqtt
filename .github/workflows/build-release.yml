@@ -83,6 +83,30 @@ jobs:
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
 
+          # Bootloader offset by chip family:
+          #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
+          #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
+          #   ESP32-C5 (RISC-V, special case)    → 0x2000
+          if [ "${{ matrix.target }}" = "esp32c5" ]; then
+            BOOTLOADER_OFFSET="0x2000"
+          elif [ "${{ matrix.target }}" = "esp32c3" ] || [ "${{ matrix.target }}" = "esp32c6" ] || [ "${{ matrix.target }}" = "esp32h2" ]; then
+            BOOTLOADER_OFFSET="0x0"
+          else
+            BOOTLOADER_OFFSET="0x1000"
+          fi
+          echo "BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET}" >> $GITHUB_ENV
+
+          # When flashing via the native USB-Serial/JTAG port, ESP32-C3 and
+          # ESP32-C6 need --after watchdog-reset instead of hard_reset: a
+          # USB-triggered core reset does not re-sample strapping pins,
+          # leaving the chip stuck in download mode.
+          if [ "${{ matrix.target }}" = "esp32c3" ] || [ "${{ matrix.target }}" = "esp32c6" ]; then
+            AFTER_RESET="watchdog-reset"
+          else
+            AFTER_RESET="hard_reset"
+          fi
+          echo "AFTER_RESET=${AFTER_RESET}" >> $GITHUB_ENV
+
           # Create merged binary for easy web-based flashing
           # Source ESP-IDF environment to get esptool.py in PATH
           cd ~/esp/esp-idf
@@ -95,7 +119,7 @@ jobs:
             --flash_mode dio \
             --flash_freq 40m \
             --flash_size 4MB \
-            0x1000 bootloader.bin \
+            ${BOOTLOADER_OFFSET} bootloader.bin \
             0x8000 partition-table.bin \
             0xd000 ota_data_initial.bin \
             0x10000 BleMesh2Mqtt.bin \
@@ -110,6 +134,7 @@ jobs:
 
           Target: ${TARGET}
           Version: ${VERSION}
+          Bootloader Offset: ${BOOTLOADER_OFFSET}
           Storage Offset: ${STORAGE_OFFSET}
 
           IMPORTANT: This firmware uses a custom ESP-IDF fork with BLE Mesh fixes.
@@ -122,26 +147,37 @@ jobs:
           METHOD 1: Using esptool.py (Linux/Mac/Windows)
           ------------------------------------------------
 
-          esptool.py --chip ${TARGET} -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+          esptool.py --chip ${TARGET} -p /dev/ttyUSB0 -b 460800 --before default_reset --after ${AFTER_RESET} \\
             write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
-            0x1000 bootloader.bin \\
+            ${BOOTLOADER_OFFSET} bootloader.bin \\
             0x8000 partition-table.bin \\
             0xd000 ota_data_initial.bin \\
             0x10000 BleMesh2Mqtt.bin \\
             ${STORAGE_OFFSET} storage.bin
 
           Or using auto-detect (recommended):
-          esptool.py --chip auto -p /dev/ttyUSB0 -b 460800 --before default_reset --after hard_reset \\
+          esptool.py --chip auto -p /dev/ttyUSB0 -b 460800 --before default_reset --after ${AFTER_RESET} \\
             write_flash --flash_mode dio --flash_size detect --flash_freq 40m \\
-            0x1000 bootloader.bin \\
+            ${BOOTLOADER_OFFSET} bootloader.bin \\
             0x8000 partition-table.bin \\
             0xd000 ota_data_initial.bin \\
             0x10000 BleMesh2Mqtt.bin \\
             ${STORAGE_OFFSET} storage.bin
 
+          Note: Bootloader offset varies by target:
+          - ESP32, ESP32-S2, ESP32-S3: 0x1000
+          - ESP32-C3, ESP32-C6, ESP32-H2: 0x0
+          - ESP32-C5: 0x2000
+
           Note: Storage offset varies by target:
           - ESP32, ESP32-S3: 0x3b0000 (dual OTA with rollback)
           - ESP32-C3, ESP32-C6: 0x2c0000 (single OTA, larger binary)
+
+          Note: On ESP32-C3/C6, if flashing via the native USB-Serial/JTAG port
+          leaves the device stuck in download mode after flashing, this is
+          already handled above via --after watchdog-reset. If you still see
+          "invalid header: 0xffffffff" in a boot loop, double-check the
+          bootloader offset above matches your chip.
 
           Note: Replace /dev/ttyUSB0 with your serial port:
           - Linux: /dev/ttyUSB0 or /dev/ttyACM0
@@ -164,7 +200,7 @@ jobs:
           --------------------------------------------------------------
 
           If the web tool supports multiple files, upload in this order:
-             - 0x1000: bootloader.bin
+             - ${BOOTLOADER_OFFSET}: bootloader.bin
              - 0x8000: partition-table.bin
              - 0xd000: ota_data_initial.bin
              - 0x10000: BleMesh2Mqtt.bin
@@ -183,7 +219,7 @@ jobs:
           1. Download tool from: https://www.espressif.com/en/support/download/other-tools
           2. Select chip type: ${TARGET}
           3. Add files with addresses:
-             bootloader.bin @ 0x1000
+             bootloader.bin @ ${BOOTLOADER_OFFSET}
              partition-table.bin @ 0x8000
              ota_data_initial.bin @ 0xd000
              BleMesh2Mqtt.bin @ 0x10000
