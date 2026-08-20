@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] Performance optimizations
 - [ ] SSL/TLS support for MQTT
 
+## [0.1.7] - 2026-08-20
+
+### Fixed
+- The bootloader flash offset fix from 0.1.6 only landed in the local
+  `build-all-targets.sh` script, not in the `build-release.yml` CI workflow
+  that actually produces the binaries attached to GitHub releases. As a
+  result, pre-built ESP32-C3/C6 binaries from the 0.1.6 release still wrote
+  the bootloader at `0x1000` instead of `0x0`, causing a boot loop with
+  `invalid header: 0xffffffff`. The release workflow now computes the same
+  per-target bootloader offset and `--after` reset flag as the local script.
+  (Fixes #37)
+
 ## [0.1.6] - 2026-04-15
 
 ### Fixed
