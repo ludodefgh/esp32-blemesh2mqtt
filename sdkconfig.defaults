@@ -98,7 +98,12 @@ CONFIG_BLE_MESH_CFG_CLI=y
 #
 CONFIG_BLE_MESH_SETTINGS=y
 CONFIG_BLE_MESH_STORE_TIMEOUT=0
-CONFIG_BLE_MESH_SEQ_STORE_RATE=0
+# A margin > 0 makes the stack round the restored sequence number up on boot,
+# guaranteeing it never reuses one already sent — protects against an abrupt
+# reset (flashing, crash, power loss) interrupting the deferred seq-number
+# write before it lands, which otherwise causes receivers to reject the
+# bridge's next messages as replays until the counter catches back up.
+CONFIG_BLE_MESH_SEQ_STORE_RATE=8
 CONFIG_BLE_MESH_RPL_STORE_TIMEOUT=0
 
 #

@@ -17,6 +17,7 @@
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 // Project includes
@@ -171,8 +172,37 @@ void prov_link_close(esp_ble_mesh_prov_bearer_t bearer, uint8_t reason)
              bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT", reason);
 }
 
+// A device we provisioned ourselves is removed from this list right away
+// (see remove_unprovisioned_device). But one that stops advertising for some
+// other reason — provisioned by a different provisioner (e.g. joining an
+// existing mesh via nRF Mesh), powered off, moved out of range — just goes
+// quiet, and we have no way to ask it "are you provisioned now?" (BLE Mesh
+// has no such message: provisioning and normal network traffic are separate
+// bearers/protocols, so an entry can only be inferred stale by beacon absence).
+// Unprovisioned devices normally re-advertise every ~1s, so 30s of silence
+// is a generous margin before treating an entry as gone.
+static constexpr int64_t UNPROV_DEVICE_STALE_US = 30 * 1000 * 1000;
+
+static void prune_stale_unprovisioned_devices()
+{
+    int64_t now = esp_timer_get_time();
+    for (auto it = unprovisioned_devices.begin(); it != unprovisioned_devices.end();)
+    {
+        if (now - it->last_seen_us > UNPROV_DEVICE_STALE_US)
+        {
+            LOG_INFO(TAG, "Unprovisioned device %s no longer seen, removing", bt_hex(it->dev_uuid, 16));
+            it = unprovisioned_devices.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned_device &unprov_device)> func)
 {
+    prune_stale_unprovisioned_devices();
     for (const auto &unprov_dev : unprovisioned_devices)
     {
         func(unprov_dev);
@@ -185,6 +215,8 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
     {
         if (memcmp(unprovisioned_devices[index].dev_uuid, unprov_device.dev_uuid, 16) == 0)
         {
+            unprovisioned_devices[index].last_seen_us = esp_timer_get_time();
+
             // Device already known via PB-GATT — upgrade to PB-ADV if we now see it on that bearer.
             // PB-ADV is preferred: it is connectionless and more reliable for provisioning.
             if (unprovisioned_devices[index].bearer == ESP_BLE_MESH_PROV_GATT &&
@@ -193,6 +225,7 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
                 LOG_INFO(TAG, "Upgrading device %s from PB-GATT to PB-ADV",
                          bt_hex(unprov_device.dev_uuid, 16));
                 unprovisioned_devices[index] = unprov_device;
+                unprovisioned_devices[index].last_seen_us = esp_timer_get_time();
                 // Re-trigger auto-provisioning with the better bearer.
                 if (ble_mesh_get_auto_provisioning_enabled())
                 {
@@ -207,6 +240,7 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
              bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
              (unprov_device.bearer & ESP_BLE_MESH_PROV_ADV) ? "PB-ADV" : "PB-GATT");
     unprovisioned_devices.emplace_back(unprov_device);
+    unprovisioned_devices.back().last_seen_us = esp_timer_get_time();
 
     // Auto-provision immediately for PB-ADV devices.
     // For PB-GATT devices, wait: if this device also supports PB-ADV, it will advertise that

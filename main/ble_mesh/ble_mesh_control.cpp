@@ -872,6 +872,40 @@ void ble_mesh_subscribe_group_addr(uint16_t group_addr)
     }
 }
 
+esp_err_t ble_mesh_apply_local_app_key(const uint8_t app_key[16])
+{
+    // add_local_app_key()/update_local_app_key() both go through the async BTC queue and
+    // return ESP_OK as soon as the request is queued, regardless of whether the stack
+    // actually accepts it — so a failed add (AppKeyIndex already in use, from any earlier
+    // boot) can never be detected from its return value to fall back to update. Check
+    // whether the index already holds a key first (a synchronous local lookup) instead.
+    bool app_key_exists = esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx) != NULL;
+    return app_key_exists
+               ? esp_ble_mesh_provisioner_update_local_app_key(app_key, store.net_idx, store.app_idx)
+               : esp_ble_mesh_provisioner_add_local_app_key(app_key, store.net_idx, store.app_idx);
+}
+
+esp_err_t ble_mesh_apply_join_keys(const uint8_t net_key[16], const uint8_t app_key[16])
+{
+    // The primary subnet must already exist for this to succeed — true at boot right after
+    // prov_enable() creates it, and true for the lifetime of the mesh stack afterwards.
+    // add_local_net_key() always fails for the primary NetKey index (rejected by the SDK),
+    // so update is the only path.
+    esp_err_t err = esp_ble_mesh_provisioner_update_local_net_key(net_key, ESP_BLE_MESH_KEY_PRIMARY);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to set NetKey for existing mesh (err %d)", err);
+        return err;
+    }
+
+    err = ble_mesh_apply_local_app_key(app_key);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to set AppKey (err %d)", err);
+    }
+    return err;
+}
+
 esp_err_t ble_mesh_init(void)
 {
     ble_mesh_get_dev_uuid(dev_uuid);
@@ -917,23 +951,16 @@ esp_err_t ble_mesh_init(void)
 
     if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
     {
-        // The primary subnet doesn't exist until prov_enable() auto-creates it, so this
-        // must run after prov_enable(), not before. add_local_net_key() also always fails
-        // for the primary NetKey index (rejected by the SDK) — update is the only path.
-        LOG_INFO(TAG, "Joining existing mesh — setting primary NetKey");
-        err = esp_ble_mesh_provisioner_update_local_net_key(mesh_cfg.net_key, ESP_BLE_MESH_KEY_PRIMARY);
+        LOG_INFO(TAG, "Joining existing mesh — setting NetKey/AppKey");
+        err = ble_mesh_apply_join_keys(mesh_cfg.net_key, prov_key.app_key);
         if (err != ESP_OK)
         {
-            LOG_ERROR(TAG, "Failed to set NetKey for existing mesh (err %d)", err);
             return err;
         }
     }
-
-    err = esp_ble_mesh_provisioner_add_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
-    if (err != ESP_OK)
+    else
     {
-        LOG_WARN(TAG, "Failed to add local AppKey (err %d), trying update", err);
-        err = esp_ble_mesh_provisioner_update_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
+        err = ble_mesh_apply_local_app_key(prov_key.app_key);
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Failed to set AppKey (err %d)", err);

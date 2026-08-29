@@ -361,6 +361,7 @@ esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
 esp_err_t mesh_settings_get_handler(httpd_req_t *req);
 esp_err_t mesh_settings_set_handler(httpd_req_t *req);
 esp_err_t mesh_keys_get_handler(httpd_req_t *req);
+esp_err_t mesh_join_keys_set_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
@@ -602,9 +603,13 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
     }
-    else if (strstr(req->uri, "/api/mesh/keys"))
+    else if (strstr(req->uri, "/api/mesh/keys") && req->method == HTTP_GET)
     {
         return mesh_keys_get_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/keys") && req->method == HTTP_POST)
+    {
+        return mesh_join_keys_set_handler(req);
     }
     else if (strstr(req->uri, "/api/mesh/external/discover"))
     {
@@ -1108,10 +1113,100 @@ esp_err_t mesh_keys_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char buf[128];
-    snprintf(buf, sizeof(buf), "{\"net_key\":\"%s\",\"app_key\":\"%s\"}", net_key_hex, app_key_hex);
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    char buf[160];
+    snprintf(buf, sizeof(buf), "{\"net_key\":\"%s\",\"app_key\":\"%s\",\"mode\":\"%s\"}",
+             net_key_hex, app_key_hex, cfg.mode == MESH_MODE_JOIN_EXISTING ? "existing" : "standalone");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+static bool hex_to_key_bytes(const char *hex, uint8_t out[16])
+{
+    if (!hex || strlen(hex) != 32)
+    {
+        return false;
+    }
+    for (int i = 0; i < 16; i++)
+    {
+        char byte_str[3] = {hex[i * 2], hex[i * 2 + 1], '\0'};
+        char *end = nullptr;
+        unsigned long val = strtoul(byte_str, &end, 16);
+        if (*end != '\0')
+        {
+            return false;
+        }
+        out[i] = (uint8_t)val;
+    }
+    return true;
+}
+
+esp_err_t mesh_join_keys_set_handler(httpd_req_t *req)
+{
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    if (cfg.mode != MESH_MODE_JOIN_EXISTING)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                             "Bridge is not in 'Join an existing mesh' mode — set that up first");
+        return ESP_FAIL;
+    }
+
+    char buf2[128];
+    int received = httpd_req_recv(req, buf2, sizeof(buf2) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf2[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf2);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *net_key_item = cJSON_GetObjectItem(json, "net_key");
+    cJSON *app_key_item = cJSON_GetObjectItem(json, "app_key");
+    uint8_t net_key[16];
+    uint8_t app_key[16];
+
+    if (!cJSON_IsString(net_key_item) || !cJSON_IsString(app_key_item) ||
+        !hex_to_key_bytes(net_key_item->valuestring, net_key) ||
+        !hex_to_key_bytes(app_key_item->valuestring, app_key))
+    {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "net_key and app_key must each be 32 hex characters");
+        return ESP_FAIL;
+    }
+    cJSON_Delete(json);
+
+    memcpy(cfg.net_key, net_key, 16);
+    memcpy(cfg.app_key, app_key, 16);
+    esp_err_t err = mesh_config_save(&cfg);
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save mesh config");
+        return ESP_FAIL;
+    }
+
+    // Applied live — no restart needed, unlike changing mode (which still goes
+    // through the captive-portal setup wizard).
+    err = ble_mesh_apply_join_keys(net_key, app_key);
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Saved, but failed to apply keys live — restart the bridge");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"applied\"}");
     return ESP_OK;
 }
 

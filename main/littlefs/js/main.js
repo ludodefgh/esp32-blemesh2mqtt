@@ -1047,6 +1047,9 @@ function loadMeshKeys() {
       const appKeyEl = document.getElementById("mesh-app-key");
       if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
       if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
+
+      const editSection = document.getElementById("mesh-keys-edit");
+      if (editSection) editSection.style.display = data.mode === 'existing' ? 'block' : 'none';
     })
     .catch(err => {
       console.error('Failed to load mesh keys:', err);
@@ -1054,6 +1057,33 @@ function loadMeshKeys() {
       const appKeyEl = document.getElementById("mesh-app-key");
       if (netKeyEl) netKeyEl.textContent = 'Unavailable';
       if (appKeyEl) appKeyEl.textContent = 'Unavailable';
+    });
+}
+
+function saveMeshJoinKeys() {
+  const netKey = document.getElementById("mesh-net-key-input").value.trim().toLowerCase();
+  const appKey = document.getElementById("mesh-app-key-input").value.trim().toLowerCase();
+
+  if (!/^[0-9a-f]{32}$/.test(netKey) || !/^[0-9a-f]{32}$/.test(appKey)) {
+    showToast('NetKey and AppKey must each be 32 hex characters', 'error');
+    return;
+  }
+
+  fetch("/api/mesh/keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ net_key: netKey, app_key: appKey })
+  })
+    .then(res => {
+      if (!res.ok) return res.text().then(t => { throw new Error(t); });
+      showToast('Keys applied', 'success');
+      document.getElementById("mesh-net-key-input").value = '';
+      document.getElementById("mesh-app-key-input").value = '';
+      loadMeshKeys();
+    })
+    .catch(err => {
+      console.error('Failed to apply mesh keys:', err);
+      showToast('Failed to apply keys: ' + err.message, 'error');
     });
 }
 
