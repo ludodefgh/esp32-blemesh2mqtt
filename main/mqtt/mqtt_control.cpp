@@ -75,11 +75,14 @@ static std::string get_node_base_topic(const std::shared_ptr<bm2mqtt_node_info>&
         return {};
     }
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only build tracks no provisioned nodes locally — nothing to bridge here.
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         std::string node_addr{bt_hex(mesh_node->addr, BD_ADDR_LEN)};
         return get_bridge_base_topic() + "/node_" + node_addr;
     }
+#endif
     LOG_WARN(TAG, "Failed to get node base topic - node not found");
     return {};
 }
@@ -113,6 +116,7 @@ std::string mqtt_get_node_discovery_id(const std::shared_ptr<bm2mqtt_node_info>&
     if (!node_info)
         return {};
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
@@ -124,6 +128,7 @@ std::string mqtt_get_node_discovery_id(const std::shared_ptr<bm2mqtt_node_info>&
         snprintf(buf, sizeof(buf), "homeassistant/light/blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
         return std::string{buf} + "_light/config";
     }
+#endif
     return {};
 }
 
@@ -373,6 +378,8 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
 
     cJSON *root = cJSON_CreateObject();
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only build provisions no one — nothing to look up here.
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid.raw()))
     {
         char buf[64] = {0};
@@ -462,6 +469,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             }
         }
     }
+#endif // CONFIG_BLE_MESH_PROVISIONER
 
     return std::unique_ptr<cJSON>{root};
 }

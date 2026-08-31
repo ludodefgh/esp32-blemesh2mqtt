@@ -19,12 +19,28 @@ typedef struct {
     uint8_t net_key[16];
     uint8_t app_key[16];
     uint16_t group_addr;
+    // Join-existing-as-node identity: unlike net_key/app_key above (manual entry,
+    // superseded for this mode — see ble_mesh_init), these are never typed in.
+    // They're learned from the real provisioning handshake (node_addr, node_net_idx)
+    // and the Config AppKey Add the external provisioner sends afterward
+    // (node_app_idx), then persisted here so we don't have to wait for those
+    // events again on every subsequent boot.
+    uint16_t node_addr;
+    uint16_t node_net_idx;
+    uint16_t node_app_idx;
 } mesh_config_t;
 
 esp_err_t mesh_config_load(mesh_config_t *cfg);
 esp_err_t mesh_config_save(const mesh_config_t *cfg);
 esp_err_t mesh_config_load_group_addr(uint16_t *group_addr);
 esp_err_t mesh_config_save_group_addr(uint16_t group_addr);
+esp_err_t mesh_config_save_node_identity(uint16_t addr, uint16_t net_idx);
+esp_err_t mesh_config_save_node_app_idx(uint16_t app_idx);
+// Erases the BLE Mesh stack's own persisted state (NVS namespace "mesh_core" — its
+// NetKey/AppKey/seq/RPL/role, NOT WiFi or MQTT config). Required before switching
+// between Provisioner and Node role: the stack refuses to enable a role that
+// mismatches whatever role it last persisted, to avoid corrupting that state.
+esp_err_t mesh_config_reset_stack_state(void);
 
 #ifdef __cplusplus
 }

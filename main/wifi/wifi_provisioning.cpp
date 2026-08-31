@@ -1444,19 +1444,6 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static bool hex_to_bytes(const char *hex, uint8_t *out, size_t out_len)
-{
-    size_t hex_len = strlen(hex);
-    if (hex_len != out_len * 2) return false;
-    for (size_t i = 0; i < out_len; i++) {
-        char byte_str[3] = {hex[i * 2], hex[i * 2 + 1], '\0'};
-        char *end;
-        unsigned long val = strtoul(byte_str, &end, 16);
-        if (*end != '\0') return false;
-        out[i] = (uint8_t)val;
-    }
-    return true;
-}
 
 static esp_err_t mesh_config_handler(httpd_req_t *req)
 {
@@ -1476,6 +1463,7 @@ static esp_err_t mesh_config_handler(httpd_req_t *req)
 
     mesh_config_t cfg = {};
     mesh_config_load(&cfg);
+    mesh_mode_t previous_mode = cfg.mode;
 
     cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
     if (cJSON_IsString(mode_item)) {
@@ -1484,21 +1472,23 @@ static esp_err_t mesh_config_handler(httpd_req_t *req)
                        : MESH_MODE_STANDALONE;
     }
 
-    if (cfg.mode == MESH_MODE_JOIN_EXISTING) {
-        cJSON *net_key_item = cJSON_GetObjectItem(json, "net_key");
-        cJSON *app_key_item = cJSON_GetObjectItem(json, "app_key");
-
-        if (!cJSON_IsString(net_key_item) || !cJSON_IsString(app_key_item) ||
-            !hex_to_bytes(net_key_item->valuestring, cfg.net_key, 16) ||
-            !hex_to_bytes(app_key_item->valuestring, cfg.app_key, 16)) {
-            cJSON_Delete(json);
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                "Invalid net_key or app_key (32 hex chars each required)");
-            return ESP_FAIL;
-        }
-    }
+    // No net_key/app_key to accept here anymore — joining an existing mesh means
+    // becoming a real node, provisioned by whatever already manages that mesh
+    // (nRF Mesh, etc.), which assigns NetKey/AppKey/address itself. See ble_mesh_init.
 
     cJSON_Delete(json);
+
+    if (cfg.mode != previous_mode) {
+        // Switching between Provisioner (standalone) and Node (join-existing) role:
+        // the stack refuses to enable a role that mismatches whatever role it last
+        // persisted, to avoid corrupting that state — clear it so the new role can
+        // start clean. This does not touch WiFi or MQTT config, just the mesh
+        // stack's own NetKey/AppKey/seq/role namespace.
+        mesh_config_reset_stack_state();
+        cfg.node_addr = 0;
+        cfg.node_net_idx = 0;
+        cfg.node_app_idx = 0xFFFF;
+    }
 
     esp_err_t err = mesh_config_save(&cfg);
     if (err != ESP_OK) {

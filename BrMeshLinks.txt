@@ -1,0 +1,8 @@
+https://stephencross.site/posts/brmesh-esphome-homeassistant/
+https://brmeshlighting.com/brmesh-flood-light-guide/
+https://www.reddit.com/r/homeassistant/comments/187t37p/brmesh_floodlights_in_home_assistant/
+https://github.com/millskyle/BRMesh_homeassistant/tree/a88418678fd5a2e79151152fa19d9dc9923a14e0
+https://github.com/ArcadeMachinist/brMeshMQTT
+https://community.home-assistant.io/t/brmesh-app-bluetooth-lights/473486/5
+https://github.com/ibroadlink/ha_magic_home
+https://github.com/dennispg/esphome-fastcon

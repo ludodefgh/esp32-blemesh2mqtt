@@ -111,6 +111,8 @@ esp_err_t nodes_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, nodes_javascript, -1);
 
     // Loop through all nodes
+    // Node-only builds have no provisioner node table.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -137,6 +139,7 @@ esp_err_t nodes_handler(httpd_req_t *req)
 
         httpd_resp_send_chunk(req, chunk, len);
     }
+#endif
 
     //
     // Unprovisioned nodes
@@ -329,8 +332,9 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    // Find the node by UUID
+    // Node-only build always reports "not found" — no provisioner table to search.
     const esp_ble_mesh_node_t *node = NULL;
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *n = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -340,6 +344,7 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
             break;
         }
     }
+#endif
 
     if (!node)
     {
@@ -361,10 +366,11 @@ esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
 esp_err_t mesh_settings_get_handler(httpd_req_t *req);
 esp_err_t mesh_settings_set_handler(httpd_req_t *req);
 esp_err_t mesh_keys_get_handler(httpd_req_t *req);
-esp_err_t mesh_join_keys_set_handler(httpd_req_t *req);
+esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
+esp_err_t mesh_reset_role_handler(httpd_req_t *req);
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -603,13 +609,13 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
     }
-    else if (strstr(req->uri, "/api/mesh/keys") && req->method == HTTP_GET)
+    else if (strstr(req->uri, "/api/mesh/keys"))
     {
         return mesh_keys_get_handler(req);
     }
-    else if (strstr(req->uri, "/api/mesh/keys") && req->method == HTTP_POST)
+    else if (strstr(req->uri, "/api/mesh/debug"))
     {
-        return mesh_join_keys_set_handler(req);
+        return mesh_debug_status_handler(req);
     }
     else if (strstr(req->uri, "/api/mesh/external/discover"))
     {
@@ -622,6 +628,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/mesh/external/command"))
     {
         return mesh_external_command_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/reset_role"))
+    {
+        return mesh_reset_role_handler(req);
     }
     else
     {
@@ -851,7 +861,8 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr_chunk(req, "{ \"provisioned\": [");
 
-    // List provisioned nodes
+    // Node-only builds have no provisioner node table — list is always empty.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     bool first_node = true;
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
@@ -889,6 +900,7 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, buf);
         first_node = false;
     }
+#endif
 
     httpd_resp_sendstr_chunk(req, "], \"unprovisioned\": [");
 
@@ -1124,89 +1136,68 @@ esp_err_t mesh_keys_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static bool hex_to_key_bytes(const char *hex, uint8_t out[16])
-{
-    if (!hex || strlen(hex) != 32)
-    {
-        return false;
-    }
-    for (int i = 0; i < 16; i++)
-    {
-        char byte_str[3] = {hex[i * 2], hex[i * 2 + 1], '\0'};
-        char *end = nullptr;
-        unsigned long val = strtoul(byte_str, &end, 16);
-        if (*end != '\0')
-        {
-            return false;
-        }
-        out[i] = (uint8_t)val;
-    }
-    return true;
-}
-
-esp_err_t mesh_join_keys_set_handler(httpd_req_t *req)
+// Consolidated mesh state dump for debugging via browser/curl instead of a serial capture.
+esp_err_t mesh_debug_status_handler(httpd_req_t *req)
 {
     mesh_config_t cfg = {};
     mesh_config_load(&cfg);
 
-    if (cfg.mode != MESH_MODE_JOIN_EXISTING)
+    extern struct mesh_network_info_store store;
+
+    char net_key_hex[33] = {0};
+    char app_key_hex[33] = {0};
+    bool keys_available = ble_mesh_get_local_keys_hex(net_key_hex, sizeof(net_key_hex), app_key_hex, sizeof(app_key_hex));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "sku",
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+                             "provisioner"
+#else
+                             "node_only"
+#endif
+    );
+    cJSON_AddStringToObject(root, "mode", cfg.mode == MESH_MODE_JOIN_EXISTING ? "existing" : "standalone");
+
+    char hex[8];
+    snprintf(hex, sizeof(hex), "0x%04X", local_element_addr);
+    cJSON_AddStringToObject(root, "local_element_addr", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", store.net_idx);
+    cJSON_AddStringToObject(root, "net_idx", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", store.app_idx);
+    cJSON_AddStringToObject(root, "app_idx", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addr);
+    cJSON_AddStringToObject(root, "group_addr", hex);
+
+    cJSON_AddBoolToObject(root, "local_keys_available", keys_available);
+    if (keys_available)
     {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                             "Bridge is not in 'Join an existing mesh' mode — set that up first");
-        return ESP_FAIL;
+        cJSON_AddStringToObject(root, "net_key", net_key_hex);
+        cJSON_AddStringToObject(root, "app_key", app_key_hex);
     }
 
-    char buf2[128];
-    int received = httpd_req_recv(req, buf2, sizeof(buf2) - 1);
-    if (received <= 0)
-    {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
-        return ESP_FAIL;
-    }
-    buf2[received] = '\0';
+    cJSON_AddBoolToObject(root, "provisioning_enabled", ble_mesh_get_provisioning_enabled());
+    cJSON_AddBoolToObject(root, "auto_provisioning_enabled", ble_mesh_get_auto_provisioning_enabled());
 
-    cJSON *json = cJSON_Parse(buf2);
-    if (!json)
-    {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
+    cJSON *ext_nodes = cJSON_CreateArray();
+    int ext_count = 0;
+    for_each_external_node([&ext_nodes, &ext_count](const external_mesh_node_t &node)
+                            {
+        ext_count++;
+        cJSON *item = cJSON_CreateObject();
+        char addr_hex[8];
+        snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
+        cJSON_AddStringToObject(item, "addr", addr_hex);
+        cJSON_AddNumberToObject(item, "features", node.features);
+        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        cJSON_AddItemToArray(ext_nodes, item); });
+    cJSON_AddNumberToObject(root, "external_node_count", ext_count);
+    cJSON_AddItemToObject(root, "external_nodes", ext_nodes);
 
-    cJSON *net_key_item = cJSON_GetObjectItem(json, "net_key");
-    cJSON *app_key_item = cJSON_GetObjectItem(json, "app_key");
-    uint8_t net_key[16];
-    uint8_t app_key[16];
-
-    if (!cJSON_IsString(net_key_item) || !cJSON_IsString(app_key_item) ||
-        !hex_to_key_bytes(net_key_item->valuestring, net_key) ||
-        !hex_to_key_bytes(app_key_item->valuestring, app_key))
-    {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "net_key and app_key must each be 32 hex characters");
-        return ESP_FAIL;
-    }
-    cJSON_Delete(json);
-
-    memcpy(cfg.net_key, net_key, 16);
-    memcpy(cfg.app_key, app_key, 16);
-    esp_err_t err = mesh_config_save(&cfg);
-    if (err != ESP_OK)
-    {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save mesh config");
-        return ESP_FAIL;
-    }
-
-    // Applied live — no restart needed, unlike changing mode (which still goes
-    // through the captive-portal setup wizard).
-    err = ble_mesh_apply_join_keys(net_key, app_key);
-    if (err != ESP_OK)
-    {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Saved, but failed to apply keys live — restart the bridge");
-        return ESP_FAIL;
-    }
-
+    char *json_str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"status\":\"applied\"}");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -1236,8 +1227,26 @@ esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
         char addr_hex[8];
         snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
         cJSON_AddStringToObject(item, "addr", addr_hex);
-        cJSON_AddBoolToObject(item, "onoff", node.onoff != 0);
         cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+
+        cJSON *features = cJSON_CreateArray();
+        if (node.features & FEATURE_GENERIC_ONOFF)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("onoff"));
+            cJSON_AddBoolToObject(item, "onoff", node.onoff != 0);
+        }
+        if (node.features & FEATURE_GENERIC_LEVEL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("level"));
+            cJSON_AddNumberToObject(item, "level", node.level);
+        }
+        if (node.features & FEATURE_LIGHT_LIGHTNESS)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("lightness"));
+            cJSON_AddNumberToObject(item, "lightness", node.lightness);
+        }
+        cJSON_AddItemToObject(item, "features", features);
+
         cJSON_AddItemToArray(arr, item); });
 
     char *json_str = cJSON_PrintUnformatted(arr);
@@ -1266,14 +1275,24 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Exactly one of onoff / level / lightness selects which model to command.
     cJSON *onoff_item = cJSON_GetObjectItem(json, "onoff");
-    if (!cJSON_IsBool(onoff_item))
+    cJSON *level_item = cJSON_GetObjectItem(json, "level");
+    cJSON *lightness_item = cJSON_GetObjectItem(json, "lightness");
+    int field_count = (onoff_item ? 1 : 0) + (level_item ? 1 : 0) + (lightness_item ? 1 : 0);
+    // Range-checked: an out-of-range double->int16_t/uint16_t cast is UB, not truncation.
+    if (field_count != 1 ||
+        (onoff_item && !cJSON_IsBool(onoff_item)) ||
+        (level_item && (!cJSON_IsNumber(level_item) || level_item->valuedouble < INT16_MIN || level_item->valuedouble > INT16_MAX)) ||
+        (lightness_item && (!cJSON_IsNumber(lightness_item) || lightness_item->valuedouble < 0 || lightness_item->valuedouble > UINT16_MAX)))
     {
         cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid onoff field");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Specify exactly one of: onoff (bool), level (number, -32768..32767), lightness (number, 0..65535)");
         return ESP_FAIL;
     }
-    bool onoff = cJSON_IsTrue(onoff_item);
+    bool onoff = onoff_item && cJSON_IsTrue(onoff_item);
+    int16_t level = level_item ? (int16_t)level_item->valuedouble : 0;
+    uint16_t lightness = lightness_item ? (uint16_t)lightness_item->valuedouble : 0;
 
     uint16_t addr = 0;
     cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
@@ -1306,7 +1325,19 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    esp_err_t err = ble_mesh_send_external_command(addr, onoff);
+    esp_err_t err;
+    if (level_item)
+    {
+        err = ble_mesh_send_external_level_command(addr, level);
+    }
+    else if (lightness_item)
+    {
+        err = ble_mesh_send_external_lightness_command(addr, lightness);
+    }
+    else
+    {
+        err = ble_mesh_send_external_command(addr, onoff);
+    }
     if (err != ESP_OK)
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send command");
@@ -1315,6 +1346,31 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
+    return ESP_OK;
+}
+
+esp_err_t mesh_reset_role_handler(httpd_req_t *req)
+{
+    // Recovery for a bridge stuck in a Provisioner/Node role mismatch (see ble_mesh_init).
+    esp_err_t err = mesh_config_reset_stack_state();
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset mesh role state");
+        return ESP_FAIL;
+    }
+
+    // Also clear our own node identity — mesh_config_reset_stack_state() only wipes mesh_core.
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+    cfg.node_addr = 0;
+    cfg.node_net_idx = 0;
+    cfg.node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
+    mesh_config_save(&cfg);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"reset, restarting\"}");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
     return ESP_OK;
 }
 

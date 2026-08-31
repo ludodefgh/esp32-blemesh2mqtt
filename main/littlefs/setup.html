@@ -70,16 +70,11 @@ input.mono { font-family: monospace; letter-spacing: 1px; }
     <label><input type='radio' name='meshMode' value='existing' onchange='onMeshModeChange()'> Join an existing mesh</label>
   </div>
   <div id='existingKeyFields' class='key-fields' style='display:none;'>
-    <div class='form-group'>
-      <label for='netKey'>NetKey (hex, 32 chars):</label>
-      <input class='mono' type='text' id='netKey' maxlength='32' placeholder='0011223344556677889aabbccddeeff'>
-      <div class='key-hint'>16 bytes as hexadecimal, no spaces</div>
-    </div>
-    <div class='form-group'>
-      <label for='appKey'>AppKey (hex, 32 chars):</label>
-      <input class='mono' type='text' id='appKey' maxlength='32' placeholder='0011223344556677889aabbccddeeff'>
-      <div class='key-hint'>16 bytes as hexadecimal, no spaces</div>
-    </div>
+    <p>No keys to enter. After restart, the bridge waits to be provisioned — pair
+       it from your existing mesh app (e.g. nRF Mesh), exactly like any other
+       device, then bind an AppKey to its models from that app. The NetKey,
+       AppKey and unicast address are all assigned automatically by that
+       provisioning — never typed in here.</p>
   </div>
   <button id='saveMeshBtn' onclick='saveMeshAndRestart()'>Save &amp; Restart</button>
   <button class='btn-secondary' onclick='triggerRestart()' style='margin-top:6px;'>Skip (use defaults)</button>
@@ -183,17 +178,6 @@ function saveMeshAndRestart() {
   const btn = document.getElementById('saveMeshBtn');
 
   const body = { mode };
-
-  if (mode === 'existing') {
-    const netKey = document.getElementById('netKey').value.trim();
-    const appKey = document.getElementById('appKey').value.trim();
-    if (!isValidHex32(netKey) || !isValidHex32(appKey)) {
-      showStatus('status2', 'NetKey and AppKey must each be 32 hex characters', true);
-      return;
-    }
-    body.net_key = netKey.toLowerCase();
-    body.app_key = appKey.toLowerCase();
-  }
 
   btn.disabled = true;
   btn.textContent = 'Saving...';

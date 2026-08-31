@@ -720,31 +720,72 @@ function loadExternalNodes() {
 }
 
 function createExternalNodeElement(node) {
+  // Same card style as a provisioned node (.node), but without controls that need
+  // things an external node doesn't have: composition data, a DevKey, MQTT bridging.
   const el = document.createElement("div");
-  el.className = "device";
+  el.className = "node";
+  el.dataset.addr = node.addr;
 
   const ageSec = Math.round((node.last_seen_ms_ago || 0) / 1000);
+  const online = ageSec < 60;
+  const features = node.features || [];
+
+  let controls = '';
+  if (features.includes('onoff')) {
+    controls += `
+      <div class="controls">
+        <button class="btn btn-primary btn-small" onclick="sendExternalNodeCommand('${node.addr}', true)">On</button>
+        <button class="btn btn-warning btn-small" onclick="sendExternalNodeCommand('${node.addr}', false)">Off</button>
+      </div>`;
+  }
+  if (features.includes('level')) {
+    controls += `
+      <div class="lightness-control">
+        <span>🎚️</span>
+        <input type="range" min="-32768" max="32767" step="256" value="${node.level || 0}"
+          onchange="sendExternalLevelCommand('${node.addr}', this.value)">
+        <output>${node.level || 0}</output>
+      </div>`;
+  }
+  if (features.includes('lightness')) {
+    controls += `
+      <div class="lightness-control">
+        <span>💡</span>
+        <input type="range" min="0" max="65535" step="500" value="${node.lightness || 0}"
+          onchange="sendExternalLightnessCommand('${node.addr}', this.value)">
+        <output>${node.lightness || 0}</output>
+      </div>`;
+  }
+  if (!features.length) {
+    controls = '<span style="font-size:0.8em;color:#666;">No known model responded yet</span>';
+  }
 
   el.innerHTML = `
-    <div class="node-info">
-      <div class="info-item">
-        <span class="info-label">Address</span>
+    <div class="node-header">
+      <div class="node-name-container">
+        <span class="node-name">${node.addr}</span>
+      </div>
+      <span class="node-status ${online ? 'online' : 'offline'}">
+        ${online ? 'Online' : 'Offline'}
+      </span>
+    </div>
+
+    <div class="node-info-grid">
+      <div class="info-row">
+        <span class="info-label">Address:</span>
         <span class="info-value">${node.addr}</span>
       </div>
-      <div class="info-item">
-        <span class="info-label">State</span>
-        <span class="info-value">${node.onoff ? 'ON' : 'OFF'}</span>
+      <div class="info-row">
+        <span class="info-label">Features:</span>
+        <span class="info-value">${features.length ? features.join(', ') : 'unknown'}</span>
       </div>
-      <div class="info-item">
-        <span class="info-label">Last seen</span>
+      <div class="info-row">
+        <span class="info-label">Last seen:</span>
         <span class="info-value">${ageSec}s ago</span>
       </div>
     </div>
 
-    <div class="controls">
-      <button class="btn btn-primary btn-small" onclick="sendExternalNodeCommand('${node.addr}', true)">On</button>
-      <button class="btn btn-warning btn-small" onclick="sendExternalNodeCommand('${node.addr}', false)">Off</button>
-    </div>
+    ${controls}
   `;
 
   return el;
@@ -783,6 +824,38 @@ function sendExternalNodeCommand(addr, onoff) {
     })
     .catch(err => {
       console.error('Failed to send external node command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function sendExternalLevelCommand(addr, level) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, level: parseInt(level, 10) })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external level command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function sendExternalLightnessCommand(addr, lightness) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, lightness: parseInt(lightness, 10) })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external lightness command:', err);
       showToast('Failed to send command', 'error');
     });
 }
@@ -1047,9 +1120,6 @@ function loadMeshKeys() {
       const appKeyEl = document.getElementById("mesh-app-key");
       if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
       if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
-
-      const editSection = document.getElementById("mesh-keys-edit");
-      if (editSection) editSection.style.display = data.mode === 'existing' ? 'block' : 'none';
     })
     .catch(err => {
       console.error('Failed to load mesh keys:', err);
@@ -1057,33 +1127,6 @@ function loadMeshKeys() {
       const appKeyEl = document.getElementById("mesh-app-key");
       if (netKeyEl) netKeyEl.textContent = 'Unavailable';
       if (appKeyEl) appKeyEl.textContent = 'Unavailable';
-    });
-}
-
-function saveMeshJoinKeys() {
-  const netKey = document.getElementById("mesh-net-key-input").value.trim().toLowerCase();
-  const appKey = document.getElementById("mesh-app-key-input").value.trim().toLowerCase();
-
-  if (!/^[0-9a-f]{32}$/.test(netKey) || !/^[0-9a-f]{32}$/.test(appKey)) {
-    showToast('NetKey and AppKey must each be 32 hex characters', 'error');
-    return;
-  }
-
-  fetch("/api/mesh/keys", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ net_key: netKey, app_key: appKey })
-  })
-    .then(res => {
-      if (!res.ok) return res.text().then(t => { throw new Error(t); });
-      showToast('Keys applied', 'success');
-      document.getElementById("mesh-net-key-input").value = '';
-      document.getElementById("mesh-app-key-input").value = '';
-      loadMeshKeys();
-    })
-    .catch(err => {
-      console.error('Failed to apply mesh keys:', err);
-      showToast('Failed to apply keys: ' + err.message, 'error');
     });
 }
 
