@@ -1,7 +1,4 @@
 // Global state
-let throttleTimeout = null;
-let lastSend = 0;
-let pending = {};
 let logAutoScroll = true;
 let currentSection = 'bridge';
 let otaApiKey = null; // Store OTA API key
@@ -288,41 +285,99 @@ function toggleEmptyState(containerId, emptyStateId, hasItems) {
   }
 }
 
-// Lightness control functions
-function onSliderInput(uuid, el) {
-  const output = el.parentElement.querySelector('output');
-  if (output) {
-    output.value = el.value;
-  }
-  throttleSendLightness(uuid, el.value);
-}
+// --- Node control helpers -------------------------------------------------
 
-function throttleSendLightness(uuid, value) {
-  pending = { uuid, value };
-  if (throttleTimeout) return;
-
-  const wait = Math.max(0, 200 - (Date.now() - lastSend));
-  throttleTimeout = setTimeout(() => {
-    sendLightness(pending.uuid, pending.value);
-    lastSend = Date.now();
-    throttleTimeout = null;
+// One shared 200 ms throttle, keyed per control so dragging one slider does not
+// starve another. Only the most recent value per key is sent.
+const _throttle = {};
+function throttlePost(key, fn) {
+  const st = _throttle[key] || (_throttle[key] = { timer: null, last: 0, pending: null });
+  st.pending = fn;
+  if (st.timer) return;
+  const wait = Math.max(0, 200 - (Date.now() - st.last));
+  st.timer = setTimeout(() => {
+    const p = st.pending;
+    st.pending = null;
+    st.last = Date.now();
+    st.timer = null;
+    if (p) p();
   }, wait);
 }
 
-function sendLightness(uuid, value) {
-  fetch("/node/set_lightness", {
+function postNode(path, body) {
+  return fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `uuid=${encodeURIComponent(uuid)}&lightness=${encodeURIComponent(value)}`
-  }).then(response => {
-    if (response.ok) {
-      showToast(`Lightness set to ${value}`, 'success');
-    } else {
-      showToast('Failed to set lightness', 'error');
-    }
-  }).catch(err => {
-    showToast('Network error setting lightness', 'error');
+    body
   });
+}
+
+// Map a value from one range to another (integer result).
+function rangeMap(v, lo, hi, olo, ohi) {
+  return hi > lo ? Math.round((v - lo) * (ohi - olo) / (hi - lo) + olo) : olo;
+}
+
+// Lightness / brightness
+function onSliderInput(uuid, el) {
+  const output = el.parentElement.querySelector('output');
+  if (output) output.value = el.value;
+  throttlePost('lightness-' + uuid, () => sendLightness(uuid, el.value));
+}
+
+function sendLightness(uuid, value) {
+  postNode("/node/set_lightness", `uuid=${encodeURIComponent(uuid)}&lightness=${encodeURIComponent(value)}`)
+    .then(response => {
+      if (!response.ok) showToast('Failed to set lightness', 'error');
+    })
+    .catch(() => showToast('Network error setting lightness', 'error'));
+}
+
+// Collapsible per-node control panel
+function toggleNodeControls(btn) {
+  const panel = btn.closest('.node').querySelector('.node-controls');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  btn.classList.toggle('active', !panel.hidden);
+}
+
+// Power (Generic OnOff)
+function setNodeOnoff(uuid, on) {
+  postNode('/node/set_onoff', `uuid=${encodeURIComponent(uuid)}&onoff=${on ? 1 : 0}`)
+    .then(r => {
+      if (!r.ok) showToast('Failed to set power', 'error');
+    })
+    .catch(() => showToast('Network error setting power', 'error'));
+}
+
+// Colour (Light HSL) — the card carries H (0-360) and S (0-100) sliders; the
+// lightness sent is whatever the card's brightness slider currently shows.
+function onHslInput(uuid, el) {
+  const nodeEl = el.closest('.node');
+  const panel = nodeEl.querySelector('.node-controls');
+  const h = +panel.querySelector('.hsl-h').value;
+  const s = +panel.querySelector('.hsl-s').value;
+  const brightEl = nodeEl.querySelector('.brightness-slider');
+  const l = brightEl ? +brightEl.value : (+nodeEl.dataset.maxLightness || 65535);
+
+  const swatch = panel.querySelector('.hsl-swatch');
+  if (swatch) swatch.style.background = `hsl(${h}, ${s}%, 50%)`;
+  const out = el.parentElement.querySelector('output');
+  if (out) out.value = el.classList.contains('hsl-h') ? `${h}°` : `${s}%`;
+
+  throttlePost('hsl-' + uuid, () =>
+    postNode('/node/set_hsl', `uuid=${encodeURIComponent(uuid)}&h=${h}&s=${s}&l=${l}`)
+      .then(r => { if (!r.ok) showToast('Failed to set colour', 'error'); })
+      .catch(() => showToast('Network error setting colour', 'error')));
+}
+
+// Colour temperature (Light CTL)
+function onTempInput(uuid, el) {
+  const out = el.parentElement.querySelector('output');
+  if (out) out.value = el.value + ' K';
+  throttlePost('temp-' + uuid, () =>
+    postNode('/node/set_temperature', `uuid=${encodeURIComponent(uuid)}&kelvin=${el.value}`)
+      .then(r => { if (!r.ok) showToast('Failed to set temperature', 'error'); })
+      .catch(() => showToast('Network error setting temperature', 'error')));
 }
 
 // Node management functions
@@ -578,7 +633,25 @@ function createNodeElement(node) {
   const el = document.createElement("div");
   el.className = "node";
   el.dataset.uuid = node.uuid;
-  
+
+  // Feature bitmask (mirrors node_supported_features_t in ble_mesh_control.h).
+  const F_ONOFF = 1, F_LIGHTNESS = 2, F_HSL = 4, F_CTL = 8;
+  const f = node.features || 0;
+  const hasLightness = f === 0 || (f & (F_LIGHTNESS | F_CTL));
+  const hasOnoff = f === 0 || (f & F_ONOFF);
+  const hasHsl = !!(f & F_HSL);
+  const hasCtl = !!(f & F_CTL);
+  const hasControls = hasOnoff || hasHsl || hasCtl;
+
+  const maxL = node.max_lightness || 65535;
+  el.dataset.maxLightness = maxL;
+
+  const hue360 = rangeMap(node.hsl_h || 0, node.min_hue || 0, node.max_hue || 65535, 0, 360);
+  const sat100 = rangeMap(node.hsl_s || 0, node.min_saturation || 0, node.max_saturation || 65535, 0, 100);
+  const tMin = (node.min_temp && node.min_temp < node.max_temp) ? node.min_temp : 2000;
+  const tMax = (node.max_temp && node.max_temp > tMin && node.max_temp < 20000) ? node.max_temp : 6500;
+  const tCur = node.curr_temp || tMin;
+
   el.innerHTML = `
     <div class="node-header">
       <div class="node-name-container">
@@ -593,7 +666,7 @@ function createNodeElement(node) {
         ${node.unicast ? 'Online' : 'Offline'}
       </span>
     </div>
-    
+
     <div class="node-info-grid">
       <div class="info-row">
         <span class="info-label">UUID:</span>
@@ -608,20 +681,24 @@ function createNodeElement(node) {
         <span class="info-value">${node.company}</span>
       </div>` : ''}
     </div>
-    
-    <div class="lightness-control">
-      <span>💡</span>
-      <input type="range" min="0" max="${node.max_lightness || 65535}" step="500" value="${node.hsl_l || 0}"
-        onchange="onSliderInput('${node.uuid}', this)">
+
+    <div class="lightness-control slider-row"${hasLightness ? '' : ' hidden'}>
+      <span class="slider-tag">💡</span>
+      <input type="range" class="brightness-slider" min="0" max="${maxL}" step="500" value="${node.hsl_l || 0}"
+        oninput="onSliderInput('${node.uuid}', this)">
       <output>${node.hsl_l || 0}</output>
     </div>
-    
+
     <div class="controls">
-      <button class="btn btn-primary btn-small" onclick="sendMqttStatus('${node.uuid}')">
+      ${hasControls ? `<button class="btn btn-secondary btn-small node-controls-toggle" onclick="toggleNodeControls(this)">
+        <span class="icon">🎛️</span>
+        Controls
+      </button>` : ''}
+      <button class="btn btn-secondary btn-small" onclick="sendMqttStatus('${node.uuid}')">
         <span class="icon">📊</span>
         MQTT Status
       </button>
-      <button class="btn btn-primary btn-small" onclick="sendMqttDiscovery('${node.uuid}')">
+      <button class="btn btn-secondary btn-small" onclick="sendMqttDiscovery('${node.uuid}')">
         <span class="icon">📡</span>
         MQTT Discovery
       </button>
@@ -630,8 +707,41 @@ function createNodeElement(node) {
         Unprovision
       </button>
     </div>
+
+    ${hasControls ? `
+    <div class="node-controls" hidden>
+      ${hasOnoff ? `
+      <div class="control-row">
+        <span class="control-label">Power</span>
+        <label class="toggle-switch">
+          <input type="checkbox" ${node.onoff ? 'checked' : ''} onchange="setNodeOnoff('${node.uuid}', this.checked)">
+          <span class="toggle-track"></span>
+        </label>
+      </div>` : ''}
+      ${hasHsl ? `
+      <div class="control-row">
+        <span class="control-label">Color</span>
+        <span class="hsl-swatch" style="background: hsl(${hue360}, ${sat100}%, 50%)"></span>
+      </div>
+      <div class="slider-row">
+        <span class="slider-tag">H</span>
+        <input type="range" class="hsl-h hue-slider" min="0" max="360" value="${hue360}" oninput="onHslInput('${node.uuid}', this)">
+        <output>${hue360}°</output>
+      </div>
+      <div class="slider-row">
+        <span class="slider-tag">S</span>
+        <input type="range" class="hsl-s" min="0" max="100" value="${sat100}" oninput="onHslInput('${node.uuid}', this)">
+        <output>${sat100}%</output>
+      </div>` : ''}
+      ${hasCtl ? `
+      <div class="slider-row">
+        <span class="slider-tag">🌡</span>
+        <input type="range" class="temp-slider" min="${tMin}" max="${tMax}" step="50" value="${tCur}" oninput="onTempInput('${node.uuid}', this)">
+        <output>${tCur} K</output>
+      </div>` : ''}
+    </div>` : ''}
   `;
-  
+
   return el;
 }
 
@@ -895,6 +1005,12 @@ function updateVersionInfo(data) {
   const firmwareVersionEl = document.getElementById("firmware-version");
   if (firmwareVersionEl && data.version) {
     firmwareVersionEl.textContent = data.version;
+  }
+
+  // Show version next to the header title
+  const appVersionEl = document.getElementById("app-version");
+  if (appVersionEl && data.version) {
+    appVersionEl.textContent = `(v${data.version})`;
   }
 
   // Update git version
@@ -1565,46 +1681,34 @@ function formatFileSize(bytes) {
 // Firmware upload initialization moved to main DOMContentLoaded handler above
 
 // Theme Toggle Functions
-function toggleTheme() {
+// The dashboard is dark by default (bare :root). Light mode is opt-in and
+// marked with data-theme="light" on <html>.
+function applyTheme(theme) {
   const html = document.documentElement;
-  const currentTheme = html.getAttribute('data-theme');
-  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  
-  // Apply theme
-  if (newTheme === 'dark') {
-    html.setAttribute('data-theme', 'dark');
+  if (theme === 'light') {
+    html.setAttribute('data-theme', 'light');
   } else {
     html.removeAttribute('data-theme');
   }
-  
-  // Update icon
-  updateThemeIcon(newTheme);
-  
-  // Save preference
+  updateThemeIcon(theme);
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const newTheme = isLight ? 'dark' : 'light';
+  applyTheme(newTheme);
   localStorage.setItem('theme', newTheme);
 }
 
 function updateThemeIcon(theme) {
   const icon = document.getElementById('theme-icon');
   if (icon) {
-    icon.textContent = theme === 'dark' ? '🌙' : '☀️';
+    icon.textContent = theme === 'light' ? '☀️' : '🌙';
   }
 }
 
 function initializeTheme() {
-  // Check for saved theme preference or default to 'light'
-  const savedTheme = localStorage.getItem('theme') || 'light';
-  
-  // Apply saved theme
-  const html = document.documentElement;
-  if (savedTheme === 'dark') {
-    html.setAttribute('data-theme', 'dark');
-  } else {
-    html.removeAttribute('data-theme');
-  }
-  
-  // Update icon
-  updateThemeIcon(savedTheme);
+  applyTheme(localStorage.getItem('theme') || 'dark');
 }
 
 // WiFi Reset Function

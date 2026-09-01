@@ -31,9 +31,10 @@ struct ble2mqtt_unprovisioned_device
     int8_t rssi;                        /*!< RSSI of the received advertising packet (1 byte) */
     // 1 byte padding to align to 4-byte boundary
     // Total: 16 + 4 + 6 + 2 + 3 + 1 padding = 32 bytes (vs 36 bytes)
+    int64_t last_seen_us;               /*!< esp_timer_get_time() when this device's beacon was last seen */
 };
 
-static_assert(sizeof(ble2mqtt_unprovisioned_device) <= 32, "ble2mqtt_unprovisioned_device has unexpected padding");
+static_assert(sizeof(ble2mqtt_unprovisioned_device) <= 40, "ble2mqtt_unprovisioned_device has unexpected padding");
 
 esp_err_t prov_complete(int node_idx, const esp_ble_mesh_octet16_t uuid,
                         uint16_t unicast, uint8_t elem_num, uint16_t net_idx);

@@ -355,6 +355,114 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Parse an application/x-www-form-urlencoded body into `body`, extract the `uuid=` field
+// and resolve it to a provisioned node. On any failure it sends the HTTP error and returns
+// nullptr; callers then parse their own remaining fields out of `body`.
+static std::shared_ptr<bm2mqtt_node_info> parse_node_from_form(httpd_req_t *req, char *body, size_t body_sz)
+{
+    int recv_len = httpd_req_recv(req, body, body_sz - 1);
+    if (recv_len <= 0 || (size_t)recv_len >= body_sz)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return nullptr;
+    }
+    body[recv_len] = '\0';
+
+    const char *p = strstr(body, "uuid=");
+    char uuid_str[33] = {0};
+    if (!p || sscanf(p, "uuid=%32[0-9a-fA-F]", uuid_str) != 1 || strlen(uuid_str) != 32)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid uuid");
+        return nullptr;
+    }
+
+    uint8_t uuid[16] = {0};
+    for (int i = 0; i < 16; i++)
+        sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
+
+    auto node_info = node_manager().get_node(device_uuid128{uuid});
+    if (!node_info || node_info->unicast == ESP_BLE_MESH_ADDR_UNASSIGNED)
+    {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Node not found");
+        return nullptr;
+    }
+    return node_info;
+}
+
+esp_err_t set_onoff_handler(httpd_req_t *req)
+{
+    char body[256] = {0};
+    auto node_info = parse_node_from_form(req, body, sizeof(body));
+    if (!node_info)
+        return ESP_FAIL;
+
+    const char *p = strstr(body, "onoff=");
+    int onoff = -1;
+    if (!p || sscanf(p, "onoff=%d", &onoff) != 1 || (onoff != 0 && onoff != 1))
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid onoff");
+        return ESP_FAIL;
+    }
+
+    node_info->onoff = (uint8_t)onoff;
+    ble_mesh_gen_onoff_set(node_info);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t set_hsl_handler(httpd_req_t *req)
+{
+    char body[256] = {0};
+    auto node_info = parse_node_from_form(req, body, sizeof(body));
+    if (!node_info)
+        return ESP_FAIL;
+
+    const char *ph = strstr(body, "h=");
+    const char *ps = strstr(body, "s=");
+    const char *pl = strstr(body, "l=");
+    int h = -1, s = -1, l = -1;
+    if (!ph || !ps || !pl ||
+        sscanf(ph, "h=%d", &h) != 1 || sscanf(ps, "s=%d", &s) != 1 || sscanf(pl, "l=%d", &l) != 1 ||
+        h < 0 || h > 360 || s < 0 || s > 100 || l < 0 || l > 65535)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid hsl params");
+        return ESP_FAIL;
+    }
+
+    // Same HA-range -> node-range mapping as the MQTT command path (mqtt_control.cpp).
+    node_info->hsl_h = (uint16_t)map(h, 0, 360, node_info->min_hue, node_info->max_hue);
+    node_info->hsl_s = (uint16_t)map(s, 0, 100, node_info->min_saturation, node_info->max_saturation);
+    node_info->hsl_l = (uint16_t)(l < (int)node_info->max_lightness ? l : (int)node_info->max_lightness);
+    ble_mesh_light_hsl_set(node_info);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+esp_err_t set_temperature_handler(httpd_req_t *req)
+{
+    char body[256] = {0};
+    auto node_info = parse_node_from_form(req, body, sizeof(body));
+    if (!node_info)
+        return ESP_FAIL;
+
+    const char *p = strstr(body, "kelvin=");
+    int kelvin = -1;
+    if (!p || sscanf(p, "kelvin=%d", &kelvin) != 1 || kelvin <= 0 || kelvin > 65535)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid kelvin");
+        return ESP_FAIL;
+    }
+
+    if (kelvin < (int)node_info->min_temp)
+        kelvin = (int)node_info->min_temp;
+    if (kelvin > (int)node_info->max_temp)
+        kelvin = (int)node_info->max_temp;
+    node_info->curr_temp = (uint16_t)kelvin;
+    ble_mesh_ctl_temperature_set(node_info);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 esp_err_t system_info_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
@@ -819,10 +927,16 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         char unicast_str[6];
         sprintf(unicast_str, "%04X", node->unicast_addr);
 
-        // Get company name and lightness from node manager
+        // Get company name and light state from node manager
         const char *company_name = "Unknown";
-        uint16_t hsl_l = 0;
-        uint16_t max_lightness = 65535;
+        const char *color_mode = "brightness";
+        uint16_t features = 0;
+        uint8_t onoff = 0;
+        uint16_t hsl_h = 0, hsl_s = 0, hsl_l = 0;
+        uint16_t min_hue = 0, max_hue = 65535;
+        uint16_t min_saturation = 0, max_saturation = 65535;
+        uint16_t curr_temp = 0, min_temp = 0, max_temp = 65535;
+        uint16_t min_lightness = 0, max_lightness = 65535;
         if (auto node_info = node_manager().get_node(device_uuid128{node->dev_uuid}))
         {
             if (node_info->company_id != 0)
@@ -831,14 +945,37 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
                 if (!company_name)
                     company_name = "Unknown";
             }
+            color_mode = get_color_mode_string(node_info->color_mode);
+            features = node_info->features;
+            onoff = node_info->onoff;
+            hsl_h = node_info->hsl_h;
+            hsl_s = node_info->hsl_s;
             hsl_l = node_info->hsl_l;
+            min_hue = node_info->min_hue;
+            max_hue = node_info->max_hue;
+            min_saturation = node_info->min_saturation;
+            max_saturation = node_info->max_saturation;
+            curr_temp = node_info->curr_temp;
+            min_temp = node_info->min_temp;
+            max_temp = node_info->max_temp;
+            min_lightness = node_info->min_lightness;
             max_lightness = node_info->max_lightness;
         }
 
-        char buf[512];
+        char buf[768];
         snprintf(buf, sizeof(buf),
-                 "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\", \"hsl_l\": %u, \"max_lightness\": %u }",
-                 first_node ? "" : ",", uuid_str, node->name, unicast_str, company_name, hsl_l, max_lightness);
+                 "%s{ \"uuid\": \"%s\", \"name\": \"%s\", \"unicast\": \"%s\", \"company\": \"%s\", "
+                 "\"features\": %u, \"color_mode\": \"%s\", \"onoff\": %u, "
+                 "\"hsl_h\": %u, \"hsl_s\": %u, \"hsl_l\": %u, "
+                 "\"min_hue\": %u, \"max_hue\": %u, \"min_saturation\": %u, \"max_saturation\": %u, "
+                 "\"curr_temp\": %u, \"min_temp\": %u, \"max_temp\": %u, "
+                 "\"min_lightness\": %u, \"max_lightness\": %u }",
+                 first_node ? "" : ",", uuid_str, node->name, unicast_str, company_name,
+                 features, color_mode, onoff,
+                 hsl_h, hsl_s, hsl_l,
+                 min_hue, max_hue, min_saturation, max_saturation,
+                 curr_temp, min_temp, max_temp,
+                 min_lightness, max_lightness);
         httpd_resp_sendstr_chunk(req, buf);
         first_node = false;
     }
@@ -1023,6 +1160,18 @@ esp_err_t node_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/node/set_lightness"))
     {
         return set_lightness_handler(req);
+    }
+    else if (strstr(req->uri, "/node/set_onoff"))
+    {
+        return set_onoff_handler(req);
+    }
+    else if (strstr(req->uri, "/node/set_hsl"))
+    {
+        return set_hsl_handler(req);
+    }
+    else if (strstr(req->uri, "/node/set_temperature"))
+    {
+        return set_temperature_handler(req);
     }
     else if (strstr(req->uri, "/node/rename"))
     {
