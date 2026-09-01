@@ -221,6 +221,52 @@ function finishEditing(container, restore) {
 // Utility functions
 function showToast(message, type = 'info') {
   console.log(`[${type.toUpperCase()}] ${message}`);
+
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg"></span>`;
+  toast.querySelector('.toast-msg').textContent = message;
+  container.appendChild(toast);
+
+  // enter
+  requestAnimationFrame(() => toast.classList.add('show'));
+
+  const remove = () => {
+    toast.classList.remove('show');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    setTimeout(() => toast.remove(), 400);
+  };
+  toast.addEventListener('click', remove);
+  setTimeout(remove, type === 'error' ? 6000 : 3500);
+}
+
+// Collapsible log dock
+function toggleLogDock(forceOpen) {
+  const dock = document.getElementById('log-dock');
+  if (!dock) return;
+  const collapsed = forceOpen === true ? false
+    : forceOpen === false ? true
+    : !dock.classList.contains('collapsed');
+  dock.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem('logDockCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+
+  if (!collapsed) {
+    const out = document.getElementById('log-output');
+    const auto = document.getElementById('auto-scroll');
+    if (out && (!auto || auto.checked)) out.scrollTop = out.scrollHeight;
+  }
+}
+
+function initLogDock() {
+  const dock = document.getElementById('log-dock');
+  if (!dock) return;
+  let collapsed = true;
+  try { collapsed = localStorage.getItem('logDockCollapsed') !== '0'; } catch (e) {}
+  dock.classList.toggle('collapsed', collapsed);
 }
 
 function formatUptime(uptimeSeconds) {
@@ -265,9 +311,12 @@ function updateBridgeStatus(systemData) {
 
 function updateNodeCount(count) {
   const counter = document.getElementById("node-count");
-  if (counter) {
-    counter.textContent = `${count} node${count !== 1 ? 's' : ''}`;
-  }
+  if (counter) counter.textContent = `${count} provisioned`;
+}
+
+function updateDeviceCount(count) {
+  const counter = document.getElementById("device-count");
+  if (counter) counter.textContent = `${count} unprovisioned`;
 }
 
 function toggleEmptyState(containerId, emptyStateId, hasItems) {
@@ -608,15 +657,45 @@ function resetWiFi() {
   }
 }
 
+function loadNodes() {
+  return fetch("/nodes.json")
+    .then(res => res.json())
+    .then(data => {
+      const nodesContainer = document.getElementById("nodes");
+      const unprovisionedContainer = document.getElementById("unprovisioned");
+      if (!nodesContainer || !unprovisionedContainer) return;
+
+      nodesContainer.innerHTML = '';
+      unprovisionedContainer.innerHTML = '';
+
+      const provisioned = data.provisioned || [];
+      const unprovisioned = data.unprovisioned || [];
+
+      provisioned.forEach(node => nodesContainer.appendChild(createNodeElement(node)));
+      toggleEmptyState('nodes', 'no-nodes', provisioned.length > 0);
+      updateNodeCount(provisioned.length);
+
+      unprovisioned.forEach(device => unprovisionedContainer.appendChild(createDeviceElement(device)));
+      toggleEmptyState('unprovisioned', 'no-devices', unprovisioned.length > 0);
+      updateDeviceCount(unprovisioned.length);
+    })
+    .catch(err => {
+      console.error('Failed to load nodes:', err);
+      showToast('Failed to load device data', 'error');
+    });
+}
+
 function refreshDevices() {
-  const button = event.target;
-  const originalText = button.innerHTML;
+  const button = event.target.closest('button');
+  const originalHtml = button.innerHTML;
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Refreshing...';
-  
-  setTimeout(() => {
-    location.reload();
-  }, 1000);
+
+  loadNodes().finally(() => {
+    button.disabled = false;
+    button.innerHTML = originalHtml;
+    showToast('Device list refreshed', 'info');
+  });
 }
 
 // Log management functions
@@ -1195,7 +1274,10 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Initialize theme
   initializeTheme();
-  
+
+  // Restore log dock collapsed/expanded state
+  initLogDock();
+
   // Initialize navigation
   initNavigation();
   
@@ -1227,43 +1309,7 @@ document.addEventListener("DOMContentLoaded", function () {
   setInterval(loadMqttStatus, 10000);
   
   // Load nodes data
-  fetch("/nodes.json")
-    .then(res => res.json())
-    .then(data => {
-      const nodesContainer = document.getElementById("nodes");
-      const unprovisionedContainer = document.getElementById("unprovisioned");
-      
-      // Clear containers
-      nodesContainer.innerHTML = '';
-      unprovisionedContainer.innerHTML = '';
-      
-      // Render provisioned nodes
-      if (data.provisioned && data.provisioned.length > 0) {
-        data.provisioned.forEach(node => {
-          nodesContainer.appendChild(createNodeElement(node));
-        });
-        toggleEmptyState('nodes', 'no-nodes', true);
-      } else {
-        toggleEmptyState('nodes', 'no-nodes', false);
-      }
-      
-      // Update node count
-      updateNodeCount(data.provisioned ? data.provisioned.length : 0);
-      
-      // Render unprovisioned devices
-      if (data.unprovisioned && data.unprovisioned.length > 0) {
-        data.unprovisioned.forEach(device => {
-          unprovisionedContainer.appendChild(createDeviceElement(device));
-        });
-        toggleEmptyState('unprovisioned', 'no-devices', true);
-      } else {
-        toggleEmptyState('unprovisioned', 'no-devices', false);
-      }
-    })
-    .catch(err => {
-      console.error('Failed to load nodes:', err);
-      showToast('Failed to load device data', 'error');
-    });
+  loadNodes();
 
   // Load console commands
   fetch("/api/console_commands")

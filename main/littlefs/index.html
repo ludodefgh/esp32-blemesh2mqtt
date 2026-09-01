@@ -42,7 +42,7 @@
       </div>
       <div class="mobile-menu-item" data-section="ble-mesh">
         <span class="menu-icon mesh-icon">🌐</span>
-        <span class="menu-text">BLE Mesh</span>
+        <span class="menu-text">Mesh</span>
       </div>
       <div class="mobile-menu-item" data-section="firmware">
         <span class="menu-icon firmware-icon">💿</span>
@@ -64,7 +64,7 @@
         </div>
         <div class="menu-item" data-section="ble-mesh">
           <span class="menu-icon mesh-icon">🌐</span>
-          <span class="menu-text">BLE Mesh</span>
+          <span class="menu-text">Mesh</span>
         </div>
         <div class="menu-item" data-section="firmware">
           <span class="menu-icon firmware-icon">💿</span>
@@ -78,21 +78,6 @@
     </nav>
 
     <main class="main-content">
-      <!-- System Logs - Always at the top -->
-      <section class="card log-section">
-        <h2>System Logs</h2>
-        <div class="log-container">
-          <div id="log-output" class="log-output"></div>
-          <div class="log-controls">
-            <button class="btn btn-secondary" onclick="clearLogs()">Clear</button>
-            <label class="checkbox-label">
-              <input type="checkbox" id="auto-scroll" checked>
-              Auto-scroll
-            </label>
-          </div>
-        </div>
-      </section>
-
       <!-- Bridge Section -->
       <div class="section-content active" id="bridge-section">
         <div class="section-grid">
@@ -301,32 +286,33 @@
         </div>
       </div>
 
-      <!-- BLE Mesh Section -->
+      <!-- Mesh Section -->
       <div class="section-content" id="ble-mesh-section">
-        <div class="section-grid">
-          <!-- Provisioned Nodes -->
-          <section class="card nodes-section">
-            <div class="section-header">
-              <h2>Provisioned Nodes</h2>
-              <div class="node-count" id="node-count">0 nodes</div>
-            </div>
-            <div id="nodes" class="nodes-grid"></div>
-            <div id="no-nodes" class="empty-state">No nodes provisioned yet</div>
-          </section>
-
-          <!-- Unprovisioned Devices -->
-          <section class="card devices-section">
-            <div class="section-header">
-              <h2>Unprovisioned Devices</h2>
-              <button class="btn btn-primary" onclick="refreshDevices()">
+        <section class="card mesh-section">
+          <div class="section-header">
+            <h2>Mesh</h2>
+            <div class="mesh-header-right">
+              <span class="mesh-count" id="node-count">0 provisioned</span>
+              <span class="mesh-count" id="device-count">0 unprovisioned</span>
+              <button class="btn btn-secondary btn-small" onclick="refreshDevices()">
                 <span class="icon">🔄</span>
                 Refresh
               </button>
             </div>
+          </div>
+
+          <div class="mesh-group">
+            <h3 class="mesh-group-title">Provisioned nodes</h3>
+            <div id="nodes" class="nodes-grid"></div>
+            <div id="no-nodes" class="empty-state">No nodes provisioned yet</div>
+          </div>
+
+          <div class="mesh-group">
+            <h3 class="mesh-group-title">Unprovisioned devices</h3>
             <div id="unprovisioned" class="devices-grid"></div>
             <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
 
       <!-- Firmware Section -->
@@ -444,6 +430,25 @@
   </div>
 
   <div class="sidebar-overlay"></div>
+
+  <!-- Collapsible system-log dock, pinned to the bottom of the viewport -->
+  <div class="log-dock collapsed" id="log-dock">
+    <div class="log-dock-bar" onclick="toggleLogDock()">
+      <span class="log-dock-chevron">▸</span>
+      <span class="log-dock-title">System Logs</span>
+      <span class="log-dock-spacer"></span>
+      <span class="log-dock-controls" onclick="event.stopPropagation()">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-scroll" checked>
+          Auto-scroll
+        </label>
+        <button class="btn btn-secondary btn-small" onclick="clearLogs()">Clear</button>
+      </span>
+    </div>
+    <div id="log-output" class="log-output"></div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
 
   <script src="/js/main.js"></script>
 

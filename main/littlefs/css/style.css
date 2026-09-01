@@ -336,11 +336,11 @@ h1, h2, h3 { color: var(--text); }
 .main-content {
   flex: 1;
   padding: 1.5rem;
+  /* clear the collapsed log dock pinned at the bottom */
+  padding-bottom: calc(1.5rem + 40px);
   overflow-y: auto;
   min-width: 0;
 }
-
-.log-section { margin-bottom: 1.5rem; }
 
 .section-content { display: none; }
 .section-content.active { display: block; }
@@ -414,26 +414,67 @@ h1, h2, h3 { color: var(--text); }
 
 .memory-value { color: var(--text); font-weight: 600; font-family: var(--mono); }
 
-/* ========================= Logs ========================= */
+/* ========================= Log dock ========================= */
 
-.log-container { display: flex; flex-direction: column; gap: 0.85rem; }
+.log-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-strong);
+  box-shadow: 0 -8px 24px -12px rgb(0 0 0 / 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+.log-dock-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.9rem;
+  height: 40px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.78rem;
+}
+
+.log-dock-bar:hover { background: var(--bg-elev); }
+
+.log-dock-chevron {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+.log-dock:not(.collapsed) .log-dock-chevron { transform: rotate(90deg); }
+
+.log-dock-title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.log-dock-spacer { flex: 1; }
+
+.log-dock-controls { display: flex; align-items: center; gap: 0.75rem; }
+
+.log-dock.collapsed .log-output { display: none; }
 
 .log-output {
   background: var(--bg-sunken);
   color: var(--text-secondary);
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.45;
-  padding: 0.85rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  max-height: 300px;
-  min-height: 150px;
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--border);
+  height: 40vh;
+  min-height: 160px;
   overflow-y: auto;
   white-space: pre-wrap;
 }
-
-.log-controls { display: flex; justify-content: space-between; align-items: center; }
 
 .checkbox-label {
   display: flex;
@@ -580,9 +621,50 @@ h1, h2, h3 { color: var(--text); }
   gap: 0.75rem;
 }
 
+/* ========================= Mesh view ========================= */
+
+.mesh-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mesh-count {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.mesh-group + .mesh-group {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.mesh-group-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mesh-group .empty-state { padding: 1rem; }
+
 /* ========================= Nodes / devices ========================= */
 
-.nodes-grid, .devices-grid { display: grid; gap: 0.9rem; }
+.nodes-grid, .devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.9rem;
+}
 
 .node, .device {
   background: var(--bg-elev);
@@ -802,6 +884,53 @@ input[type="range"].hue-slider {
   display: none;
 }
 .empty-state.show { display: block; }
+
+/* ========================= Toasts ========================= */
+
+.toast-container {
+  position: fixed;
+  right: 1rem;
+  bottom: calc(40px + 1rem); /* clear the log dock bar */
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(360px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.83rem;
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateX(12px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast.show { opacity: 1; transform: translateX(0); }
+
+.toast-icon { font-weight: 700; line-height: 1.4; }
+.toast-msg { flex: 1; word-break: break-word; }
+
+.toast-success { border-left-color: var(--success); }
+.toast-success .toast-icon { color: var(--success); }
+.toast-error { border-left-color: var(--danger); }
+.toast-error .toast-icon { color: var(--danger); }
+.toast-warning { border-left-color: var(--warning); }
+.toast-warning .toast-icon { color: var(--warning); }
+.toast-info { border-left-color: var(--accent); }
+.toast-info .toast-icon { color: var(--accent); }
 
 /* ========================= Forms ========================= */
 
@@ -1108,12 +1237,14 @@ input[type="range"].hue-slider {
   .menu-toggle { display: flex; }
   .mobile-menu { display: block; }
   .sidebar, .sidebar-overlay { display: none; }
-  .main-content { padding: 1rem; width: 100%; }
+  .main-content { padding: 1rem; padding-bottom: calc(1rem + 40px); width: 100%; }
   .header { padding: 0.5rem 0.85rem; flex-wrap: wrap; }
   .header-left { flex: 1; min-width: 0; }
   .section-grid { grid-template-columns: 1fr; }
+  .nodes-grid, .devices-grid { grid-template-columns: 1fr; }
   .node-info { grid-template-columns: 1fr; }
   .controls-grid { grid-template-columns: 1fr; }
+  .mesh-header-right { width: 100%; }
   .section-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }
   .memory-info { justify-content: center; }
   .form-row { flex-direction: column; gap: 0.9rem; align-items: stretch; }
@@ -1129,7 +1260,9 @@ input[type="range"].hue-slider {
 @media (max-width: 480px) {
   .header h1 { font-size: 0.92rem; }
   .app-version { font-size: 0.72rem; }
-  .main-content { padding: 0.75rem; }
+  .main-content { padding: 0.75rem; padding-bottom: calc(0.75rem + 40px); }
+  .log-dock-controls .checkbox-label { display: none; }
+  .toast-container { left: 1rem; right: 1rem; max-width: none; }
   .card { padding: 1rem; }
   .mobile-menu-content { top: 48px; }
   .btn { font-size: 0.78rem; padding: 0.4rem 0.65rem; }
