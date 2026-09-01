@@ -429,6 +429,17 @@ h1, h2, h3 { color: var(--text); }
   flex-direction: column;
 }
 
+.log-dock-resizer {
+  height: 7px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.log-dock:not(.collapsed) .log-dock-resizer:hover,
+.log-dock-resizer:active { background: var(--accent-line); }
+.log-dock.collapsed .log-dock-resizer { display: none; }
+
 .log-dock-bar {
   display: flex;
   align-items: center;
@@ -471,7 +482,7 @@ h1, h2, h3 { color: var(--text); }
   padding: 0.7rem 0.9rem;
   border-top: 1px solid var(--border);
   height: 40vh;
-  min-height: 160px;
+  min-height: 140px;
   overflow-y: auto;
   white-space: pre-wrap;
 }

@@ -267,6 +267,45 @@ function initLogDock() {
   let collapsed = true;
   try { collapsed = localStorage.getItem('logDockCollapsed') !== '0'; } catch (e) {}
   dock.classList.toggle('collapsed', collapsed);
+
+  // Restore a previously dragged height, then wire up the resize handle.
+  const out = document.getElementById('log-output');
+  const resizer = document.getElementById('log-dock-resizer');
+  if (!out || !resizer) return;
+
+  const clampH = h => Math.max(140, Math.min(Math.round(window.innerHeight * 0.85), h));
+
+  try {
+    const saved = parseInt(localStorage.getItem('logDockHeight'), 10);
+    if (saved) out.style.height = clampH(saved) + 'px';
+  } catch (e) {}
+
+  let startY = 0, startH = 0, dragging = false;
+
+  const onMove = e => {
+    if (!dragging) return;
+    // drag up => taller
+    out.style.height = clampH(startH + (startY - e.clientY)) + 'px';
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    try { localStorage.setItem('logDockHeight', parseInt(out.style.height, 10)); } catch (e) {}
+  };
+
+  resizer.addEventListener('pointerdown', e => {
+    if (dock.classList.contains('collapsed')) return;
+    dragging = true;
+    startY = e.clientY;
+    startH = out.getBoundingClientRect().height;
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    e.preventDefault();
+  });
 }
 
 function formatUptime(uptimeSeconds) {
