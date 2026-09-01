@@ -24,4 +24,29 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     BUILD_TIME="${BUILD_TIME}"
 )
 
-littlefs_create_partition_image(storage ./littlefs FLASH_IN_PROJECT)
+# Stage the web assets and pre-gzip the large text files, then pack THAT directory
+# into the LittleFS image. style.css / main.js are served with Content-Encoding: gzip
+# (see static_handler in web_server.cpp); this keeps the image inside the 224K
+# storage partition so the bridge can be updated fully over OTA. company_map.bin is
+# left raw (random-access lookup) and the HTML is small enough to leave raw.
+set(WEB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/littlefs)
+set(WEB_PACKED ${CMAKE_CURRENT_BINARY_DIR}/littlefs_packed)
+set(WEB_PACKED_STAMP ${CMAKE_CURRENT_BINARY_DIR}/littlefs_packed.stamp)
+
+add_custom_command(
+    OUTPUT ${WEB_PACKED_STAMP}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_PACKED}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${WEB_SRC} ${WEB_PACKED}
+    COMMAND gzip -9 -n -f ${WEB_PACKED}/css/style.css ${WEB_PACKED}/js/main.js
+    COMMAND ${CMAKE_COMMAND} -E touch ${WEB_PACKED_STAMP}
+    DEPENDS
+        ${WEB_SRC}/index.html
+        ${WEB_SRC}/setup.html
+        ${WEB_SRC}/company_map.bin
+        ${WEB_SRC}/css/style.css
+        ${WEB_SRC}/js/main.js
+    VERBATIM
+)
+add_custom_target(webassets_pack DEPENDS ${WEB_PACKED_STAMP})
+
+littlefs_create_partition_image(storage ${WEB_PACKED} FLASH_IN_PROJECT DEPENDS ${WEB_PACKED_STAMP})

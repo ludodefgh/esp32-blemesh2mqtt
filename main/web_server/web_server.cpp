@@ -1874,6 +1874,19 @@ esp_err_t static_handler(httpd_req_t *req)
     }
 
     FILE *file = fopen(filepath, "r");
+
+    // Some assets are stored pre-gzipped (see main/CMakeLists.txt). If the plain
+    // file is missing, fall back to "<path>.gz" and serve it with Content-Encoding.
+    bool gzipped = false;
+    if (!file)
+    {
+        char gzpath[648];
+        snprintf(gzpath, sizeof(gzpath), "%s.gz", filepath);
+        file = fopen(gzpath, "r");
+        if (file)
+            gzipped = true;
+    }
+
     if (!file)
     {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
@@ -1883,6 +1896,8 @@ esp_err_t static_handler(httpd_req_t *req)
 
     const char *content_type = get_content_type(filepath);
     httpd_resp_set_type(req, content_type);
+    if (gzipped)
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
 
     char chunk[512];
     size_t read_bytes;
