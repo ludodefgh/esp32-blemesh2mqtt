@@ -33,10 +33,10 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
 - **Device Management**: Visual device provisioning, configuration, and control
 - **System Administration**: WiFi configuration, MQTT setup, and system controls
 
-### 🔄 **Advanced OTA System**
-- **Dual OTA Support**: Separate firmware and web interface updates
+### 🔄 **OTA System**
+- **Three update modes**: firmware only, web interface only, or a single combined
+  `update_bundle.bin` that flashes both and restarts once
 - **Safe Updates**: Rollback protection and update validation
-- **Live Updates**: Update web interface without device restart
 - **Progress Monitoring**: Real-time upload progress and status feedback
 
 ### 🛡️ **Enterprise Security**
@@ -155,20 +155,17 @@ Access the web interface at your device's IP address after WiFi setup:
 - WiFi and MQTT connection status
 - Bridge control functions
 
-### **BLE Mesh Management** 📡
-- View all provisioned devices
-- Scan for new unprovisioned devices
-- Provision devices with one click
-- Monitor device health and status
+### **Mesh** 📡
+- Provisioned and unprovisioned devices in one view, with counts
+- One-click provisioning and unprovisioning
+- Per-node controls (on/off, brightness, HSL colour, colour temperature) shown
+  according to the models each node reports
 
-### **Firmware Updates** 💾
-- Upload new firmware binaries
-- Update web interface files
-- Monitor upload progress
-- Automatic validation and rollback
+### **Firmware** 💾
+- Firmware, web-interface, or combined-bundle updates
+- Live upload progress, validation and rollback
 
-### **Debug Console** 🐛
-- Live system logs
+Live system logs are available from a collapsible dock at the bottom of every page.
 
 ## ⚙️ Configuration
 
