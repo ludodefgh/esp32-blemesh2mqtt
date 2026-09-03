@@ -10,47 +10,22 @@
 
 > **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**.
 
-A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling seamless integration with Home Assistant and other home automation platforms. This project transforms your ESP32 into a comprehensive IoT gateway.
+An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant and other home-automation platforms.
 
 📖 **[User Guide — Web Interface & Home Assistant Integration](documentation/USER_GUIDE.md)**
 
 ## 🌟 Key Features
 
-### 🔗 **Dual Connectivity Bridge**
-- **BLE Mesh Provisioner**: Automatically discovers, provisions, and manages BLE Mesh devices
-- **MQTT Publisher**: Bridges all mesh communications to MQTT with Home Assistant auto-discovery
-- **Real-time Communication**: Bidirectional message forwarding between BLE Mesh and MQTT networks
-
-### 🏠 **Home Assistant Integration**
-- **Automatic Discovery**: Zero-configuration device setup with Home Assistant MQTT discovery
-- **Device Management**: Complete device lifecycle management (provision, configure, remove)
-- **Real-time Status**: Live device status updates and health monitoring
-- **Native Entity Support**: Lights, switches, sensors appear as native Home Assistant entities
-
-### 🌐 **Professional Web Interface**
-- **Modern Responsive UI**: Clean, mobile-friendly interface with dark/light theme support
-- **Real-time Dashboard**: Live system monitoring with memory usage, uptime, and connection status
-- **Device Management**: Visual device provisioning, configuration, and control
-- **System Administration**: WiFi configuration, MQTT setup, and system controls
-
-### 🔄 **OTA System**
-- **Three update modes**: firmware only, web interface only, or a single combined
-  `update_bundle.bin` that flashes both and restarts once
-- **Safe Updates**: Rollback protection and update validation
-- **Progress Monitoring**: Real-time upload progress and status feedback
-
-### 🛡️ **Enterprise Security**
-- **Credential Encryption**: Secure storage of WiFi and MQTT credentials
-- **Secure Provisioning**: Safe device onboarding process
-
-### 📱 **Smart WiFi Provisioning**
-- **Captive Portal**: Automatic setup portal with iOS/Android detection
-- **RFC 8910 Compliant**: Standards-based captive portal detection
-- **WiFi Scanning**: Dropdown selection of available networks
-- **Auto-Recovery**: Fallback to setup mode on connection failure
-
-### 📊 **Comprehensive Monitoring**
-- **Real-time Logging**: Live system logs via WebSocket connection
+- **BLE Mesh ⇄ MQTT bridge**: discovers, provisions and manages BLE Mesh devices,
+  with bidirectional message forwarding to MQTT
+- **Home Assistant auto-discovery**: devices appear as native lights, switches and
+  sensors — no manual YAML
+- **Web interface**: dark-first responsive dashboard with live status, per-node
+  controls (on/off, brightness, HSL, colour temperature) and system logs
+- **OTA**: firmware, web interface, or a single combined `update_bundle.bin`
+  (flashes both, restarts once); rollback protection
+- **WiFi captive portal** (RFC 8910) for first-time setup, with auto-recovery
+- **Encrypted credential storage** for WiFi and MQTT
 
 ## 🏗️ Architecture Overview
 
@@ -68,24 +43,13 @@ A powerful ESP32-based bridge that connects BLE Mesh devices to MQTT, enabling s
                        └─────────────┘
 ```
 
-### Core Components
-
-- **BLE Mesh Stack**: Custom provisioner implementation with enhanced stability
-- **MQTT Bridge**: High-performance message translation and routing
-- **Web Server**: Embedded HTTP server with WebSocket support for real-time updates
-- **Storage System**: LittleFS-based file system for web assets and configuration
-- **Security Layer**: Encrypted credential storage and secure communications
-- **OTA Manager**: Over-the-air update system with rollback protection
-
 ## 🚀 Quick Start
 
 ### Option A: Pre-compiled Binaries (No ESP-IDF Required) ⚡
 
-**Fastest way to get started - no development environment needed!**
-
 1. **Download Pre-built Firmware**
    - Go to [Releases](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
-   - Download the `.zip` file for your board (e.g., `BleMesh2Mqtt-v1.0.0-esp32.zip`)
+   - Download the `.zip` file for your board (e.g., `BleMesh2Mqtt-v0.1.8-esp32.zip`)
    - Extract the archive
 
 2. **Flash to Device**
@@ -169,30 +133,14 @@ Live system logs are available from a collapsible dock at the bottom of every pa
 
 ## ⚙️ Configuration
 
-### MQTT Settings
-- **Broker Host**: Your MQTT broker IP or hostname
-- **Port**: Usually 1883 (non-SSL) or 8883 (SSL)
-- **Credentials**: Username and password for MQTT authentication
-- **SSL/TLS**: Enable for encrypted communications
-
-### BLE Mesh Configuration
-- **Provisioning**: Automatic device discovery and provisioning
-- **Network Key**: Automatically generated secure network keys
-- **Address Assignment**: Dynamic address allocation for new devices
-
-### System Configuration
-- **WiFi**: Supports WPA2/WPA3 with automatic reconnection
-- **Storage**: LittleFS partition for web assets and logs
-- **Security**: Hardware-accelerated encryption for credentials
+Everything is configured from the web interface: MQTT broker (host, port, credentials),
+WiFi (WPA2/WPA3, auto-reconnect), and BLE Mesh provisioning. Network keys and device
+addresses are generated and assigned automatically. Credentials are stored encrypted.
 
 ## 🏠 Home Assistant Integration
 
-### Automatic Discovery
-Devices appear automatically in Home Assistant with:
-- **Device Information**: Model, manufacturer, firmware version
-- **Entity Categories**: Lights, switches, sensors, diagnostics
-- **Control Entities**: On/off, brightness, color control
-- **Status Entities**: Battery level, signal strength, availability
+Devices appear automatically via MQTT discovery — lights, switches and sensors as
+native entities, with availability and diagnostics.
 
 ### MQTT Topics Structure
 ```
@@ -225,19 +173,9 @@ blemesh2mqtt_<MAC>/
 ```
 
 ### Custom ESP-IDF
-This project uses a forked ESP-IDF (`ludodefgh/esp-idf`, branch `ble-mesh-fixes`) with essential BLE Mesh fixes:
-- **C99 Compatibility**: Resolved initialization issues in mesh core
-- **Provisioning Stability**: Fixed OOB authentication problems
-- **Enhanced Reliability**: Improved error handling and recovery
-
-The forked ESP-IDF is automatically included in the Dev Container image — no manual installation required.
-
-### Building Custom Features
-The modular architecture allows easy extension:
-- Add new device types in `ble_mesh/`
-- Extend MQTT functionality in `mqtt/`
-- Create new web interface features in `web_server/`
-- Implement custom security features in `security/`
+Uses a forked ESP-IDF (`ludodefgh/esp-idf`, branch `ble-mesh-fixes`) with BLE Mesh
+fixes (mesh-core init, OOB provisioning, error recovery). It ships in the Dev
+Container image — no manual install.
 
 ## 🐛 Troubleshooting
 
@@ -266,96 +204,34 @@ idf.py erase-flash
 idf.py flash
 ```
 
-**Device Not Found**
-- Ensure ESP32 is powered and running
-- Check serial logs for boot messages
-- Verify correct port in flash command (`ls /dev/tty*` on Linux/Mac, Device Manager on Windows)
-- Try different USB cable or port
-- Install USB-to-serial drivers (CP210x or CH340)
+**Device Not Found** — check power, USB cable/port, the port in your flash command,
+and that USB-to-serial drivers (CP210x / CH340) are installed.
 
-**WiFi Connection Failed**
-- Reset WiFi via web interface or button
-- Check SSID/password in captive portal
-- Verify network supports ESP32 (2.4GHz only, not 5GHz)
-- Check if network has client isolation enabled
-- Try disabling 802.11w (Protected Management Frames)
+**WiFi Connection Failed** — 2.4GHz only (not 5GHz); check SSID/password in the
+captive portal; try disabling client isolation and 802.11w on the router.
 
-**MQTT Not Connecting**
-- Verify broker IP and port (use IP address, not hostname if DNS fails)
-- Check username/password
-- Test MQTT broker accessibility from your network
-- Verify broker allows connections from ESP32's IP
-- Enable debug logs for detailed error info
-- Check firewall rules on broker
+**MQTT Not Connecting** — use the broker's IP (not hostname); check credentials,
+firewall, and that the broker accepts the bridge's IP.
 
-**BLE Mesh Provisioning Failed**
-- Ensure target device is in provisioning mode (usually flashing/blinking)
-- Check for interference from other BLE devices
-- Move devices closer together (within 1-2 meters)
-- Reset mesh network if needed
-- Verify device compatibility (must support BLE Mesh, not just BLE)
-- Check if device UUID matches expected format
+**BLE Mesh Provisioning Failed** — put the target device in provisioning mode, move
+it within 1–2 m, reduce nearby BLE interference; the device must support BLE Mesh.
 
-**Captive Portal Not Appearing**
-- Wait 30-60 seconds after connecting to AP
-- Manually navigate to `192.168.4.1`
-- Try forgetting and reconnecting to the WiFi network
-- Disable mobile data on smartphone
-- Some Android devices require "Use network as is" option
+**Captive Portal Not Appearing** — wait ~30–60 s, then open `192.168.4.1` manually;
+disable mobile data; some Android devices need "Use network as is".
 
-**Out of Memory Errors**
-- Reduce `CONFIG_BLE_MESH_MAX_PROV_NODES` in menuconfig
-- Disable debug logging in production builds
-- Monitor heap usage via web interface
-- Consider using ESP32 with more RAM (ESP32-S3 has more, but no BLE Mesh support)
+**Out of Memory** — lower `CONFIG_BLE_MESH_MAX_PROV_NODES` in menuconfig and disable
+debug logging for production builds.
 
 ### Debug Tools
-- **Serial Monitor**: `idf.py monitor` for real-time logs
-  - Press `Ctrl+]` to exit
-  - Use `idf.py monitor -p /dev/ttyUSB0` to specify port
-- **Web Console**: Access debug commands via web interface
-- **MQTT Logs**: Monitor MQTT traffic for message debugging
-  - Use `mosquitto_sub -h <broker> -t blemesh2mqtt_#` to monitor all topics
-- **Memory Monitoring**: Track heap usage for stability issues
-  - Available in web interface dashboard
-  - Also check serial logs for heap warnings
+- `idf.py monitor` — serial logs (`Ctrl+]` to exit)
+- Web dashboard — live logs and heap usage
+- `mosquitto_sub -h <broker> -t 'blemesh2mqtt_#'` — watch MQTT traffic
 
 ## 🤝 Contributing
 
-Contributions are welcome! This project is designed for the ESP32 and Home Assistant community.
-
-### Development Setup
-1. Fork the repository
-2. Create a feature branch
-3. Make changes following the existing code style
-4. Test thoroughly with real hardware
-5. Submit a pull request
-
-### Areas for Contribution
-- New BLE Mesh device support
-- Enhanced web interface features
-- Additional Home Assistant integrations
-- Performance optimizations
-- Documentation improvements
+Fork, branch, follow the existing code style, test on real hardware, and open a PR.
+Bugs and questions: GitHub Issues / Discussions.
 
 ## 📄 License
 
-This project is open source and available under the MIT License. See LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- **ESP-IDF Team**: For the excellent development framework
-- **Home Assistant Community**: For inspiration and integration standards
-- **BLE Mesh Community**: For protocol documentation and examples
-- **Contributors**: Everyone who helps make this project better
-
-## 📞 Support
-
-- **Issues**: Report bugs via GitHub Issues
-- **Discussions**: Join community discussions for questions
-- **Documentation**: Check the tutorial folder for detailed guides
-- **Updates**: Watch the repository for new releases and features
-
----
-
-**Made with ❤️ for the Home Assistant and ESP32 communities**
+MIT — see the LICENSE file.
