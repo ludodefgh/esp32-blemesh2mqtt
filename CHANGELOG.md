@@ -9,9 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 - [ ] Additional BLE Mesh device types support
-- [ ] Enhanced web interface features
 - [ ] Performance optimizations
 - [ ] SSL/TLS support for MQTT
+
+## [0.1.8] - 2026-09-03
+
+### Added
+- Full per-node controls in the dashboard: on/off, HSL colour (hue/saturation
+  with a live swatch) and colour temperature, shown per the node's advertised
+  models — not just brightness. New `POST /node/set_onoff`, `/node/set_hsl`,
+  `/node/set_temperature` endpoints reusing the existing BLE Mesh client and the
+  same value mapping as the MQTT command path.
+- Combined firmware + web-interface OTA: `POST /api/ota/upload_bundle` accepts a
+  single `update_bundle.bin` (`tools/make_update_bundle.py` packs the app image
+  and the LittleFS image behind a 16-byte header). The device writes the
+  firmware, then the storage image, and restarts once. Firmware-only and
+  web-only updates remain available.
+- Firmware version shown next to the header title.
+- Toasts (bottom-right, colour-coded) replace the console-only notifications.
+- Collapsible, drag-to-resize system-log dock pinned to the bottom of the page.
+
+### Changed
+- Dashboard restyled dark-first with a single accent; light mode is now opt-in.
+- BLE Mesh view unified into one "Mesh" card with provisioned / unprovisioned
+  counts; node cards use "Controls" / "Advanced" tabs.
+- Firmware page rebuilt: compact status, segmented update-type control,
+  single drop zone.
+- Left-nav emoji replaced with inline SVG icons.
+- CSS and JS assets are served pre-gzipped (`Content-Encoding: gzip`), keeping
+  the LittleFS image inside the existing 224K storage partition.
+- Removed the Debug page from the navigation (section left in the source).
+
+### Fixed
+- Stale entries in the Unprovisioned Devices list are now pruned after ~30s of
+  beacon silence, instead of lingering until this bridge provisions them.
 
 ## [0.1.7] - 2026-08-20
 

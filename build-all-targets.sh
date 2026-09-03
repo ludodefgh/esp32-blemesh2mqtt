@@ -103,6 +103,9 @@ for target in $TARGETS; do
     cp build/ota_data_initial.bin "$PACKAGE_DIR/"
     cp build/storage.bin "$PACKAGE_DIR/"
 
+    # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
+    python3 tools/make_update_bundle.py build/BleMesh2Mqtt.bin build/storage.bin "$PACKAGE_DIR/update_bundle.bin" || true
+
     # Get partition addresses
     # Bootloader offset by chip family:
     #   Xtensa (esp32, esp32s2, esp32s3)  → 0x1000

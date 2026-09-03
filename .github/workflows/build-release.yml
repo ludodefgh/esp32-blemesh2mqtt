@@ -68,6 +68,9 @@ jobs:
           cp build/ota_data_initial.bin ${PACKAGE_NAME}/
           cp build/storage.bin ${PACKAGE_NAME}/
 
+          # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
+          python3 tools/make_update_bundle.py build/BleMesh2Mqtt.bin build/storage.bin ${PACKAGE_NAME}/update_bundle.bin
+
           # Detect storage offset from build log (differs by architecture)
           # ESP32/ESP32-S3 (dual-ota): 0x3b0000, ESP32-C3/C6 (single-ota): 0x2c0000
           STORAGE_OFFSET=$(grep -r "storage.bin" build/ 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=.*storage\.bin)' | head -1)
