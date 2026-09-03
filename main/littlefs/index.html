@@ -48,10 +48,6 @@
         <span class="menu-icon firmware-icon">💿</span>
         <span class="menu-text">Firmware</span>
       </div>
-      <div class="mobile-menu-item" data-section="debug">
-        <span class="menu-icon debug-icon">🔧</span>
-        <span class="menu-text">Debug</span>
-      </div>
     </div>
   </div>
 
@@ -69,10 +65,6 @@
         <div class="menu-item" data-section="firmware">
           <span class="menu-icon firmware-icon">💿</span>
           <span class="menu-text">Firmware</span>
-        </div>
-        <div class="menu-item" data-section="debug">
-          <span class="menu-icon debug-icon">🔧</span>
-          <span class="menu-text">Debug</span>
         </div>
       </div>
     </nav>
@@ -320,99 +312,74 @@
         <div class="section-grid">
           <section class="card firmware-section">
             <div class="section-header">
-              <h2>Bridge Firmware</h2>
-              <div class="firmware-info" id="firmware-info">
-                <div class="info-item">
-                  <span class="info-label">Current Version</span>
-                  <span class="info-value" id="current-version">Loading...</span>
-                </div>
-                <div class="info-item">
-                  <span class="info-label">OTA API Key</span>
-                  <span class="info-value" id="ota-api-key" style="font-family: monospace; color: #4CAF50; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyOtaKey()">Loading...</span>
-                </div>
-                <div class="firmware-notice">
-                  ⚠️ <strong>Security Notice:</strong> This is a cryptographically secure random key generated at first boot.
-                  Keep it safe - you'll need it for OTA updates. It's stored securely on the device.
-                </div>
-              </div>
+              <h2>Firmware &amp; Web Interface</h2>
+              <span class="fw-current">
+                <span class="info-label">Running</span>
+                <span class="fw-current-version" id="current-version">…</span>
+              </span>
             </div>
-            
-            <div class="firmware-upload">
-              <div class="upload-type-selector">
-                <h3>Update Type</h3>
-                <div class="radio-group">
-                  <label class="radio-label">
-                    <input type="radio" name="update-type" value="firmware" checked>
-                    <span class="radio-text">
-                      <strong>Firmware Update</strong><br>
-                      <small>Updates application code (requires restart)</small>
-                    </span>
-                  </label>
-                  <label class="radio-label">
-                    <input type="radio" name="update-type" value="storage">
-                    <span class="radio-text">
-                      <strong>Web Interface Update</strong><br>
-                      <small>Updates web files (no restart required)</small>
-                    </span>
-                  </label>
-                </div>
+
+            <div class="fw-keyrow">
+              <span class="info-label">OTA API key</span>
+              <code class="fw-key" id="ota-api-key" title="Click to copy" onclick="copyOtaKey()">…</code>
+              <button class="btn btn-secondary btn-small" onclick="copyOtaKey()" title="Copy key">
+                <span class="icon">⧉</span>
+              </button>
+            </div>
+            <p class="hint">Random key generated at first boot, stored on the device — required to authenticate every upload below.</p>
+
+            <div class="fw-update">
+              <div class="seg-control" id="update-type" role="radiogroup" aria-label="Update type">
+                <label class="seg">
+                  <input type="radio" name="update-type" value="bundle" checked>
+                  <span>Firmware + Web</span>
+                </label>
+                <label class="seg">
+                  <input type="radio" name="update-type" value="firmware">
+                  <span>Firmware</span>
+                </label>
+                <label class="seg">
+                  <input type="radio" name="update-type" value="storage">
+                  <span>Web interface</span>
+                </label>
               </div>
+              <p class="seg-hint" id="update-type-hint"></p>
 
               <div class="upload-area" id="upload-area">
-                <div class="upload-content">
-                  <span class="upload-icon">📁</span>
-                  <p class="upload-text" id="upload-text">
-                    <strong>Select firmware file (.bin)</strong><br>
-                    or drag and drop here
-                  </p>
-                  <input type="file" id="firmware-file" accept=".bin" style="display: none;">
-                  <button class="btn btn-primary" onclick="document.getElementById('firmware-file').click()">
-                    <span class="icon">📂</span>
-                    Choose File
-                  </button>
-                </div>
+                <input type="file" id="firmware-file" accept=".bin" hidden>
+                <span class="upload-icon">⬆</span>
+                <p class="upload-text" id="upload-text"><strong>Drop <code>update_bundle.bin</code></strong> or click to choose</p>
+                <button class="btn btn-secondary btn-small" type="button"
+                  onclick="document.getElementById('firmware-file').click()">Choose file</button>
               </div>
-              
-              <div id="file-info" class="file-info" style="display: none;">
-                <div class="file-details">
-                  <span class="file-icon">📄</span>
-                  <div class="file-text">
-                    <div class="file-name" id="file-name"></div>
-                    <div class="file-size" id="file-size"></div>
-                  </div>
-                  <button class="btn btn-small btn-secondary" onclick="clearFile()">✕</button>
-                </div>
+
+              <div id="file-info" class="file-chip" hidden>
+                <span class="file-icon">📦</span>
+                <span class="file-name" id="file-name"></span>
+                <span class="file-size" id="file-size"></span>
+                <button class="file-remove" onclick="clearFile()" title="Remove" aria-label="Remove">✕</button>
               </div>
-              
-              <div id="upload-progress" class="upload-progress" style="display: none;">
+
+              <div id="upload-progress" class="upload-progress" hidden>
                 <div class="progress-info">
-                  <span class="progress-text" id="progress-text">Preparing upload...</span>
+                  <span class="progress-text" id="progress-text">Preparing…</span>
                   <span class="progress-percent" id="progress-percent">0%</span>
                 </div>
-                <div class="progress-bar">
-                  <div class="progress-fill" id="progress-fill"></div>
-                </div>
+                <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
                 <div class="progress-details" id="progress-details"></div>
               </div>
-              
+
               <div class="upload-actions">
-                <button class="btn btn-danger" id="upload-btn" onclick="uploadFirmware()" disabled>
-                  <span class="icon">⬆️</span>
-                  <span id="upload-btn-text">Upload Firmware</span>
+                <button class="btn btn-primary" id="upload-btn" onclick="uploadFirmware()" disabled>
+                  <span class="icon">⬆</span>
+                  <span id="upload-btn-text">Update</span>
                 </button>
-                <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" style="display: none;">
-                  <span class="icon">✕</span>
-                  Cancel
-                </button>
+                <button class="btn btn-secondary" id="cancel-btn" onclick="cancelUpload()" hidden>Cancel</button>
+                <span class="fw-warn">Wrong or corrupt images can require a serial recovery.</span>
               </div>
-              
-              <div class="firmware-warning">
-                <p><strong>⚠️ Warning:</strong> Uploading invalid firmware may render the device unusable. 
-                   Ensure you have the correct firmware file for this device.</p>
-              </div>
+
+              <div id="firmware-error" class="error-message" hidden></div>
             </div>
-            
-            <div id="firmware-error" class="error-message" style="display: none;"></div>
           </section>
         </div>
       </div>

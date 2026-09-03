@@ -98,6 +98,7 @@ esp_err_t node_send_mqtt_status_handler(httpd_req_t *req);
 esp_err_t node_send_mqtt_discovery_handler(httpd_req_t *req);
 esp_err_t ota_upload_handler(httpd_req_t *req);
 esp_err_t storage_upload_handler(httpd_req_t *req);
+esp_err_t ota_bundle_upload_handler(httpd_req_t *req);
 esp_err_t ota_status_handler(httpd_req_t *req);
 esp_err_t ota_restart_handler(httpd_req_t *req);
 
@@ -663,6 +664,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
             return ESP_FAIL;
         }
+    }
+    else if (strstr(req->uri, "/api/ota/upload_bundle"))
+    {
+        return ota_bundle_upload_handler(req);
     }
     else if (strstr(req->uri, "/api/ota/upload"))
     {
@@ -1290,6 +1295,9 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 // Constants for OTA security
 #define OTA_MIN_FIRMWARE_SIZE (32 * 1024)       // 32KB minimum
 #define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
+#define OTA_MAX_STORAGE_SIZE (256 * 1024)       // 256KB maximum (matches storage_upload_handler)
+// firmware + storage + 16-byte bundle header
+#define OTA_MAX_BUNDLE_SIZE (OTA_MAX_FIRMWARE_SIZE + OTA_MAX_STORAGE_SIZE + 64)
 #define OTA_BUFFER_SIZE 1024
 #define OTA_API_KEY_LENGTH 32  // 32 characters for base64-like encoding
 #define OTA_NVS_NAMESPACE "ota_config"
@@ -1720,6 +1728,188 @@ storage_cleanup:
     httpd_resp_send(req, success_response, -1);
 
     LOG_INFO(TAG, "Storage update completed successfully");
+
+    return ESP_OK;
+}
+
+// ---- Combined firmware + web-interface bundle --------------------------------
+//
+// Bundle layout (see tools/make_update_bundle.py):
+//   offset 0 : 16-byte header
+//       char     magic[4]   = "B2MU"
+//       uint8_t  version    = 1
+//       uint8_t  reserved[3]
+//       uint32_t app_size   (little-endian)
+//       uint32_t fs_size    (little-endian)
+//   offset 16          : app image      (app_size bytes)
+//   offset 16+app_size : storage image  (fs_size bytes)
+//
+// The firmware is written and finalized first (boot partition is switched), then
+// the storage image. If the storage phase fails after the firmware succeeded the
+// device still boots the new app against the old storage — static_handler serves
+// the plain (non-.gz) files that the old image contains, so the dashboard keeps
+// working; just re-run the bundle to finish.
+
+struct __attribute__((packed)) ota_bundle_header_t
+{
+    char magic[4];
+    uint8_t version;
+    uint8_t reserved[3];
+    uint32_t app_size;
+    uint32_t fs_size;
+};
+static_assert(sizeof(ota_bundle_header_t) == 16, "bundle header must be 16 bytes");
+
+static esp_err_t recv_exact(httpd_req_t *req, void *dst, size_t len)
+{
+    size_t got = 0;
+    while (got < len)
+    {
+        int r = httpd_req_recv(req, static_cast<char *>(dst) + got, len - got);
+        if (r <= 0)
+            return ESP_FAIL;
+        got += static_cast<size_t>(r);
+    }
+    return ESP_OK;
+}
+
+// Stream exactly `len` bytes of the request body through ota_manager_write().
+static esp_err_t stream_body_to_ota(httpd_req_t *req, char *buffer, size_t len)
+{
+    size_t remaining = len;
+    while (remaining > 0)
+    {
+        size_t chunk = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
+        int r = httpd_req_recv(req, buffer, chunk);
+        if (r <= 0)
+            return ESP_FAIL;
+        esp_err_t err = ota_manager_write(reinterpret_cast<const uint8_t *>(buffer), static_cast<size_t>(r));
+        if (err != ESP_OK)
+            return err;
+        remaining -= static_cast<size_t>(r);
+    }
+    return ESP_OK;
+}
+
+esp_err_t ota_bundle_upload_handler(httpd_req_t *req)
+{
+    LOG_INFO(TAG, "OTA bundle upload handler called");
+
+    if (req->method != HTTP_POST)
+    {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+
+    if (!authenticate_ota_request(req))
+    {
+        LOG_WARN(TAG, "Unauthorized OTA bundle upload attempt");
+        httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
+        return ESP_FAIL;
+    }
+
+    size_t content_length = req->content_len;
+    if (content_length < sizeof(ota_bundle_header_t) + OTA_MIN_FIRMWARE_SIZE ||
+        content_length > OTA_MAX_BUNDLE_SIZE)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid bundle size");
+        return ESP_FAIL;
+    }
+
+    ota_bundle_header_t hdr;
+    if (recv_exact(req, &hdr, sizeof(hdr)) != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read bundle header");
+        return ESP_FAIL;
+    }
+
+    if (memcmp(hdr.magic, "B2MU", 4) != 0 || hdr.version != 1)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Not a valid update bundle");
+        return ESP_FAIL;
+    }
+
+    // header fields are little-endian, matching the ESP32
+    const size_t app_size = hdr.app_size;
+    const size_t fs_size = hdr.fs_size;
+
+    if (sizeof(ota_bundle_header_t) + app_size + fs_size != content_length)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bundle size mismatch");
+        return ESP_FAIL;
+    }
+    if (app_size < OTA_MIN_FIRMWARE_SIZE || app_size > OTA_MAX_FIRMWARE_SIZE)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad firmware size in bundle");
+        return ESP_FAIL;
+    }
+    if (fs_size < 512 || fs_size > OTA_MAX_STORAGE_SIZE)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad storage size in bundle");
+        return ESP_FAIL;
+    }
+
+    char *buffer = static_cast<char *>(malloc(OTA_BUFFER_SIZE));
+    if (buffer == nullptr)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+
+    LOG_INFO(TAG, "Bundle: firmware %zu bytes, storage %zu bytes", app_size, fs_size);
+
+    // Phase 1 — firmware
+    esp_err_t err = ota_manager_begin(app_size);
+    if (err != ESP_OK)
+    {
+        free(buffer);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to begin firmware update");
+        return ESP_FAIL;
+    }
+    if (stream_body_to_ota(req, buffer, app_size) != ESP_OK)
+    {
+        ota_manager_abort();
+        free(buffer);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Firmware upload failed");
+        return ESP_FAIL;
+    }
+    err = ota_manager_end();
+    if (err != ESP_OK)
+    {
+        free(buffer);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Firmware finalization failed");
+        return ESP_FAIL;
+    }
+
+    // Phase 2 — web interface (storage)
+    err = ota_manager_begin_storage(fs_size);
+    if (err != ESP_OK)
+    {
+        free(buffer);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to begin storage update");
+        return ESP_FAIL;
+    }
+    if (stream_body_to_ota(req, buffer, fs_size) != ESP_OK)
+    {
+        ota_manager_abort();
+        free(buffer);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Storage upload failed");
+        return ESP_FAIL;
+    }
+    err = ota_manager_end();
+    free(buffer);
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Storage finalization failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{ \"success\": true, \"message\": \"Firmware + web interface updated. Device will restart in 3 seconds.\" }", -1);
+
+    LOG_INFO(TAG, "Bundle update complete, restarting");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
 
     return ESP_OK;
 }
