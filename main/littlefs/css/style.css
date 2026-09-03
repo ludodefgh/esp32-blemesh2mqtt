@@ -268,18 +268,19 @@ h1, h2, h3 { color: var(--text); }
 }
 
 .menu-icon {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 1.3rem;
-  text-align: center;
-  filter: grayscale(0.15);
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
 }
 
-/* colourful-icon overrides from the old theme — neutralised */
-.bridge-icon, .mesh-icon, .firmware-icon, .debug-icon {
-  color: inherit;
-  text-shadow: none;
-}
-.menu-item:hover .menu-icon { transform: none; }
+.menu-icon svg { width: 17px; height: 17px; display: block; }
+
+.menu-item:hover .menu-icon { color: var(--text-secondary); }
+.menu-item.active .menu-icon { color: var(--accent); }
 
 .menu-text { font-size: 0.86rem; }
 
@@ -330,7 +331,9 @@ h1, h2, h3 { color: var(--text); }
 .mobile-menu-item:last-child { border-bottom: none; }
 .mobile-menu-item:hover { background: var(--bg-elev); color: var(--text); }
 .mobile-menu-item.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
-.mobile-menu-item .menu-icon { font-size: 1.25rem; width: 1.8rem; }
+.mobile-menu-item .menu-icon { width: 1.8rem; }
+.mobile-menu-item .menu-icon svg { width: 19px; height: 19px; }
+.mobile-menu-item.active .menu-icon { color: var(--accent); }
 .mobile-menu-item .menu-text { font-size: 0.95rem; font-weight: 500; }
 
 /* ========================= Main content ========================= */
@@ -713,6 +716,7 @@ h1, h2, h3 { color: var(--text); }
 .node-name:hover { background: var(--accent-weak); border-color: var(--accent-line); }
 
 .node-name-input {
+  display: inline-block;
   font-weight: 600;
   color: var(--text);
   font-size: 0.98rem;
@@ -847,22 +851,34 @@ input[type="range"].hue-slider {
     hsl(180,80%,55%), hsl(240,80%,55%), hsl(300,80%,55%), hsl(360,80%,55%));
 }
 
-/* ---- collapsible node control panel ---- */
+/* ---- node card: Controls / Advanced tabs ---- */
 
-.node-controls-toggle.active {
-  background: var(--accent-weak);
-  color: var(--accent);
-  border-color: var(--accent-line);
+.node-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  border-bottom: 1px solid var(--border);
 }
 
-.node-controls {
-  margin-top: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent-line);
-  border-radius: var(--radius);
-  background: var(--bg-card);
+.node-tab {
+  background: none;
+  border: none;
+  padding: 0.4rem 0.1rem;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
+.node-tab:hover { color: var(--text-secondary); }
+.node-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.node-tab-panel { padding-top: 0.75rem; }
 
 .control-row {
   display: flex;
@@ -880,11 +896,26 @@ input[type="range"].hue-slider {
   color: var(--text-muted);
 }
 
+.control-none {
+  margin: 0.25rem 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
 .hsl-swatch {
   width: 2rem;
   height: 1.15rem;
   border-radius: 4px;
   border: 1px solid var(--border-strong);
+}
+
+.node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
 }
 
 /* ========================= Empty states ========================= */

@@ -122,10 +122,10 @@ function startEditingNodeName(nameElement) {
   const editButtons = container.querySelector('.edit-buttons');
   
   // Hide the name span and show input + buttons
-  nameElement.style.display = 'none';
-  input.style.display = 'inline-block';
-  editButtons.style.display = 'flex';
-  
+  nameElement.hidden = true;
+  input.hidden = false;
+  editButtons.hidden = false;
+
   // Focus and select the input text
   input.focus();
   input.select();
@@ -205,9 +205,9 @@ function finishEditing(container, restore) {
   }
   
   // Show name span, hide input and buttons
-  nameElement.style.display = 'inline';
-  input.style.display = 'none';
-  editButtons.style.display = 'none';
+  nameElement.hidden = false;
+  input.hidden = true;
+  editButtons.hidden = true;
   
   // Reset buttons
   acceptBtn.disabled = false;
@@ -420,14 +420,6 @@ function sendLightness(uuid, value) {
     .catch(() => showToast('Network error setting lightness', 'error'));
 }
 
-// Collapsible per-node control panel
-function toggleNodeControls(btn) {
-  const panel = btn.closest('.node').querySelector('.node-controls');
-  if (!panel) return;
-  panel.hidden = !panel.hidden;
-  btn.classList.toggle('active', !panel.hidden);
-}
-
 // Power (Generic OnOff)
 function setNodeOnoff(uuid, on) {
   postNode('/node/set_onoff', `uuid=${encodeURIComponent(uuid)}&onoff=${on ? 1 : 0}`)
@@ -441,13 +433,12 @@ function setNodeOnoff(uuid, on) {
 // lightness sent is whatever the card's brightness slider currently shows.
 function onHslInput(uuid, el) {
   const nodeEl = el.closest('.node');
-  const panel = nodeEl.querySelector('.node-controls');
-  const h = +panel.querySelector('.hsl-h').value;
-  const s = +panel.querySelector('.hsl-s').value;
+  const h = +nodeEl.querySelector('.hsl-h').value;
+  const s = +nodeEl.querySelector('.hsl-s').value;
   const brightEl = nodeEl.querySelector('.brightness-slider');
   const l = brightEl ? +brightEl.value : (+nodeEl.dataset.maxLightness || 65535);
 
-  const swatch = panel.querySelector('.hsl-swatch');
+  const swatch = nodeEl.querySelector('.hsl-swatch');
   if (swatch) swatch.style.background = `hsl(${h}, ${s}%, 50%)`;
   const out = el.parentElement.querySelector('output');
   if (out) out.value = el.classList.contains('hsl-h') ? `${h}°` : `${s}%`;
@@ -746,6 +737,19 @@ function clearLogs() {
   }
 }
 
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Switch between a node card's "Controls" and "Advanced" tabs.
+function switchNodeTab(btn) {
+  const card = btn.closest('.node');
+  const tab = btn.dataset.tab;
+  card.querySelectorAll('.node-tab').forEach(b => b.classList.toggle('active', b === btn));
+  card.querySelectorAll('.node-tab-panel').forEach(p => { p.hidden = p.dataset.tab !== tab; });
+}
+
 // Node rendering functions
 function createNodeElement(node) {
   const el = document.createElement("div");
@@ -759,7 +763,6 @@ function createNodeElement(node) {
   const hasOnoff = f === 0 || (f & F_ONOFF);
   const hasHsl = !!(f & F_HSL);
   const hasCtl = !!(f & F_CTL);
-  const hasControls = hasOnoff || hasHsl || hasCtl;
 
   const maxL = node.max_lightness || 65535;
   el.dataset.maxLightness = maxL;
@@ -769,95 +772,91 @@ function createNodeElement(node) {
   const tMin = (node.min_temp && node.min_temp < node.max_temp) ? node.min_temp : 2000;
   const tMax = (node.max_temp && node.max_temp > tMin && node.max_temp < 20000) ? node.max_temp : 6500;
   const tCur = node.curr_temp || tMin;
+  const u = node.uuid;
 
-  el.innerHTML = `
-    <div class="node-header">
-      <div class="node-name-container">
-        <span class="node-name editable" data-original-name="${node.name}">${node.name}</span>
-        <input type="text" class="node-name-input" value="${node.name}" style="display: none;">
-        <div class="edit-buttons" style="display: none;">
-          <button class="btn btn-primary btn-small accept-btn" title="Accept">✓</button>
-          <button class="btn btn-secondary btn-small discard-btn" title="Discard">✕</button>
-        </div>
-      </div>
-      <span class="node-status ${node.unicast ? 'online' : 'offline'}">
-        ${node.unicast ? 'Online' : 'Offline'}
-      </span>
-    </div>
-
-    <div class="node-info-grid">
-      <div class="info-row">
-        <span class="info-label">UUID:</span>
-        <span class="info-value">${node.uuid}</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">Address:</span>
-        <span class="info-value">${node.unicast || 'Not assigned'}</span>
-      </div>
-      ${node.company ? `<div class="info-row">
-        <span class="info-label">Manufacturer:</span>
-        <span class="info-value">${node.company}</span>
-      </div>` : ''}
-    </div>
-
-    <div class="lightness-control slider-row"${hasLightness ? '' : ' hidden'}>
-      <span class="slider-tag">💡</span>
-      <input type="range" class="brightness-slider" min="0" max="${maxL}" step="500" value="${node.hsl_l || 0}"
-        oninput="onSliderInput('${node.uuid}', this)">
-      <output>${node.hsl_l || 0}</output>
-    </div>
-
-    <div class="controls">
-      ${hasControls ? `<button class="btn btn-secondary btn-small node-controls-toggle" onclick="toggleNodeControls(this)">
-        <span class="icon">🎛️</span>
-        Controls
-      </button>` : ''}
-      <button class="btn btn-secondary btn-small" onclick="sendMqttStatus('${node.uuid}')">
-        <span class="icon">📊</span>
-        MQTT Status
-      </button>
-      <button class="btn btn-secondary btn-small" onclick="sendMqttDiscovery('${node.uuid}')">
-        <span class="icon">📡</span>
-        MQTT Discovery
-      </button>
-      <button class="btn btn-danger btn-small" onclick="unprovision('${node.uuid}')">
-        <span class="icon">🗑️</span>
-        Unprovision
-      </button>
-    </div>
-
-    ${hasControls ? `
-    <div class="node-controls" hidden>
-      ${hasOnoff ? `
+  let controls = '';
+  if (hasOnoff) {
+    controls += `
       <div class="control-row">
         <span class="control-label">Power</span>
         <label class="toggle-switch">
-          <input type="checkbox" ${node.onoff ? 'checked' : ''} onchange="setNodeOnoff('${node.uuid}', this.checked)">
+          <input type="checkbox" ${node.onoff ? 'checked' : ''} onchange="setNodeOnoff('${u}', this.checked)">
           <span class="toggle-track"></span>
         </label>
-      </div>` : ''}
-      ${hasHsl ? `
+      </div>`;
+  }
+  if (hasLightness) {
+    controls += `
+      <div class="slider-row">
+        <span class="slider-tag">💡</span>
+        <input type="range" class="brightness-slider" min="0" max="${maxL}" step="500" value="${node.hsl_l || 0}"
+          oninput="onSliderInput('${u}', this)">
+        <output>${node.hsl_l || 0}</output>
+      </div>`;
+  }
+  if (hasHsl) {
+    controls += `
       <div class="control-row">
         <span class="control-label">Color</span>
         <span class="hsl-swatch" style="background: hsl(${hue360}, ${sat100}%, 50%)"></span>
       </div>
       <div class="slider-row">
         <span class="slider-tag">H</span>
-        <input type="range" class="hsl-h hue-slider" min="0" max="360" value="${hue360}" oninput="onHslInput('${node.uuid}', this)">
+        <input type="range" class="hsl-h hue-slider" min="0" max="360" value="${hue360}" oninput="onHslInput('${u}', this)">
         <output>${hue360}°</output>
       </div>
       <div class="slider-row">
         <span class="slider-tag">S</span>
-        <input type="range" class="hsl-s" min="0" max="100" value="${sat100}" oninput="onHslInput('${node.uuid}', this)">
+        <input type="range" class="hsl-s" min="0" max="100" value="${sat100}" oninput="onHslInput('${u}', this)">
         <output>${sat100}%</output>
-      </div>` : ''}
-      ${hasCtl ? `
+      </div>`;
+  }
+  if (hasCtl) {
+    controls += `
       <div class="slider-row">
         <span class="slider-tag">🌡</span>
-        <input type="range" class="temp-slider" min="${tMin}" max="${tMax}" step="50" value="${tCur}" oninput="onTempInput('${node.uuid}', this)">
+        <input type="range" class="temp-slider" min="${tMin}" max="${tMax}" step="50" value="${tCur}" oninput="onTempInput('${u}', this)">
         <output>${tCur} K</output>
-      </div>` : ''}
-    </div>` : ''}
+      </div>`;
+  }
+  if (!controls) {
+    controls = `<p class="control-none">No controllable models reported for this node.</p>`;
+  }
+
+  el.innerHTML = `
+    <div class="node-header">
+      <div class="node-name-container">
+        <span class="node-name editable" data-original-name="${esc(node.name)}">${esc(node.name)}</span>
+        <input type="text" class="node-name-input" value="${esc(node.name)}" hidden>
+        <div class="edit-buttons" hidden>
+          <button class="btn btn-primary btn-small accept-btn" title="Accept">✓</button>
+          <button class="btn btn-secondary btn-small discard-btn" title="Discard">✕</button>
+        </div>
+      </div>
+      <span class="node-status ${node.unicast ? 'online' : 'offline'}">${node.unicast ? 'Online' : 'Offline'}</span>
+    </div>
+
+    <div class="node-tabs">
+      <button class="node-tab active" data-tab="controls" onclick="switchNodeTab(this)">Controls</button>
+      <button class="node-tab" data-tab="advanced" onclick="switchNodeTab(this)">Advanced</button>
+    </div>
+
+    <div class="node-tab-panel" data-tab="controls">
+      ${controls}
+    </div>
+
+    <div class="node-tab-panel" data-tab="advanced" hidden>
+      <div class="node-info-grid">
+        <div class="info-row"><span class="info-label">UUID</span><span class="info-value">${esc(node.uuid)}</span></div>
+        <div class="info-row"><span class="info-label">Address</span><span class="info-value">${node.unicast || '—'}</span></div>
+        ${node.company ? `<div class="info-row"><span class="info-label">Manufacturer</span><span class="info-value">${esc(node.company)}</span></div>` : ''}
+      </div>
+      <div class="node-actions">
+        <button class="btn btn-secondary btn-small" onclick="sendMqttStatus('${u}')"><span class="icon">📊</span> MQTT Status</button>
+        <button class="btn btn-secondary btn-small" onclick="sendMqttDiscovery('${u}')"><span class="icon">📡</span> MQTT Discovery</button>
+        <button class="btn btn-danger btn-small" onclick="unprovision('${u}')"><span class="icon">🗑️</span> Unprovision</button>
+      </div>
+    </div>
   `;
 
   return el;
