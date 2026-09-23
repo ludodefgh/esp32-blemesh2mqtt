@@ -29,8 +29,10 @@
 #include "mqtt/mqtt_bridge.h"
 #include "mqtt/mqtt_control.h"
 #include "mqtt/mqtt_credentials.h"
+#include "mqtt/mqtt_external_control.h"
 #include "ota/ota_manager.h"
 #include "sig_companies/company_map.h"
+#include "wifi/mesh_config.h"
 #include "wifi/wifi_provisioning.h"
 
 #define TAG "WEB_SERVER"
@@ -111,6 +113,8 @@ esp_err_t nodes_handler(httpd_req_t *req)
     httpd_resp_send_chunk(req, nodes_javascript, -1);
 
     // Loop through all nodes
+    // Node-only builds have no provisioner node table.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -137,6 +141,7 @@ esp_err_t nodes_handler(httpd_req_t *req)
 
         httpd_resp_send_chunk(req, chunk, len);
     }
+#endif
 
     //
     // Unprovisioned nodes
@@ -329,8 +334,9 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
         sscanf(uuid_str + i * 2, "%2hhx", &uuid[i]);
     }
 
-    // Find the node by UUID
+    // Node-only build always reports "not found" — no provisioner table to search.
     const esp_ble_mesh_node_t *node = NULL;
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *n = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -340,6 +346,7 @@ esp_err_t set_lightness_handler(httpd_req_t *req)
             break;
         }
     }
+#endif
 
     if (!node)
     {
@@ -463,6 +470,21 @@ esp_err_t set_temperature_handler(httpd_req_t *req)
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
+esp_err_t auto_provisioning_get_handler(httpd_req_t *req);
+esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
+esp_err_t mesh_settings_get_handler(httpd_req_t *req);
+esp_err_t mesh_settings_set_handler(httpd_req_t *req);
+esp_err_t mesh_settings_remove_handler(httpd_req_t *req);
+esp_err_t mesh_keys_get_handler(httpd_req_t *req);
+esp_err_t mesh_external_discover_handler(httpd_req_t *req);
+esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
+esp_err_t mesh_external_command_handler(httpd_req_t *req);
+esp_err_t mesh_external_mqtt_handler(httpd_req_t *req);
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+esp_err_t mesh_debug_status_handler(httpd_req_t *req);
+esp_err_t mesh_reset_role_handler(httpd_req_t *req);
+esp_err_t logs_get_handler(httpd_req_t *req);
+#endif
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -689,6 +711,85 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return reset_wifi_handler(req);
     }
+    else if (strstr(req->uri, "/api/mesh/settings/remove"))
+    {
+        if (req->method != HTTP_POST)
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        return mesh_settings_remove_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/settings"))
+    {
+        if (req->method == HTTP_GET)
+        {
+            return mesh_settings_get_handler(req);
+        }
+        else if (req->method == HTTP_POST)
+        {
+            return mesh_settings_set_handler(req);
+        }
+        else
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+    }
+    else if (strstr(req->uri, "/api/mesh/keys"))
+    {
+        return mesh_keys_get_handler(req);
+    }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+    else if (strstr(req->uri, "/api/mesh/debug"))
+    {
+        return mesh_debug_status_handler(req);
+    }
+#endif
+    else if (strstr(req->uri, "/api/mesh/external/nodes"))
+    {
+        return mesh_external_nodes_get_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/external/")
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+             || strstr(req->uri, "/api/mesh/reset_role")
+#endif
+    )
+    {
+        // Everything else here sends mesh traffic, publishes, or restarts — POST only,
+        // so a plain GET (link, <img src>) can't trigger it.
+        if (req->method != HTTP_POST)
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        if (strstr(req->uri, "/api/mesh/external/discover"))
+        {
+            return mesh_external_discover_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/command"))
+        {
+            return mesh_external_command_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/mqtt"))
+        {
+            return mesh_external_mqtt_handler(req);
+        }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+        else if (strstr(req->uri, "/api/mesh/reset_role"))
+        {
+            return mesh_reset_role_handler(req);
+        }
+#endif
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
+        return ESP_FAIL;
+    }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+    else if (strstr(req->uri, "/api/logs"))
+    {
+        return logs_get_handler(req);
+    }
+#endif
     else
     {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
@@ -917,7 +1018,8 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr_chunk(req, "{ \"provisioned\": [");
 
-    // List provisioned nodes
+    // Node-only builds have no provisioner node table — list is always empty.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     bool first_node = true;
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
@@ -984,6 +1086,7 @@ esp_err_t nodes_json_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, buf);
         first_node = false;
     }
+#endif
 
     httpd_resp_sendstr_chunk(req, "], \"unprovisioned\": [");
 
@@ -1143,6 +1246,511 @@ esp_err_t auto_provisioning_set_handler(httpd_req_t *req)
     cJSON_Delete(json);
     return ESP_OK;
 }
+
+// Shared by all three handlers below: {"group_addr": <first addr, "" if none — legacy
+// single-address key some tooling still reads>, "group_addrs": [...], "max": N}.
+static void add_group_addrs_to_json(cJSON *root)
+{
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+
+    char hex[8];
+    if (count > 0) {
+        snprintf(hex, sizeof(hex), "0x%04X", group_addrs[0]);
+        cJSON_AddStringToObject(root, "group_addr", hex);
+    } else {
+        cJSON_AddStringToObject(root, "group_addr", "0x0000");
+    }
+
+    cJSON *arr = cJSON_CreateArray();
+    for (uint8_t i = 0; i < count; i++) {
+        snprintf(hex, sizeof(hex), "0x%04X", group_addrs[i]);
+        cJSON_AddItemToArray(arr, cJSON_CreateString(hex));
+    }
+    cJSON_AddItemToObject(root, "group_addrs", arr);
+    cJSON_AddNumberToObject(root, "max", MESH_MAX_GROUP_ADDRS);
+}
+
+static void send_group_addrs_json(httpd_req_t *req, bool success)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", success);
+    add_group_addrs_to_json(root);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+}
+
+// Parses {"group_addr": "0xC000" | <number>} from the request body. Returns false (and
+// sends the error response itself) if the body is missing/invalid.
+static bool parse_group_addr_body(httpd_req_t *req, uint16_t *out_addr)
+{
+    char buf[128];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return false;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return false;
+    }
+
+    cJSON *addr_item = cJSON_GetObjectItem(json, "group_addr");
+    bool ok = false;
+    if (cJSON_IsString(addr_item)) {
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end != addr_item->valuestring && *end == '\0' && raw > 0 && raw <= 0xFFFF) {
+            *out_addr = (uint16_t)raw;
+            ok = true;
+        }
+    } else if (cJSON_IsNumber(addr_item) && addr_item->valuedouble > 0 && addr_item->valuedouble <= 0xFFFF) {
+        *out_addr = (uint16_t)addr_item->valuedouble;
+        ok = true;
+    }
+    cJSON_Delete(json);
+
+    if (!ok) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid group_addr");
+    }
+    return ok;
+}
+
+esp_err_t mesh_settings_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    add_group_addrs_to_json(root);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Adds a group address (up to MESH_MAX_GROUP_ADDRS). Kept as the POST body shape
+// existing tooling already uses (esp32-test-provisioner skill, etc.) — was "set the
+// one group address", now "add one to the list".
+esp_err_t mesh_settings_set_handler(httpd_req_t *req)
+{
+    uint16_t group_addr = 0;
+    if (!parse_group_addr_body(req, &group_addr)) {
+        return ESP_FAIL;
+    }
+
+    // Same check the stack's own subscribe API applies — reject up front instead of
+    // persisting an address it will refuse on every boot.
+    if (!ESP_BLE_MESH_ADDR_IS_GROUP(group_addr)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "group_addr must be a group address (0xC000-0xFF00)");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = mesh_config_add_group_addr(group_addr);
+    if (err == ESP_ERR_NO_MEM) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Already have the maximum number of group addresses");
+        return ESP_FAIL;
+    }
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save group address");
+        return ESP_FAIL;
+    }
+    ble_mesh_subscribe_group_addr(group_addr);
+
+    send_group_addrs_json(req, true);
+    return ESP_OK;
+}
+
+esp_err_t mesh_settings_remove_handler(httpd_req_t *req)
+{
+    uint16_t group_addr = 0;
+    if (!parse_group_addr_body(req, &group_addr)) {
+        return ESP_FAIL;
+    }
+
+    if (mesh_config_remove_group_addr(group_addr) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save group addresses");
+        return ESP_FAIL;
+    }
+    ble_mesh_unsubscribe_group_addr(group_addr);
+
+    send_group_addrs_json(req, true);
+    return ESP_OK;
+}
+
+esp_err_t mesh_keys_get_handler(httpd_req_t *req)
+{
+    char net_key_hex[33];
+    char app_key_hex[33];
+
+    if (!ble_mesh_get_local_keys_hex(net_key_hex, sizeof(net_key_hex), app_key_hex, sizeof(app_key_hex)))
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mesh keys not available yet");
+        return ESP_FAIL;
+    }
+
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    char buf[160];
+    snprintf(buf, sizeof(buf), "{\"net_key\":\"%s\",\"app_key\":\"%s\",\"mode\":\"%s\"}",
+             net_key_hex, app_key_hex, cfg.mode == MESH_MODE_JOIN_EXISTING ? "existing" : "standalone");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, -1);
+    return ESP_OK;
+}
+
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+// Consolidated mesh state dump for debugging via browser/curl instead of a serial capture.
+esp_err_t mesh_debug_status_handler(httpd_req_t *req)
+{
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    extern struct mesh_network_info_store store;
+
+    char net_key_hex[33] = {0};
+    char app_key_hex[33] = {0};
+    bool keys_available = ble_mesh_get_local_keys_hex(net_key_hex, sizeof(net_key_hex), app_key_hex, sizeof(app_key_hex));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "sku",
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+                             "provisioner"
+#else
+                             "node_only"
+#endif
+    );
+    cJSON_AddStringToObject(root, "mode", cfg.mode == MESH_MODE_JOIN_EXISTING ? "existing" : "standalone");
+
+    char hex[8];
+    snprintf(hex, sizeof(hex), "0x%04X", local_element_addr);
+    cJSON_AddStringToObject(root, "local_element_addr", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", store.net_idx);
+    cJSON_AddStringToObject(root, "net_idx", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", store.app_idx);
+    cJSON_AddStringToObject(root, "app_idx", hex);
+    snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addr_count > 0 ? cfg.group_addrs[0] : 0);
+    cJSON_AddStringToObject(root, "group_addr", hex);
+    cJSON *group_addrs_arr = cJSON_CreateArray();
+    for (uint8_t i = 0; i < cfg.group_addr_count; i++)
+    {
+        snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addrs[i]);
+        cJSON_AddItemToArray(group_addrs_arr, cJSON_CreateString(hex));
+    }
+    cJSON_AddItemToObject(root, "group_addrs", group_addrs_arr);
+
+    cJSON_AddBoolToObject(root, "local_keys_available", keys_available);
+    if (keys_available)
+    {
+        cJSON_AddStringToObject(root, "net_key", net_key_hex);
+        cJSON_AddStringToObject(root, "app_key", app_key_hex);
+    }
+
+    cJSON_AddBoolToObject(root, "provisioning_enabled", ble_mesh_get_provisioning_enabled());
+    cJSON_AddBoolToObject(root, "auto_provisioning_enabled", ble_mesh_get_auto_provisioning_enabled());
+
+    cJSON *ext_nodes = cJSON_CreateArray();
+    int ext_count = 0;
+    for_each_external_node([&ext_nodes, &ext_count](const external_mesh_node_t &node)
+                            {
+        ext_count++;
+        cJSON *item = cJSON_CreateObject();
+        char addr_hex[8];
+        snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
+        cJSON_AddStringToObject(item, "addr", addr_hex);
+        cJSON_AddNumberToObject(item, "features", node.features);
+        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        cJSON_AddItemToArray(ext_nodes, item); });
+    cJSON_AddNumberToObject(root, "external_node_count", ext_count);
+    cJSON_AddItemToObject(root, "external_nodes", ext_nodes);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
+
+esp_err_t mesh_external_discover_handler(httpd_req_t *req)
+{
+    esp_err_t err = ble_mesh_discover_external_nodes();
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                             err == ESP_ERR_INVALID_STATE
+                                 ? "No group address configured — set one first"
+                                 : "Failed to send discovery request");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"discovering\"}");
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
+{
+    cJSON *arr = cJSON_CreateArray();
+    for_each_external_node([&arr](const external_mesh_node_t &node)
+                            {
+        cJSON *item = cJSON_CreateObject();
+        char addr_hex[8];
+        snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
+        cJSON_AddStringToObject(item, "addr", addr_hex);
+        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+
+        cJSON *features = cJSON_CreateArray();
+        if (node.features & FEATURE_GENERIC_ONOFF)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("onoff"));
+            cJSON_AddBoolToObject(item, "onoff", node.onoff != 0);
+        }
+        if (node.features & FEATURE_GENERIC_LEVEL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("level"));
+            cJSON_AddNumberToObject(item, "level", node.level);
+        }
+        if (node.features & FEATURE_LIGHT_LIGHTNESS)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("lightness"));
+        }
+        if (node.features & FEATURE_LIGHT_HSL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("hsl"));
+        }
+        if (node.features & FEATURE_LIGHT_CTL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("ctl"));
+        }
+        // HSL/CTL Servers extend Light Lightness, so any of the three is dimmable.
+        if (node.features & (FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL))
+        {
+            cJSON_AddNumberToObject(item, "lightness", node.lightness);
+            cJSON_AddNumberToObject(item, "max_lightness", node.max_lightness);
+        }
+        cJSON_AddItemToObject(item, "features", features);
+
+        cJSON_AddItemToArray(arr, item); });
+
+    char *json_str = cJSON_PrintUnformatted(arr);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(arr);
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_command_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    // Exactly one of onoff / level / lightness selects which model to command.
+    cJSON *onoff_item = cJSON_GetObjectItem(json, "onoff");
+    cJSON *level_item = cJSON_GetObjectItem(json, "level");
+    cJSON *lightness_item = cJSON_GetObjectItem(json, "lightness");
+    int field_count = (onoff_item ? 1 : 0) + (level_item ? 1 : 0) + (lightness_item ? 1 : 0);
+    // Range-checked: an out-of-range double->int16_t/uint16_t cast is UB, not truncation.
+    if (field_count != 1 ||
+        (onoff_item && !cJSON_IsBool(onoff_item)) ||
+        (level_item && (!cJSON_IsNumber(level_item) || level_item->valuedouble < INT16_MIN || level_item->valuedouble > INT16_MAX)) ||
+        (lightness_item && (!cJSON_IsNumber(lightness_item) || lightness_item->valuedouble < 0 || lightness_item->valuedouble > UINT16_MAX)))
+    {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Specify exactly one of: onoff (bool), level (number, -32768..32767), lightness (number, 0..65535)");
+        return ESP_FAIL;
+    }
+    bool onoff = onoff_item && cJSON_IsTrue(onoff_item);
+    int16_t level = level_item ? (int16_t)level_item->valuedouble : 0;
+    uint16_t lightness = lightness_item ? (uint16_t)lightness_item->valuedouble : 0;
+
+    uint16_t addr = 0;
+    cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
+    if (cJSON_IsString(addr_item))
+    {
+        // Explicit target must be a single unicast node — group/broadcast addresses
+        // (0xC000-0xFFFF) are only reachable via the configured group address below,
+        // never directly from client input, to avoid a request accidentally (or
+        // maliciously) commanding every device on the mesh at once.
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end == addr_item->valuestring || *end != '\0' || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw) || raw > 0xFFFF)
+        {
+            cJSON_Delete(json);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "addr must be a valid unicast address (0x0001-0x7FFF)");
+            return ESP_FAIL;
+        }
+        addr = (uint16_t)raw;
+    }
+    else
+    {
+        // No specific address: broadcast to the first configured group address instead.
+        uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+        uint8_t count = 0;
+        mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+        if (count > 0)
+        {
+            addr = group_addrs[0];
+        }
+    }
+    cJSON_Delete(json);
+
+    if (addr == 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No target address (specify addr or configure a group address)");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err;
+    if (level_item)
+    {
+        err = ble_mesh_send_external_level_command(addr, level);
+    }
+    else if (lightness_item)
+    {
+        err = ble_mesh_send_external_lightness_command(addr, lightness);
+    }
+    else
+    {
+        err = ble_mesh_send_external_command(addr, onoff);
+    }
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send command");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
+    return ESP_OK;
+}
+
+// Dashboard counterpart of a provisioned node's "MQTT Discovery"/"MQTT Status" buttons.
+esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    uint16_t addr = 0;
+    cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
+    if (cJSON_IsString(addr_item))
+    {
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end != addr_item->valuestring && *end == '\0' && raw <= 0xFFFF)
+        {
+            addr = (uint16_t)raw;
+        }
+    }
+    cJSON_Delete(json);
+
+    external_mesh_node_t node;
+    if (addr == 0 || !ble_mesh_find_external_node(addr, node))
+    {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown external node");
+        return ESP_FAIL;
+    }
+    if (mqtt_credentials().get_connection_state() != mqtt_connection_state_t::CONNECTED)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "MQTT not connected");
+        return ESP_FAIL;
+    }
+
+    mqtt_notify_external_node_changed(addr, true);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"published\"}");
+    return ESP_OK;
+}
+
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+esp_err_t mesh_reset_role_handler(httpd_req_t *req)
+{
+    // Recovery for a bridge stuck in a Provisioner/Node role mismatch (see ble_mesh_init).
+    esp_err_t err = mesh_config_reset_stack_state();
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset mesh role state");
+        return ESP_FAIL;
+    }
+
+    // Also clear our own node identity — mesh_config_reset_stack_state() only wipes mesh_core.
+    mesh_config_update([](mesh_config_t *cfg, void *) {
+        cfg->node_addr = 0;
+        cfg->node_net_idx = 0;
+        cfg->node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
+    }, nullptr);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"reset, restarting\"}");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+esp_err_t logs_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+
+    if (!websocket_logger_is_history_enabled())
+    {
+        httpd_resp_sendstr(req, "Log history retention is disabled. Enable it over the debug console with: log_history on\n");
+        return ESP_OK;
+    }
+
+    // Heap, not stack: LOG_HISTORY_MAX_LINES (200) lines up to ~256 bytes each could
+    // reach tens of KB, too large for this task's stack.
+    static constexpr size_t BUF_SIZE = 32 * 1024;
+    char *buf = (char *)malloc(BUF_SIZE);
+    if (!buf)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    size_t len = websocket_logger_get_history(buf, BUF_SIZE);
+    httpd_resp_send(req, buf, len);
+    free(buf);
+    return ESP_OK;
+}
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 esp_err_t node_wildcard_handler(httpd_req_t *req)
 {
@@ -2308,7 +2916,9 @@ namespace
         // API endpoints
         {"/api/wifi/scan", HTTP_GET},
         {"/api/wifi/connect", HTTP_POST},
-        {"/api/wifi/status", HTTP_GET}};
+        {"/api/wifi/status", HTTP_GET},
+        {"/api/mesh/config", HTTP_POST},
+        {"/api/setup/restart", HTTP_POST}};
 
     constexpr size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);
 }

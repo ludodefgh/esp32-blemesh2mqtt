@@ -2,15 +2,22 @@
 
 // Standard C/C++ libraries
 #include <algorithm>
+#include <atomic>
+#include <deque>
 #include <mutex>
+#include <string>
 #include <vector>
 
 // ESP-IDF includes
+#include "esp_console.h"
+#include "sdkconfig.h"
 #include "esp_log_write.h"
 #include <freertos/ringbuf.h>
 
 // Project includes
 #include "common/log_common.h"
+#include "debug/console_cmd.h"
+#include "debug/debug_commands_registry.h"
 
 static httpd_handle_t ws_server = nullptr;
 static std::vector<int> ws_clients;
@@ -18,6 +25,14 @@ static std::mutex ws_mutex;
 static RingbufHandle_t log_ringbuf = nullptr;
 static const char *TAG = "ws_logger";
 static vprintf_like_t original_vprintf = nullptr;
+
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+// Retained log history — off by default, see websocket_logger_set_history_enabled.
+static constexpr size_t LOG_HISTORY_MAX_LINES = 200;
+static std::deque<std::string> log_history;
+static std::mutex log_history_mutex;
+static std::atomic<bool> log_history_enabled{false};
+#endif
 
 // WebSocket connection management constants
 static constexpr size_t MAX_WS_CLIENTS = 4;
@@ -126,7 +141,16 @@ void websocket_logger_register_uri(httpd_handle_t server)
 int log_ws_vprintf(const char *fmt, va_list args)
 {
     char line[256];
-    int len = vsnprintf(line, sizeof(line), fmt, args);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int len = vsnprintf(line, sizeof(line), fmt, args_copy);
+    va_end(args_copy);
+    if (len < 0)
+    {
+        return len;
+    }
+    // vsnprintf returns the untruncated length; only what fits in `line` is valid.
+    size_t stored = std::min<size_t>(len, sizeof(line) - 1);
 
     // Use original vprintf to avoid recursive logging
     if (original_vprintf)
@@ -137,7 +161,7 @@ int log_ws_vprintf(const char *fmt, va_list args)
     // Prevent recursive logging: don't send ws_logger messages to WebSocket
     if (log_ringbuf && !strstr(line, "ws_logger"))
     {
-        BaseType_t result = xRingbufferSend(log_ringbuf, line, len + 1, 0); // include null terminator
+        BaseType_t result = xRingbufferSend(log_ringbuf, line, stored + 1, 0); // include null terminator
         if (result != pdTRUE)
         {
             // Use printf directly for error logging to avoid recursion
@@ -145,8 +169,91 @@ int log_ws_vprintf(const char *fmt, va_list args)
         }
     }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+    if (log_history_enabled.load(std::memory_order_relaxed))
+    {
+        std::lock_guard<std::mutex> lock(log_history_mutex);
+        log_history.emplace_back(line, stored);
+        if (log_history.size() > LOG_HISTORY_MAX_LINES)
+        {
+            log_history.pop_front();
+        }
+    }
+#endif
+
     return len;
 }
+
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+void websocket_logger_set_history_enabled(bool enabled)
+{
+    log_history_enabled.store(enabled, std::memory_order_relaxed);
+    if (!enabled)
+    {
+        std::lock_guard<std::mutex> lock(log_history_mutex);
+        log_history.clear();
+    }
+}
+
+bool websocket_logger_is_history_enabled(void)
+{
+    return log_history_enabled.load(std::memory_order_relaxed);
+}
+
+size_t websocket_logger_get_history(char *buf, size_t buf_size)
+{
+    if (!buf || buf_size == 0)
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(log_history_mutex);
+    size_t pos = 0;
+    for (const auto &line : log_history)
+    {
+        if (pos + 1 >= buf_size)
+        {
+            break; // no room left even for a null terminator
+        }
+        size_t to_copy = std::min(line.size(), buf_size - 1 - pos);
+        memcpy(buf + pos, line.data(), to_copy);
+        pos += to_copy;
+        if (to_copy < line.size())
+        {
+            break; // buffer full mid-line
+        }
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static int log_history_cmd(int argc, char **argv)
+{
+    if (argc != 2 || (strcmp(argv[1], "on") != 0 && strcmp(argv[1], "off") != 0))
+    {
+        LOG_ERROR(TAG, "Usage: log_history <on|off>");
+        return 1;
+    }
+
+    bool enable = strcmp(argv[1], "on") == 0;
+    websocket_logger_set_history_enabled(enable);
+    LOG_INFO(TAG, "Log history retention %s", enable ? "enabled" : "disabled");
+    return 0;
+}
+
+static void register_websocket_logger_commands(void)
+{
+    const esp_console_cmd_t cmd_def = {
+        .command = "log_history",
+        .help = "Enable/disable retaining recent log lines for GET /api/logs: log_history <on|off>",
+        .hint = NULL,
+        .func = &log_history_cmd,
+    };
+    ESP_ERROR_CHECK(register_console_command(&cmd_def));
+}
+
+REGISTER_DEBUG_COMMAND(register_websocket_logger_commands);
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 void ws_log_sender_task(void *arg)
 {

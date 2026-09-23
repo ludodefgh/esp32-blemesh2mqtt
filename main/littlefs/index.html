@@ -99,6 +99,15 @@
                 </label>
                 <span class="toggle-description">Automatically provision newly discovered BLE Mesh devices</span>
               </div>
+              <div class="form-group" style="margin-top:14px;">
+                <label style="font-size:0.9em;font-weight:600;">Group Address Subscriptions</label>
+                <div id="group-addr-list" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="text" id="group-addr-input" placeholder="e.g. 0xC000" style="font-family:monospace;max-width:160px;">
+                  <button class="btn btn-primary" style="width:auto;padding:8px 16px;" onclick="addMeshGroupAddr()">Add</button>
+                </div>
+                <span style="font-size:0.8em;color:var(--text-muted);">Subscribe bridge models to up to 3 group addresses — applied immediately, no restart needed.</span>
+              </div>
             </div>
             
             <div class="controls-grid">
@@ -275,6 +284,25 @@
               </div>
             </div>
           </section>
+
+          <!-- Mesh Keys -->
+          <section class="card mesh-keys-section">
+            <div class="section-header">
+              <h2>Mesh Keys</h2>
+            </div>
+
+            <div class="version-info-grid">
+              <div class="info-row">
+                <span class="info-label">NetKey:</span>
+                <span class="info-value" id="mesh-net-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-net-key')">Loading...</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">AppKey:</span>
+                <span class="info-value" id="mesh-app-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-app-key')">Loading...</span>
+              </div>
+            </div>
+            <span style="font-size:0.8em;color:var(--text-muted);">Read-only. In standalone mode these are self-generated; in "Join an existing mesh" mode they're received from the real provisioning handshake — see External Mesh Nodes. Click a value to copy it.</span>
+          </section>
         </div>
       </div>
 
@@ -303,6 +331,35 @@
             <h3 class="mesh-group-title">Unprovisioned devices</h3>
             <div id="unprovisioned" class="devices-grid"></div>
             <div id="no-devices" class="empty-state">No unprovisioned devices found</div>
+          </div>
+
+          <!-- External Mesh Nodes (joined existing mesh, no DevKey) — ported from
+               feature/join-existing-mesh into the unified Mesh card as a third group. -->
+          <div class="mesh-group external-nodes-section">
+            <div class="section-header">
+              <h3 class="mesh-group-title">External mesh nodes</h3>
+              <div class="mesh-header-right">
+                <button class="btn btn-secondary btn-small" onclick="sendExternalGroupCommand(true)">
+                  <span class="icon">💡</span>
+                  Group ON
+                </button>
+                <button class="btn btn-warning btn-small" onclick="sendExternalGroupCommand(false)">
+                  <span class="icon">🌙</span>
+                  Group OFF
+                </button>
+                <button class="btn btn-primary btn-small" onclick="discoverExternalNodes()">
+                  <span class="icon">📡</span>
+                  Discover
+                </button>
+              </div>
+            </div>
+            <p class="hint" style="margin-bottom:0.75rem;">
+              Nodes on a joined existing mesh that this bridge did not provision itself.
+              Discovery probes each supported model (OnOff, Level, Lightness, HSL, CTL) on every
+              configured group address and lists whichever nodes reply.
+            </p>
+            <div id="external-nodes" class="devices-grid"></div>
+            <div id="no-external-nodes" class="empty-state">No external nodes discovered yet</div>
           </div>
         </section>
       </div>

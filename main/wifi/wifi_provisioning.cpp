@@ -7,6 +7,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 
 // ESP-IDF component includes
@@ -25,6 +26,7 @@
 // Project includes
 #include "common/log_common.h"
 #include "dns_server.h"
+#include "mesh_config.h"
 #include "security/credential_encryption.h"
 #include "wifi_provisioning.h"
 
@@ -1343,6 +1345,39 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// The wizard restarts via /api/setup/restart after step 2; if the user never gets
+// there (portal sheet closed, error), don't leave saved credentials stuck in AP mode.
+static constexpr uint64_t SETUP_FALLBACK_RESTART_US = 3ULL * 60 * 1000 * 1000;
+static esp_timer_handle_t s_setup_fallback_timer = nullptr;
+
+static void setup_fallback_restart_cb(void *arg)
+{
+    LOG_WARN(TAG, "Setup wizard not completed after WiFi was saved — restarting with defaults");
+    wifi_provisioning_stop_captive_portal();
+    esp_restart();
+}
+
+static void arm_setup_fallback_restart()
+{
+    if (!s_setup_fallback_timer)
+    {
+        const esp_timer_create_args_t args = {
+            .callback = &setup_fallback_restart_cb,
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "setup_fallback",
+            .skip_unhandled_events = false,
+        };
+        if (esp_timer_create(&args, &s_setup_fallback_timer) != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to create setup fallback restart timer");
+            return;
+        }
+    }
+    esp_timer_stop(s_setup_fallback_timer); // restart the countdown on a re-submit
+    esp_timer_start_once(s_setup_fallback_timer, SETUP_FALLBACK_RESTART_US);
+}
+
 static esp_err_t wifi_connect_handler(httpd_req_t *req)
 {
     char buf[256];
@@ -1391,15 +1426,16 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     }
 
     esp_err_t err = wifi_provisioning_set_credentials(ssid, password);
-    cJSON_Delete(json);
 
     if (err == ESP_ERR_INVALID_ARG)
     {
+        cJSON_Delete(json);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid SSID or password format");
         return ESP_FAIL;
     }
     else if (err != ESP_OK)
     {
+        cJSON_Delete(json);
         LOG_ERROR(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
         return ESP_FAIL;
@@ -1428,10 +1464,13 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     // Clear sensitive verification data
     memset(verify_ssid, 0, sizeof(verify_ssid));
     memset(verify_password, 0, sizeof(verify_password));
+    cJSON_Delete(json); // ssid/password point into it
+
+    arm_setup_fallback_restart();
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddStringToObject(response, "message", "Credentials saved, restarting device...");
+    cJSON_AddStringToObject(response, "message", "Credentials saved");
 
     char *response_string = cJSON_Print(response);
     httpd_resp_set_type(req, "application/json");
@@ -1440,20 +1479,107 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     free(response_string);
     cJSON_Delete(response);
 
-    // Schedule restart to allow HTTP response to be sent
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    return ESP_OK;
+}
 
-    // Stop captive portal cleanly before restart
+
+static esp_err_t mesh_config_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0 || ret >= (int)sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    mesh_config_t current = {};
+    mesh_config_load(&current);
+    mesh_mode_t requested_mode = current.mode;
+
+    cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
+    if (cJSON_IsString(mode_item)) {
+        requested_mode = (strcmp(mode_item->valuestring, "existing") == 0)
+                             ? MESH_MODE_JOIN_EXISTING
+                             : MESH_MODE_STANDALONE;
+    }
+    cJSON_Delete(json);
+
+    // Only one role is compiled into a given SKU (see CLAUDE.md) — refuse the other
+    // rather than saving a mode ble_mesh_init() can't start.
+#ifndef CONFIG_BLE_MESH_PROVISIONER
+    if (requested_mode == MESH_MODE_STANDALONE) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Node-only build: only 'Join an existing mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+#ifndef CONFIG_BLE_MESH_NODE
+    if (requested_mode == MESH_MODE_JOIN_EXISTING) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Provisioner-only build: only 'Create a new mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+
+    // No net_key/app_key to accept here anymore — joining an existing mesh means
+    // becoming a real node, provisioned by whatever already manages that mesh
+    // (nRF Mesh, etc.), which assigns NetKey/AppKey/address itself. See ble_mesh_init.
+
+    struct mode_change_t { mesh_mode_t mode; bool changed; } change = {requested_mode, false};
+    esp_err_t err = mesh_config_update([](mesh_config_t *cfg, void *ctx) {
+        auto *c = static_cast<mode_change_t *>(ctx);
+        c->changed = cfg->mode != c->mode;
+        cfg->mode = c->mode;
+        if (c->changed) {
+            cfg->node_addr = 0;
+            cfg->node_net_idx = 0;
+            cfg->node_app_idx = 0xFFFF;
+        }
+    }, &change);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save mesh config");
+        return ESP_FAIL;
+    }
+
+    if (change.changed) {
+        // Switching between Provisioner (standalone) and Node (join-existing) role:
+        // the stack refuses to enable a role that mismatches whatever role it last
+        // persisted — clear it so the new role can start clean. Only touches the
+        // mesh stack's own namespace, not WiFi/MQTT config.
+        mesh_config_reset_stack_state();
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
+}
+
+static esp_err_t mesh_config_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    httpd_resp_sendstr(req, "{\"supported_mode\":\"standalone\"}");
+#else
+    httpd_resp_sendstr(req, "{\"supported_mode\":\"existing\"}");
+#endif
+    return ESP_OK;
+}
+
+static esp_err_t setup_restart_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"restarting\"}");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
     wifi_provisioning_stop_captive_portal();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // Additional delay to ensure all NVS operations are fully completed
-    LOG_INFO(TAG, "Final synchronization before restart...");
     vTaskDelay(pdMS_TO_TICKS(500));
-
-    LOG_INFO(TAG, "Restarting ESP32 to connect with new credentials...");
+    LOG_INFO(TAG, "Restarting ESP32 after setup completion...");
     esp_restart();
-
     return ESP_OK;
 }
 
@@ -1523,7 +1649,10 @@ constexpr httpd_uri_t captive_uris[] = {
         // API endpoints
         {.uri = "/api/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_handler},
         {.uri = "/api/wifi/connect", .method = HTTP_POST, .handler = wifi_connect_handler},
-        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler}};
+        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler},
+        {.uri = "/api/mesh/config", .method = HTTP_POST, .handler = mesh_config_handler},
+        {.uri = "/api/mesh/config", .method = HTTP_GET, .handler = mesh_config_get_handler},
+        {.uri = "/api/setup/restart", .method = HTTP_POST, .handler = setup_restart_handler}};
 }
 void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
 {

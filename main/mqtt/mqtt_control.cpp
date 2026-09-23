@@ -23,6 +23,7 @@
 #include "debug_console_common.h"
 #include "mqtt_bridge.h"
 #include "mqtt_credentials.h"
+#include "mqtt_external_control.h"
 #include "sig_companies/company_map.h"
 
 #define TAG "APP_MQTT"
@@ -75,11 +76,14 @@ static std::string get_node_base_topic(const std::shared_ptr<bm2mqtt_node_info>&
         return {};
     }
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only build tracks no provisioned nodes locally — nothing to bridge here.
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         std::string node_addr{bt_hex(mesh_node->addr, BD_ADDR_LEN)};
         return get_bridge_base_topic() + "/node_" + node_addr;
     }
+#endif
     LOG_WARN(TAG, "Failed to get node base topic - node not found");
     return {};
 }
@@ -101,20 +105,31 @@ std::string mqtt_get_node_state_topic(const std::shared_ptr<bm2mqtt_node_info>& 
     return base.empty() ? std::string{} : base + "/state";
 }
 
+static bool node_is_cover(const std::shared_ptr<bm2mqtt_node_info>& node_info)
+{
+    const uint16_t light_features = FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+    return (node_info->features & FEATURE_GENERIC_LEVEL) &&
+           !(node_info->features & light_features);
+}
+
 std::string mqtt_get_node_discovery_id(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     if (!node_info)
         return {};
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node_info->uuid.raw()))
     {
         char buf[64] = {0};
+        if (node_is_cover(node_info))
+        {
+            snprintf(buf, sizeof(buf), "homeassistant/cover/blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
+            return std::string{buf} + "_cover/config";
+        }
         snprintf(buf, sizeof(buf), "homeassistant/light/blemesh2mqtt_%s", bt_hex(mesh_node->addr, BD_ADDR_LEN));
-
-        std::string uniq_id = std::string{buf} + "_light/config";
-
-        return uniq_id;
+        return std::string{buf} + "_light/config";
     }
+#endif
     return {};
 }
 
@@ -128,6 +143,12 @@ void mqtt_subscribe_node(esp_mqtt_client_handle_t client, const std::shared_ptr<
 {
     int msg_id = esp_mqtt_client_subscribe(client, mqtt_get_node_set_topic(node_info).c_str(), 0);
     LOG_INFO(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
+    if (node_is_cover(node_info))
+    {
+        const std::string pos_topic = get_node_base_topic(node_info) + "/set_position";
+        esp_mqtt_client_subscribe(client, pos_topic.c_str(), 0);
+    }
 }
 
 /*
@@ -156,6 +177,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
 
         mqtt_subscribe_all_nodes(client);
+        mqtt_subscribe_all_external_nodes(client);
         mqtt_bridge_subscribe(client);
 
         {
@@ -358,6 +380,8 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
 
     cJSON *root = cJSON_CreateObject();
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only build provisions no one — nothing to look up here.
     if (esp_ble_mesh_node_t *mesh_node = esp_ble_mesh_provisioner_get_node_with_uuid(node->uuid.raw()))
     {
         char buf[64] = {0};
@@ -401,38 +425,53 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
 
         cJSON_AddItemToObject(root, "~", cJSON_CreateString(root_publish.c_str()));
         cJSON_AddItemToObject(root, "name", cJSON_CreateNull());
-        const std::string uniq_id = std::string{buf} + "_light";
-        cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
+
         cJSON_AddItemToObject(root, "cmd_t", cJSON_CreateString("~/set"));
         cJSON_AddItemToObject(root, "stat_t", cJSON_CreateString("~/state"));
-        cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
-        cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
-        cJSON_AddNumberToObject(root, "brightness_scale", node->max_lightness);
-        cJSON *sup_clrm = nullptr;
-        cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
-        if (sup_clrm != nullptr)
-        {
-            bool has_color = false;
-            if (node->features & FEATURE_LIGHT_CTL)
-            {
-                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
-                cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
-                cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
-                cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
-                has_color = true;
-            }
-            if (node->features & FEATURE_LIGHT_HSL)
-            {
-                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
-                has_color = true;
-            }
 
-            if (!has_color && (node->features & FEATURE_LIGHT_LIGHTNESS))
+        if (node_is_cover(node))
+        {
+            const std::string uniq_id = std::string{buf} + "_cover";
+            cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
+            cJSON_AddItemToObject(root, "pos_t", cJSON_CreateString("~/state"));
+            cJSON_AddItemToObject(root, "set_pos_t", cJSON_CreateString("~/set_position"));
+            cJSON_AddItemToObject(root, "pos_template", cJSON_CreateString("{{ value_json.position }}"));
+            cJSON_AddItemToObject(root, "value_template", cJSON_CreateString("{{ value_json.state }}"));
+            cJSON_AddItemToObject(root, "device_class", cJSON_CreateString("blind"));
+        }
+        else
+        {
+            const std::string uniq_id = std::string{buf} + "_light";
+            cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
+            cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
+            cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
+            cJSON_AddNumberToObject(root, "brightness_scale", node->max_lightness);
+            cJSON *sup_clrm = nullptr;
+            cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
+            if (sup_clrm != nullptr)
             {
-                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
+                bool has_color = false;
+                if (node->features & FEATURE_LIGHT_CTL)
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
+                    cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
+                    cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node->min_temp));
+                    cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node->max_temp));
+                    has_color = true;
+                }
+                if (node->features & FEATURE_LIGHT_HSL)
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("hs"));
+                    has_color = true;
+                }
+                if (!has_color && (node->features & FEATURE_LIGHT_LIGHTNESS))
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
+                }
             }
         }
     }
+#endif // CONFIG_BLE_MESH_PROVISIONER
 
     return std::unique_ptr<cJSON>{root};
 }
@@ -447,26 +486,36 @@ std::unique_ptr<cJSON> make_status_message(const std::shared_ptr<bm2mqtt_node_in
 
     if (node_info->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
     {
-        cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
+        if (node_is_cover(node_info))
+        {
+            // Generic Level -32768..32767 mapped to position 0..100
+            int position = (int)map(node_info->level, -32768, 32767, 0, 100);
+            cJSON_AddStringToObject(root, "state", position > 0 ? "open" : "closed");
+            cJSON_AddNumberToObject(root, "position", position);
+        }
+        else
+        {
+            cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
 
-        if (node_info->color_mode == color_mode_t::brightness)
-        {
-            cJSON_AddStringToObject(root, "color_mode", "brightness");
-            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
-        }
-        else if (node_info->color_mode == color_mode_t::color_temp)
-        {
-            cJSON_AddStringToObject(root, "color_mode", "color_temp");
-            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
-            cJSON_AddNumberToObject(root, "color_temp", node_info->curr_temp);
-        }
-        else if (node_info->color_mode == color_mode_t::hs)
-        {
-            cJSON_AddStringToObject(root, "color_mode", "hs");
-            cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
-            cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
-            cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, node_info->min_hue, node_info->max_hue, 0, 360));
-            cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));
+            if (node_info->color_mode == color_mode_t::brightness)
+            {
+                cJSON_AddStringToObject(root, "color_mode", "brightness");
+                cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
+            }
+            else if (node_info->color_mode == color_mode_t::color_temp)
+            {
+                cJSON_AddStringToObject(root, "color_mode", "color_temp");
+                cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
+                cJSON_AddNumberToObject(root, "color_temp", node_info->curr_temp);
+            }
+            else if (node_info->color_mode == color_mode_t::hs)
+            {
+                cJSON_AddStringToObject(root, "color_mode", "hs");
+                cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
+                cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
+                cJSON_AddNumberToObject(color, "h", (uint16_t)map(node_info->hsl_h, node_info->min_hue, node_info->max_hue, 0, 360));
+                cJSON_AddNumberToObject(color, "s", (uint16_t)map(node_info->hsl_s, node_info->min_saturation, node_info->max_saturation, 0, 100));
+            }
         }
     }
 
@@ -487,6 +536,7 @@ void on_home_assistant_restart_timer(void *arg)
         esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         publish_bridge_info();
         ble_mesh_republish_all_nodes_to_mqtt();
+        mqtt_republish_all_external_nodes();
     }
     else
     {
@@ -583,6 +633,12 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
     // FIX-ME : likely slow af
     const std::string topic{event->topic, static_cast<std::string::size_type>(event->topic_len)};
+    if (topic.find("ext_") != std::string::npos)
+    {
+        mqtt_handle_external_node_data(topic, event->data, event->data_len);
+        return;
+    }
+
     if (auto index_pos = topic.find("node_"); index_pos != std::string::npos)
     {
         // +5 : sizeof node_
@@ -590,8 +646,36 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
         const std::string mac{topic, index_pos + 5, 12};
         if (auto node_info = node_manager().get_node(mac))
         {
+            const bool is_cover = node_is_cover(node_info);
+            if (is_cover && topic.find("/set_position") != std::string::npos)
+            {
+                const std::string pos_str{event->data, static_cast<size_t>(event->data_len)};
+                char *endptr;
+                long pos_l = strtol(pos_str.c_str(), &endptr, 10);
+                if (endptr == pos_str.c_str() || *endptr != '\0') return;
+                int pos = (int)pos_l;
+                pos = pos < 0 ? 0 : (pos > 100 ? 100 : pos);
+                node_info->level = (int16_t)map(pos, 0, 100, -32768, 32767);
+                ble_mesh_gen_level_set(node_info);
+                return;
+            }
+
+            // Cover command handling (plain text: OPEN / CLOSE / STOP)
+            if (is_cover && topic.find("/set") != std::string::npos)
+            {
+                const std::string cmd{event->data, static_cast<size_t>(event->data_len)};
+                if (cmd == "OPEN") {
+                    node_info->level = 32767;
+                    ble_mesh_gen_level_set(node_info);
+                } else if (cmd == "CLOSE") {
+                    node_info->level = -32768;
+                    ble_mesh_gen_level_set(node_info);
+                }
+                return;
+            }
+
             // Use RAII wrapper to prevent memory leaks
-            CJsonPtr response(cJSON_Parse(event->data), cJSON_Delete);
+            CJsonPtr response(cJSON_ParseWithLength(event->data, event->data_len), cJSON_Delete);
             if (response)
             {
                 if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response.get(), "state"))

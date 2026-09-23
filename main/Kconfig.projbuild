@@ -113,4 +113,12 @@ menu "Example Configuration"
             bool "WAPI PSK"
     endchoice
 
+    config BM2MQTT_DEBUG_TOOLS
+        bool "Developer debug tools"
+        default n
+        help
+            Builds in developer-only tooling: GET /api/mesh/debug (dumps mesh keys),
+            GET /api/logs + the log_history console command, POST /api/mesh/reset_role,
+            and the wifi_set console command. Keep disabled for release/shared builds.
+
 endmenu
