@@ -58,6 +58,7 @@ esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff);
 esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level);
 esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t lightness);
 void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
+bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

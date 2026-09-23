@@ -37,6 +37,7 @@
 #include "message_queue.h"
 #include "mqtt/mqtt_bridge.h"
 #include "mqtt/mqtt_control.h"
+#include "mqtt/mqtt_external_control.h"
 #include "sig_companies/company_map.h"
 #include "sig_models/model_map.h"
 
@@ -62,26 +63,46 @@ static std::mutex external_nodes_mutex;
 static std::vector<external_mesh_node_t> external_nodes;
 
 // Caller must hold external_nodes_mutex.
-static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr)
+static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, bool *was_new = nullptr)
 {
     for (auto &n : external_nodes)
     {
         if (n.unicast == addr)
         {
+            if (was_new) *was_new = false;
             return n;
         }
     }
     external_nodes.push_back({addr, 0, 0, 0, 0, 0});
+    if (was_new) *was_new = true;
     return external_nodes.back();
+}
+
+bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
+{
+    std::lock_guard<std::mutex> lock(external_nodes_mutex);
+    for (const auto &n : external_nodes)
+    {
+        if (n.unicast == addr)
+        {
+            out = n;
+            return true;
+        }
+    }
+    return false;
 }
 
 static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
 {
-    std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    auto &node = get_or_create_external_node_locked(addr);
-    node.onoff = onoff;
-    node.features |= FEATURE_GENERIC_ONOFF;
-    node.last_seen_us = esp_timer_get_time();
+    bool was_new = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        node.onoff = onoff;
+        node.features |= FEATURE_GENERIC_ONOFF;
+        node.last_seen_us = esp_timer_get_time();
+    }
+    mqtt_notify_external_node_changed(addr, was_new);
 }
 
 // Lightness/HSL/CTL Server models extend Generic Level Server (Mesh Model spec), so a
@@ -91,25 +112,40 @@ static constexpr uint16_t GENERIC_LEVEL_EXTENDING_FEATURES =
 
 static void upsert_external_node_level(uint16_t addr, int16_t level)
 {
-    std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    auto &node = get_or_create_external_node_locked(addr);
-    if (node.features & GENERIC_LEVEL_EXTENDING_FEATURES)
+    bool was_new = false;
+    bool excluded = false;
     {
-        return;
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        if (node.features & GENERIC_LEVEL_EXTENDING_FEATURES)
+        {
+            excluded = true;
+        }
+        else
+        {
+            node.level = level;
+            node.features |= FEATURE_GENERIC_LEVEL;
+            node.last_seen_us = esp_timer_get_time();
+        }
     }
-    node.level = level;
-    node.features |= FEATURE_GENERIC_LEVEL;
-    node.last_seen_us = esp_timer_get_time();
+    if (!excluded)
+    {
+        mqtt_notify_external_node_changed(addr, was_new);
+    }
 }
 
 static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
 {
-    std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    auto &node = get_or_create_external_node_locked(addr);
-    node.lightness = lightness;
-    node.features |= FEATURE_LIGHT_LIGHTNESS;
-    node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
-    node.last_seen_us = esp_timer_get_time();
+    bool was_new = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        node.lightness = lightness;
+        node.features |= FEATURE_LIGHT_LIGHTNESS;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.last_seen_us = esp_timer_get_time();
+    }
+    mqtt_notify_external_node_changed(addr, was_new);
 }
 
 // Detection only, no value storage or UI/command support — just enough to exclude

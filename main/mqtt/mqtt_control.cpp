@@ -23,6 +23,7 @@
 #include "debug_console_common.h"
 #include "mqtt_bridge.h"
 #include "mqtt_credentials.h"
+#include "mqtt_external_control.h"
 #include "sig_companies/company_map.h"
 
 #define TAG "APP_MQTT"
@@ -176,6 +177,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
 
         mqtt_subscribe_all_nodes(client);
+        mqtt_subscribe_all_external_nodes(client);
         mqtt_bridge_subscribe(client);
 
         {
@@ -534,6 +536,7 @@ void on_home_assistant_restart_timer(void *arg)
         esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         publish_bridge_info();
         ble_mesh_republish_all_nodes_to_mqtt();
+        mqtt_republish_all_external_nodes();
     }
     else
     {
@@ -630,6 +633,12 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 
     // FIX-ME : likely slow af
     const std::string topic{event->topic, static_cast<std::string::size_type>(event->topic_len)};
+    if (topic.find("ext_") != std::string::npos)
+    {
+        mqtt_handle_external_node_data(topic, event->data, event->data_len);
+        return;
+    }
+
     if (auto index_pos = topic.find("node_"); index_pos != std::string::npos)
     {
         // +5 : sizeof node_
