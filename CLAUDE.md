@@ -8,14 +8,17 @@ ESP32 firmware (ESP-IDF v5.5-dev, C++23) that bridges a BLE Mesh network to MQTT
 
 ## Build, flash, monitor
 
-Two ESP-IDF projects exist on this devcontainer, each with real attached hardware for live testing:
+Up to three ESP-IDF projects exist on this devcontainer, each with real attached hardware for live testing (see the **`esp32-test-provisioner`** skill for how they fit together as a fully-automated, nRF-Mesh-free test setup):
 
 | Project | Chip | Port | Role |
 |---|---|---|---|
 | `/workspaces/ESPIDFSengledB11N1EProto` (this repo) | ESP32 WROOM | `/dev/ttyUSB0` | the bridge |
-| `/workspaces/onoff_server_test` | ESP32-C3 | `/dev/ttyACM0` | disposable test node running Espressif's stock `onoff_server` example (not this project's code) |
+| `/workspaces/provisioner_test` | ESP32-C3 | `/dev/ttyACM0` | test-harness Provisioner (Espressif's stock `provisioner` example, adapted) — auto-provisions and configures whatever unprovisioned device it sees, standing in for nRF Mesh |
+| `/workspaces/onoff_server_test` | ESP32-C3 | `/dev/ttyACM1` (varies) | disposable "External Mesh Node" test target running Espressif's stock `onoff_server` example (not this project's code) |
 
-Use the **`esp32-flash`** and **`esp32-monitor`** skills for build/flash/serial-log workflows — they encode hard-won gotchas (non-interactive `idf.py monitor` doesn't work, `ttyACM0` resets on every open, Kconfig *choice* options can silently revert on `reconfigure`, etc.) that are easy to rediscover the hard way otherwise.
+Use the **`esp32-flash`** and **`esp32-monitor`** skills for build/flash/serial-log workflows — they encode hard-won gotchas (non-interactive `idf.py monitor` doesn't work, `ttyACM0`-style ports reset on every open, Kconfig *choice* options can silently revert on `reconfigure`, etc.) that are easy to rediscover the hard way otherwise.
+
+**`sdkconfig` is not version-controlled and does not survive a devcontainer restart** — it regenerates from `sdkconfig.defaults` (which *is* tracked), silently reverting any role/Kconfig edit made only to the live `sdkconfig`. Persist a role change (e.g. `CONFIG_BLE_MESH_NODE` vs `CONFIG_BLE_MESH_PROVISIONER`) in `sdkconfig.defaults`, not just `sdkconfig`, or it'll come back the next time the container restarts.
 
 Quick reference:
 ```bash
@@ -56,6 +59,10 @@ Console commands register themselves via the `REGISTER_DEBUG_COMMAND(fn)` macro 
 `web_server/web_server.cpp` serves both the dashboard/API (once WiFi is configured) and, via `wifi/wifi_provisioning.cpp`, a captive-portal setup wizard for first-time WiFi configuration. Static assets (`main/littlefs/*`) are packed into a LittleFS image and flashed as a separate `storage` partition (see `littlefs_create_partition_image` in `main/CMakeLists.txt`) — editing `index.html`/`setup.html`/`js/main.js` requires reflashing to take effect, not just a app rebuild (though a normal `flash` does both).
 
 `GET /api/mesh/debug` (`mesh_debug_status_handler`) dumps the mesh stack's internal state as JSON in one shot — SKU, mode, `local_element_addr`/`net_idx`/`app_idx`, group address, whether local keys actually resolve, and the external-nodes table — for diagnosing live without a serial capture.
+
+The captive portal's temporary AP has no route from this devcontainer's network (no WiFi passthrough), so its setup wizard can't be driven over HTTP after an `erase-flash`. The `wifi_set <ssid> <password>` debug console command (`wifi/wifi_commands.cpp`) is the workaround: sets WiFi credentials + mesh mode (join-existing) and restarts, all over serial.
+
+`/ws/logs` (WebSocket) only streams *future* log lines to whoever's connected — nothing to see if you connect after the fact. `GET /api/logs` (`websocket_logger.cpp`) covers that gap with a retained history buffer, but it's off by default (costs RAM continuously otherwise) — enable it over the debug console with `log_history on` before you need it, `log_history off` when done.
 
 ## Live-hardware debugging notes
 

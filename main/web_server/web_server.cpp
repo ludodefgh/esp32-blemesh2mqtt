@@ -371,6 +371,7 @@ esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
 esp_err_t mesh_reset_role_handler(httpd_req_t *req);
+esp_err_t logs_get_handler(httpd_req_t *req);
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -632,6 +633,10 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/mesh/reset_role"))
     {
         return mesh_reset_role_handler(req);
+    }
+    else if (strstr(req->uri, "/api/logs"))
+    {
+        return logs_get_handler(req);
     }
     else
     {
@@ -1371,6 +1376,32 @@ esp_err_t mesh_reset_role_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, "{\"status\":\"reset, restarting\"}");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
+    return ESP_OK;
+}
+
+esp_err_t logs_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+
+    if (!websocket_logger_is_history_enabled())
+    {
+        httpd_resp_sendstr(req, "Log history retention is disabled. Enable it over the debug console with: log_history on\n");
+        return ESP_OK;
+    }
+
+    // Heap, not stack: LOG_HISTORY_MAX_LINES (200) lines up to ~256 bytes each could
+    // reach tens of KB, too large for this task's stack.
+    static constexpr size_t BUF_SIZE = 32 * 1024;
+    char *buf = (char *)malloc(BUF_SIZE);
+    if (!buf)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    size_t len = websocket_logger_get_history(buf, BUF_SIZE);
+    httpd_resp_send(req, buf, len);
+    free(buf);
     return ESP_OK;
 }
 
