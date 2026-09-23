@@ -1843,7 +1843,11 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
             int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV | PB-GATT enabled");
+                LOG_ERROR(TAG, "Failed to enable PB-ADV | PB-GATT provisioning (err %d)", err);
+            }
+            else
+            {
+                LOG_INFO(TAG, "PB-ADV | PB-GATT provisioning enabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }
@@ -1852,7 +1856,11 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
             int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV | PB-GATT disabled");
+                LOG_ERROR(TAG, "Failed to disable PB-ADV | PB-GATT provisioning (err %d)", err);
+            }
+            else
+            {
+                LOG_INFO(TAG, "PB-ADV | PB-GATT provisioning disabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }

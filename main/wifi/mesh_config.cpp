@@ -1,4 +1,7 @@
 #include "mesh_config.h"
+
+#include <mutex>
+
 #include "sdkconfig.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -22,9 +25,14 @@ static const uint8_t DEFAULT_APP_KEY[16] = {
     0x12, 0x12, 0x12, 0x12, 0x12, 0x12, 0x12, 0x12
 };
 
+// Serializes every read-modify-write of mesh_cfg: HTTP/console handlers save the
+// whole struct, while the BLE task writes node identity/app_idx directly.
+static std::recursive_mutex s_cfg_mutex;
+
 esp_err_t mesh_config_load(mesh_config_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
 
     // Unconfigured default is whichever role this SKU can actually run (see ble_mesh_init).
 #ifdef CONFIG_BLE_MESH_PROVISIONER
@@ -91,6 +99,7 @@ esp_err_t mesh_config_load(mesh_config_t *cfg)
 esp_err_t mesh_config_save(const mesh_config_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(MESH_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
@@ -131,6 +140,16 @@ cleanup:
     return err;
 }
 
+esp_err_t mesh_config_update(void (*mutate)(mesh_config_t *cfg, void *ctx), void *ctx)
+{
+    if (!mutate) return ESP_ERR_INVALID_ARG;
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+    mutate(&cfg, ctx);
+    return mesh_config_save(&cfg);
+}
+
 esp_err_t mesh_config_load_group_addrs(uint16_t *out_addrs, uint8_t max_count, uint8_t *out_count)
 {
     if (!out_addrs || !out_count) return ESP_ERR_INVALID_ARG;
@@ -149,6 +168,7 @@ esp_err_t mesh_config_load_group_addrs(uint16_t *out_addrs, uint8_t max_count, u
 
 esp_err_t mesh_config_add_group_addr(uint16_t group_addr)
 {
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
     mesh_config_t cfg = {};
     mesh_config_load(&cfg);
 
@@ -166,6 +186,7 @@ esp_err_t mesh_config_add_group_addr(uint16_t group_addr)
 
 esp_err_t mesh_config_remove_group_addr(uint16_t group_addr)
 {
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
     mesh_config_t cfg = {};
     mesh_config_load(&cfg);
 
@@ -187,6 +208,7 @@ esp_err_t mesh_config_remove_group_addr(uint16_t group_addr)
 
 esp_err_t mesh_config_save_node_identity(uint16_t addr, uint16_t net_idx)
 {
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
     nvs_handle_t handle;
     esp_err_t err = nvs_open(MESH_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK)
@@ -223,6 +245,7 @@ esp_err_t mesh_config_save_node_app_idx(uint16_t app_idx)
                  (unsigned)stats.free_entries, (unsigned)stats.namespace_count);
     }
 
+    std::lock_guard<std::recursive_mutex> lock(s_cfg_mutex);
     nvs_handle_t handle;
     esp_err_t err = nvs_open(MESH_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK)

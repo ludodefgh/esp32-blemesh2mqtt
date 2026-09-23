@@ -99,10 +99,7 @@ static int wifi_set_cmd(int argc, char **argv)
     }
 
 #ifdef CONFIG_BLE_MESH_NODE
-    mesh_config_t cfg = {};
-    mesh_config_load(&cfg);
-    cfg.mode = MESH_MODE_JOIN_EXISTING;
-    mesh_config_save(&cfg);
+    mesh_config_update([](mesh_config_t *cfg, void *) { cfg->mode = MESH_MODE_JOIN_EXISTING; }, nullptr);
 
     LOG_INFO(TAG, "WiFi credentials saved, mesh mode set to join-existing, restarting...");
 #else

@@ -187,7 +187,7 @@ function saveMeshAndRestart() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   })
-  .then(r => r.json())
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t); }))
   .then(() => triggerRestart())
   .catch(error => {
     showStatus('status2', 'Failed to save mesh config: ' + error.message, true);
@@ -205,6 +205,21 @@ function triggerRestart() {
   }, 3000);
 }
 
-window.onload = () => scanNetworks();
+// Only one mesh role is compiled into a given firmware — preselect it, disable the other.
+function loadSupportedMeshMode() {
+  fetch('/api/mesh/config')
+    .then(r => r.json())
+    .then(data => {
+      document.querySelectorAll('input[name="meshMode"]').forEach(radio => {
+        const supported = radio.value === data.supported_mode;
+        radio.checked = supported;
+        radio.disabled = !supported;
+      });
+      onMeshModeChange();
+    })
+    .catch(() => {});
+}
+
+window.onload = () => { scanNetworks(); loadSupportedMeshMode(); };
 </script>
 </body></html>

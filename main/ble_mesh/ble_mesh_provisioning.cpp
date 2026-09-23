@@ -346,7 +346,7 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         break;
 
 #ifdef CONFIG_BLE_MESH_NODE
-    // Node-role-only (join-existing): these two cases.
+    // Node-role-only (join-existing) events.
     case ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT, err_code %d", param->node_prov_enable_comp.err_code);
         break;
@@ -377,6 +377,28 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         for (uint8_t i = 0; i < mesh_cfg.group_addr_count; i++)
         {
             ble_mesh_subscribe_group_addr(mesh_cfg.group_addrs[i]);
+        }
+        break;
+    }
+    case ESP_BLE_MESH_NODE_PROV_RESET_EVT:
+    {
+        // Removed from its mesh (Config Node Reset, e.g. "Reset node" in nRF Mesh). The
+        // stack wipes its own keys; drop our cached identity and advertise again so it
+        // can be re-added without a reboot.
+        LOG_WARN(TAG, "ESP_BLE_MESH_NODE_PROV_RESET_EVT: node reset by its provisioner");
+        mesh_config_update([](mesh_config_t *cfg, void *) {
+            cfg->node_addr = 0;
+            cfg->node_net_idx = 0;
+            cfg->node_app_idx = ESP_BLE_MESH_KEY_UNUSED;
+        }, nullptr);
+        local_element_addr = 0;
+        store.net_idx = ESP_BLE_MESH_KEY_UNUSED;
+        store.app_idx = ESP_BLE_MESH_KEY_UNUSED;
+
+        esp_err_t err = esp_ble_mesh_node_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to re-enable node provisioning after reset (err %d)", err);
         }
         break;
     }

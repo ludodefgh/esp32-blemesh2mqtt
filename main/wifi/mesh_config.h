@@ -37,6 +37,9 @@ typedef struct {
 
 esp_err_t mesh_config_load(mesh_config_t *cfg);
 esp_err_t mesh_config_save(const mesh_config_t *cfg);
+// Load, mutate, save as one step under the config lock — use this instead of a
+// separate load()/save() pair, which can clobber a concurrent write from the BLE task.
+esp_err_t mesh_config_update(void (*mutate)(mesh_config_t *cfg, void *ctx), void *ctx);
 // Replaces the old single-address mesh_config_load_group_addr/save_group_addr.
 esp_err_t mesh_config_load_group_addrs(uint16_t *out_addrs, uint8_t max_count, uint8_t *out_count);
 // No-op (ESP_OK) if already present. ESP_ERR_NO_MEM if MESH_MAX_GROUP_ADDRS is already used.

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <mutex>
 #include <vector>
 
 // ESP-IDF includes
@@ -36,14 +38,19 @@ static bool external_node_is_cover(const external_mesh_node_t &node)
     return (node.features & FEATURE_GENERIC_LEVEL) && !(node.features & light_features);
 }
 
-static std::string external_node_discovery_id(const external_mesh_node_t &node)
+static std::string discovery_id_for(uint16_t addr, bool is_cover)
 {
-    const std::string id = external_node_id(node.unicast);
-    if (external_node_is_cover(node))
+    const std::string id = external_node_id(addr);
+    if (is_cover)
     {
         return "homeassistant/cover/blemesh2mqtt_" + id + "_cover/config";
     }
     return "homeassistant/light/blemesh2mqtt_" + id + "_light/config";
+}
+
+static std::string external_node_discovery_id(const external_mesh_node_t &node)
+{
+    return discovery_id_for(node.unicast, external_node_is_cover(node));
 }
 
 static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node)
@@ -218,12 +225,55 @@ static void mqtt_publish_external_status(const external_mesh_node_t &node)
     cJSON_free(json);
 }
 
+// HA entity type last announced per node (true = cover). Features keep arriving after
+// first sighting (OnOff answers before Level), so a node can need re-announcing as
+// the other type — and the stale entity removed.
+static std::mutex s_announced_mutex;
+static std::map<uint16_t, bool> s_announced_as_cover;
+
+static void mqtt_announce_external_node(const external_mesh_node_t &node)
+{
+    const bool is_cover = external_node_is_cover(node);
+    bool had_previous = false;
+    bool was_cover = false;
+    {
+        std::lock_guard<std::mutex> lock(s_announced_mutex);
+        auto it = s_announced_as_cover.find(node.unicast);
+        if (it != s_announced_as_cover.end())
+        {
+            had_previous = true;
+            was_cover = it->second;
+        }
+        s_announced_as_cover[node.unicast] = is_cover;
+    }
+
+    if (had_previous && was_cover != is_cover)
+    {
+        LOG_INFO(TAG, "External node 0x%04X is now a %s - replacing HA entity", node.unicast, is_cover ? "cover" : "light");
+        // Empty discovery payload removes the old entity from HA.
+        esp_mqtt_client_publish(mqtt_get_client(), discovery_id_for(node.unicast, was_cover).c_str(), "", 0, 0, 0);
+        if (was_cover)
+        {
+            esp_mqtt_client_unsubscribe(mqtt_get_client(), (external_node_base_topic(node.unicast) + "/set_position").c_str());
+        }
+    }
+
+    mqtt_subscribe_external_node(mqtt_get_client(), node);
+    mqtt_publish_external_discovery(node);
+}
+
+static bool needs_announce(const external_mesh_node_t &node)
+{
+    std::lock_guard<std::mutex> lock(s_announced_mutex);
+    auto it = s_announced_as_cover.find(node.unicast);
+    return it == s_announced_as_cover.end() || it->second != external_node_is_cover(node);
+}
+
 void mqtt_republish_all_external_nodes(void)
 {
     for (const auto &node : snapshot_external_nodes())
     {
-        mqtt_subscribe_external_node(mqtt_get_client(), node);
-        mqtt_publish_external_discovery(node);
+        mqtt_announce_external_node(node);
         mqtt_publish_external_status(node);
     }
 }
@@ -241,11 +291,10 @@ void mqtt_notify_external_node_changed(uint16_t addr, bool is_new)
         return;
     }
 
-    if (is_new)
+    if (is_new || needs_announce(node))
     {
-        LOG_INFO(TAG, "New external node 0x%04X - publishing HA discovery", addr);
-        mqtt_subscribe_external_node(mqtt_get_client(), node);
-        mqtt_publish_external_discovery(node);
+        LOG_INFO(TAG, "External node 0x%04X - publishing HA discovery", addr);
+        mqtt_announce_external_node(node);
     }
     mqtt_publish_external_status(node);
 }

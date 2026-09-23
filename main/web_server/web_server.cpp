@@ -1697,12 +1697,11 @@ esp_err_t mesh_reset_role_handler(httpd_req_t *req)
     }
 
     // Also clear our own node identity — mesh_config_reset_stack_state() only wipes mesh_core.
-    mesh_config_t cfg = {};
-    mesh_config_load(&cfg);
-    cfg.node_addr = 0;
-    cfg.node_net_idx = 0;
-    cfg.node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
-    mesh_config_save(&cfg);
+    mesh_config_update([](mesh_config_t *cfg, void *) {
+        cfg->node_addr = 0;
+        cfg->node_net_idx = 0;
+        cfg->node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
+    }, nullptr);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"reset, restarting\"}");

@@ -138,7 +138,16 @@ void websocket_logger_register_uri(httpd_handle_t server)
 int log_ws_vprintf(const char *fmt, va_list args)
 {
     char line[256];
-    int len = vsnprintf(line, sizeof(line), fmt, args);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int len = vsnprintf(line, sizeof(line), fmt, args_copy);
+    va_end(args_copy);
+    if (len < 0)
+    {
+        return len;
+    }
+    // vsnprintf returns the untruncated length; only what fits in `line` is valid.
+    size_t stored = std::min<size_t>(len, sizeof(line) - 1);
 
     // Use original vprintf to avoid recursive logging
     if (original_vprintf)
@@ -149,7 +158,7 @@ int log_ws_vprintf(const char *fmt, va_list args)
     // Prevent recursive logging: don't send ws_logger messages to WebSocket
     if (log_ringbuf && !strstr(line, "ws_logger"))
     {
-        BaseType_t result = xRingbufferSend(log_ringbuf, line, len + 1, 0); // include null terminator
+        BaseType_t result = xRingbufferSend(log_ringbuf, line, stored + 1, 0); // include null terminator
         if (result != pdTRUE)
         {
             // Use printf directly for error logging to avoid recursion
@@ -160,7 +169,7 @@ int log_ws_vprintf(const char *fmt, va_list args)
     if (log_history_enabled.load(std::memory_order_relaxed))
     {
         std::lock_guard<std::mutex> lock(log_history_mutex);
-        log_history.emplace_back(line, len);
+        log_history.emplace_back(line, stored);
         if (log_history.size() > LOG_HISTORY_MAX_LINES)
         {
             log_history.pop_front();
