@@ -675,7 +675,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
             }
 
             // Use RAII wrapper to prevent memory leaks
-            CJsonPtr response(cJSON_Parse(event->data), cJSON_Delete);
+            CJsonPtr response(cJSON_ParseWithLength(event->data, event->data_len), cJSON_Delete);
             if (response)
             {
                 if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response.get(), "state"))

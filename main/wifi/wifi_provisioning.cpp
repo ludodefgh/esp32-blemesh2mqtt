@@ -1472,6 +1472,23 @@ static esp_err_t mesh_config_handler(httpd_req_t *req)
                        : MESH_MODE_STANDALONE;
     }
 
+    // Only one role is compiled into a given SKU (see CLAUDE.md) — refuse the other
+    // rather than saving a mode ble_mesh_init() can't start.
+#ifndef CONFIG_BLE_MESH_PROVISIONER
+    if (cfg.mode == MESH_MODE_STANDALONE) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Node-only build: only 'Join an existing mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+#ifndef CONFIG_BLE_MESH_NODE
+    if (cfg.mode == MESH_MODE_JOIN_EXISTING) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Provisioner-only build: only 'Create a new mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+
     // No net_key/app_key to accept here anymore — joining an existing mesh means
     // becoming a real node, provisioned by whatever already manages that mesh
     // (nRF Mesh, etc.), which assigns NetKey/AppKey/address itself. See ble_mesh_init.

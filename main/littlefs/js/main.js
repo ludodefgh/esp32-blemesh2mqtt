@@ -720,8 +720,8 @@ function loadExternalNodes() {
 }
 
 function createExternalNodeElement(node) {
-  // Same card style as a provisioned node (.node), but without controls that need
-  // things an external node doesn't have: composition data, a DevKey, MQTT bridging.
+  // Same card style as a provisioned node (.node), minus what needs a DevKey
+  // (rename, unprovision).
   const el = document.createElement("div");
   el.className = "node";
   el.dataset.addr = node.addr;
@@ -747,17 +747,25 @@ function createExternalNodeElement(node) {
         <output>${node.level || 0}</output>
       </div>`;
   }
-  if (features.includes('lightness')) {
+  if (node.lightness !== undefined) {
     controls += `
       <div class="lightness-control">
         <span>💡</span>
-        <input type="range" min="0" max="65535" step="500" value="${node.lightness || 0}"
+        <input type="range" min="0" max="${node.max_lightness || 65535}" step="500" value="${node.lightness || 0}"
           onchange="sendExternalLightnessCommand('${node.addr}', this.value)">
         <output>${node.lightness || 0}</output>
       </div>`;
   }
   if (!features.length) {
     controls = '<span style="font-size:0.8em;color:#666;">No known model responded yet</span>';
+  } else {
+    controls += `
+      <div class="controls">
+        <button class="btn btn-primary btn-small" onclick="republishExternalNodeMqtt('${node.addr}')">
+          <span class="icon">📡</span>
+          MQTT Discovery
+        </button>
+      </div>`;
   }
 
   el.innerHTML = `
@@ -857,6 +865,22 @@ function sendExternalLightnessCommand(addr, lightness) {
     .catch(err => {
       console.error('Failed to send external lightness command:', err);
       showToast('Failed to send command', 'error');
+    });
+}
+
+function republishExternalNodeMqtt(addr) {
+  fetch("/api/mesh/external/mqtt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Republish failed');
+      showToast('MQTT discovery and status published', 'success');
+    })
+    .catch(err => {
+      console.error('Failed to republish external node to MQTT:', err);
+      showToast('Failed to publish to MQTT', 'error');
     });
 }
 

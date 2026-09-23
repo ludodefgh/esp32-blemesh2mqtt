@@ -366,8 +366,8 @@
             </div>
             <span style="font-size:0.8em;color:#666;">
               Nodes on a joined existing mesh that this bridge did not provision itself.
-              Discovery sends a Generic OnOff Get to the group address configured above
-              (Group Address Subscription) and lists whichever nodes reply.
+              Discovery probes each supported model (OnOff, Level, Lightness, HSL, CTL) on every
+              group address configured above and lists whichever nodes reply.
             </span>
             <div class="controls-grid" style="margin-top:12px;">
               <button class="btn btn-primary" onclick="sendExternalGroupCommand(true)">

@@ -1,4 +1,5 @@
 #include "mesh_config.h"
+#include "sdkconfig.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "common/log_common.h"
@@ -25,7 +26,12 @@ esp_err_t mesh_config_load(mesh_config_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
 
+    // Unconfigured default is whichever role this SKU can actually run (see ble_mesh_init).
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     cfg->mode = MESH_MODE_STANDALONE;
+#else
+    cfg->mode = MESH_MODE_JOIN_EXISTING;
+#endif
     memcpy(cfg->app_key, DEFAULT_APP_KEY, 16);
     memset(cfg->net_key, 0, 16);
     memset(cfg->group_addrs, 0, sizeof(cfg->group_addrs));
@@ -58,7 +64,9 @@ esp_err_t mesh_config_load(mesh_config_t *cfg)
     if (nvs_get_u8(handle, KEY_GRP_ADDR_COUNT, &count) == ESP_OK) {
         size_t blob_len = sizeof(cfg->group_addrs);
         if (nvs_get_blob(handle, KEY_GRP_ADDRS, cfg->group_addrs, &blob_len) == ESP_OK) {
-            cfg->group_addr_count = count > MESH_MAX_GROUP_ADDRS ? MESH_MAX_GROUP_ADDRS : count;
+            // Never trust count past what the blob actually held.
+            uint8_t stored = (uint8_t)(blob_len / sizeof(cfg->group_addrs[0]));
+            cfg->group_addr_count = count > stored ? stored : count;
         }
     } else {
         // Migrate from the old single-address key — never written back here, just

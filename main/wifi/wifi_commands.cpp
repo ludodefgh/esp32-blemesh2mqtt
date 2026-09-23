@@ -98,12 +98,17 @@ static int wifi_set_cmd(int argc, char **argv)
         return 1;
     }
 
+#ifdef CONFIG_BLE_MESH_NODE
     mesh_config_t cfg = {};
     mesh_config_load(&cfg);
     cfg.mode = MESH_MODE_JOIN_EXISTING;
     mesh_config_save(&cfg);
 
     LOG_INFO(TAG, "WiFi credentials saved, mesh mode set to join-existing, restarting...");
+#else
+    // Provisioner-only SKU can't run join-existing mode — leave the mesh mode alone.
+    LOG_INFO(TAG, "WiFi credentials saved, restarting...");
+#endif
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
     return 0;
@@ -113,7 +118,7 @@ void register_wifi_commands(void)
 {
     const esp_console_cmd_t wifi_set_cmd_def = {
         .command = "wifi_set",
-        .help = "Set WiFi credentials + mesh mode (join-existing) and restart: wifi_set <ssid> <password>",
+        .help = "Set WiFi credentials (+ join-existing mesh mode on a Node SKU) and restart: wifi_set <ssid> <password>",
         .hint = NULL,
         .func = &wifi_set_cmd,
     };

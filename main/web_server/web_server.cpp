@@ -29,6 +29,7 @@
 #include "mqtt/mqtt_bridge.h"
 #include "mqtt/mqtt_control.h"
 #include "mqtt/mqtt_credentials.h"
+#include "mqtt/mqtt_external_control.h"
 #include "ota/ota_manager.h"
 #include "sig_companies/company_map.h"
 #include "wifi/mesh_config.h"
@@ -371,6 +372,7 @@ esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
+esp_err_t mesh_external_mqtt_handler(httpd_req_t *req);
 esp_err_t mesh_reset_role_handler(httpd_req_t *req);
 esp_err_t logs_get_handler(httpd_req_t *req);
 
@@ -628,21 +630,37 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return mesh_debug_status_handler(req);
     }
-    else if (strstr(req->uri, "/api/mesh/external/discover"))
-    {
-        return mesh_external_discover_handler(req);
-    }
     else if (strstr(req->uri, "/api/mesh/external/nodes"))
     {
         return mesh_external_nodes_get_handler(req);
     }
-    else if (strstr(req->uri, "/api/mesh/external/command"))
+    else if (strstr(req->uri, "/api/mesh/external/") || strstr(req->uri, "/api/mesh/reset_role"))
     {
-        return mesh_external_command_handler(req);
-    }
-    else if (strstr(req->uri, "/api/mesh/reset_role"))
-    {
-        return mesh_reset_role_handler(req);
+        // Everything else here sends mesh traffic, publishes, or restarts — POST only,
+        // so a plain GET (link, <img src>) can't trigger it.
+        if (req->method != HTTP_POST)
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        if (strstr(req->uri, "/api/mesh/external/discover"))
+        {
+            return mesh_external_discover_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/command"))
+        {
+            return mesh_external_command_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/mqtt"))
+        {
+            return mesh_external_mqtt_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/reset_role"))
+        {
+            return mesh_reset_role_handler(req);
+        }
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
+        return ESP_FAIL;
     }
     else if (strstr(req->uri, "/api/logs"))
     {
@@ -1133,14 +1151,17 @@ static bool parse_group_addr_body(httpd_req_t *req, uint16_t *out_addr)
     }
 
     cJSON *addr_item = cJSON_GetObjectItem(json, "group_addr");
-    bool ok = true;
+    bool ok = false;
     if (cJSON_IsString(addr_item)) {
-        char *end;
-        *out_addr = (uint16_t)strtoul(addr_item->valuestring, &end, 16);
-    } else if (cJSON_IsNumber(addr_item)) {
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end != addr_item->valuestring && *end == '\0' && raw > 0 && raw <= 0xFFFF) {
+            *out_addr = (uint16_t)raw;
+            ok = true;
+        }
+    } else if (cJSON_IsNumber(addr_item) && addr_item->valuedouble > 0 && addr_item->valuedouble <= 0xFFFF) {
         *out_addr = (uint16_t)addr_item->valuedouble;
-    } else {
-        ok = false;
+        ok = true;
     }
     cJSON_Delete(json);
 
@@ -1173,9 +1194,20 @@ esp_err_t mesh_settings_set_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Same check the stack's own subscribe API applies — reject up front instead of
+    // persisting an address it will refuse on every boot.
+    if (!ESP_BLE_MESH_ADDR_IS_GROUP(group_addr)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "group_addr must be a group address (0xC000-0xFF00)");
+        return ESP_FAIL;
+    }
+
     esp_err_t err = mesh_config_add_group_addr(group_addr);
     if (err == ESP_ERR_NO_MEM) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Already have the maximum number of group addresses");
+        return ESP_FAIL;
+    }
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save group address");
         return ESP_FAIL;
     }
     ble_mesh_subscribe_group_addr(group_addr);
@@ -1191,7 +1223,10 @@ esp_err_t mesh_settings_remove_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    mesh_config_remove_group_addr(group_addr);
+    if (mesh_config_remove_group_addr(group_addr) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save group addresses");
+        return ESP_FAIL;
+    }
     ble_mesh_unsubscribe_group_addr(group_addr);
 
     send_group_addrs_json(req, true);
@@ -1334,7 +1369,20 @@ esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
         if (node.features & FEATURE_LIGHT_LIGHTNESS)
         {
             cJSON_AddItemToArray(features, cJSON_CreateString("lightness"));
+        }
+        if (node.features & FEATURE_LIGHT_HSL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("hsl"));
+        }
+        if (node.features & FEATURE_LIGHT_CTL)
+        {
+            cJSON_AddItemToArray(features, cJSON_CreateString("ctl"));
+        }
+        // HSL/CTL Servers extend Light Lightness, so any of the three is dimmable.
+        if (node.features & (FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL))
+        {
             cJSON_AddNumberToObject(item, "lightness", node.lightness);
+            cJSON_AddNumberToObject(item, "max_lightness", node.max_lightness);
         }
         cJSON_AddItemToObject(item, "features", features);
 
@@ -1443,6 +1491,57 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
+    return ESP_OK;
+}
+
+// Dashboard counterpart of a provisioned node's "MQTT Discovery"/"MQTT Status" buttons.
+esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    uint16_t addr = 0;
+    cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
+    if (cJSON_IsString(addr_item))
+    {
+        char *end = nullptr;
+        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
+        if (end != addr_item->valuestring && *end == '\0' && raw <= 0xFFFF)
+        {
+            addr = (uint16_t)raw;
+        }
+    }
+    cJSON_Delete(json);
+
+    external_mesh_node_t node;
+    if (addr == 0 || !ble_mesh_find_external_node(addr, node))
+    {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown external node");
+        return ESP_FAIL;
+    }
+    if (mqtt_credentials().get_connection_state() != mqtt_connection_state_t::CONNECTED)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "MQTT not connected");
+        return ESP_FAIL;
+    }
+
+    mqtt_notify_external_node_changed(addr, true);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"published\"}");
     return ESP_OK;
 }
 

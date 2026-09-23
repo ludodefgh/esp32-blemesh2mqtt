@@ -1,8 +1,10 @@
 #include "mqtt_external_control.h"
 
 // Standard C/C++ libraries
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // ESP-IDF includes
 #include "cJSON.h"
@@ -117,6 +119,11 @@ static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node
             {
                 cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
             }
+            // OnOff-only node: HA rejects an empty supported_color_modes list.
+            else if (!(node.features & light_features))
+            {
+                cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("onoff"));
+            }
         }
     }
 
@@ -175,10 +182,23 @@ static void mqtt_subscribe_external_node(esp_mqtt_client_handle_t client, const 
     }
 }
 
+// for_each_external_node holds external_nodes_mutex for the whole walk; copy out first
+// so no MQTT call runs under it (the MQTT task takes that mutex via
+// ble_mesh_find_external_node while holding its own client lock).
+static std::vector<external_mesh_node_t> snapshot_external_nodes()
+{
+    std::vector<external_mesh_node_t> nodes;
+    for_each_external_node([&nodes](const external_mesh_node_t &node)
+                            { nodes.push_back(node); });
+    return nodes;
+}
+
 void mqtt_subscribe_all_external_nodes(esp_mqtt_client_handle_t client)
 {
-    for_each_external_node([client](const external_mesh_node_t &node)
-                            { mqtt_subscribe_external_node(client, node); });
+    for (const auto &node : snapshot_external_nodes())
+    {
+        mqtt_subscribe_external_node(client, node);
+    }
 }
 
 static void mqtt_publish_external_discovery(const external_mesh_node_t &node)
@@ -200,11 +220,12 @@ static void mqtt_publish_external_status(const external_mesh_node_t &node)
 
 void mqtt_republish_all_external_nodes(void)
 {
-    for_each_external_node([](const external_mesh_node_t &node)
-                            {
+    for (const auto &node : snapshot_external_nodes())
+    {
         mqtt_subscribe_external_node(mqtt_get_client(), node);
         mqtt_publish_external_discovery(node);
-        mqtt_publish_external_status(node); });
+        mqtt_publish_external_status(node);
+    }
 }
 
 void mqtt_notify_external_node_changed(uint16_t addr, bool is_new)
@@ -282,7 +303,8 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
         return true;
     }
 
-    CJsonPtr payload(cJSON_Parse(data), cJSON_Delete);
+    // MQTT payloads aren't NUL-terminated.
+    CJsonPtr payload(cJSON_ParseWithLength(data, data_len), cJSON_Delete);
     if (!payload)
     {
         return true;
@@ -303,58 +325,68 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
         }
     }
 
+    // Same shape as mqtt_parse_event_data's provisioned-node flow: collect every light
+    // field first, then send one Set for the resulting mode so a combined
+    // brightness+color payload doesn't send the color with a stale lightness.
+    bool light_value_changed = false;
+    color_mode_t current_mode = node.color_mode;
+    uint16_t lightness = node.lightness;
+    uint16_t hue = node.hue;
+    uint16_t saturation = node.saturation;
+    uint16_t temperature = node.temperature;
+
     const uint16_t light_features = FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
     if (node.features & light_features)
     {
-        if (const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(payload.get(), "brightness"))
+        if (const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(payload.get(), "brightness"); cJSON_IsNumber(brightness))
         {
-            if (cJSON_IsNumber(brightness))
-            {
-                double clamped = brightness->valuedouble;
-                clamped = clamped < 0 ? 0 : (clamped > 65535 ? 65535 : clamped);
-                ble_mesh_send_external_lightness_command(addr, (uint16_t)clamped);
-            }
+            lightness = (uint16_t)std::clamp(brightness->valuedouble, 0.0, (double)node.max_lightness);
+            light_value_changed = true;
         }
     }
 
     if (node.features & FEATURE_LIGHT_HSL)
     {
-        if (const cJSON *color = cJSON_GetObjectItemCaseSensitive(payload.get(), "color"))
+        if (const cJSON *color = cJSON_GetObjectItemCaseSensitive(payload.get(), "color"); cJSON_IsObject(color))
         {
-            if (cJSON_IsObject(color))
+            if (const cJSON *h = cJSON_GetObjectItemCaseSensitive(color, "h"); cJSON_IsNumber(h))
             {
-                uint16_t hue = node.hue;
-                uint16_t saturation = node.saturation;
-                bool changed = false;
-
-                if (const cJSON *h = cJSON_GetObjectItemCaseSensitive(color, "h"); cJSON_IsNumber(h))
-                {
-                    hue = (uint16_t)map(h->valuedouble, 0, 360, node.min_hue, node.max_hue);
-                    changed = true;
-                }
-                if (const cJSON *s = cJSON_GetObjectItemCaseSensitive(color, "s"); cJSON_IsNumber(s))
-                {
-                    saturation = (uint16_t)map(s->valuedouble, 0, 100, node.min_saturation, node.max_saturation);
-                    changed = true;
-                }
-                if (changed)
-                {
-                    ble_mesh_send_external_hsl_command(addr, hue, saturation);
-                }
+                hue = (uint16_t)map((long)std::clamp(h->valuedouble, 0.0, 360.0), 0, 360, node.min_hue, node.max_hue);
+                current_mode = color_mode_t::hs;
+                light_value_changed = true;
+            }
+            if (const cJSON *sat = cJSON_GetObjectItemCaseSensitive(color, "s"); cJSON_IsNumber(sat))
+            {
+                saturation = (uint16_t)map((long)std::clamp(sat->valuedouble, 0.0, 100.0), 0, 100, node.min_saturation, node.max_saturation);
+                current_mode = color_mode_t::hs;
+                light_value_changed = true;
             }
         }
     }
 
     if (node.features & FEATURE_LIGHT_CTL)
     {
-        if (const cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(payload.get(), "color_temp"))
+        if (const cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(payload.get(), "color_temp"); cJSON_IsNumber(color_temp))
         {
-            if (cJSON_IsNumber(color_temp))
-            {
-                double clamped = color_temp->valuedouble;
-                clamped = clamped < node.min_temp ? node.min_temp : (clamped > node.max_temp ? node.max_temp : clamped);
-                ble_mesh_send_external_ctl_command(addr, (uint16_t)clamped);
-            }
+            temperature = (uint16_t)std::clamp(color_temp->valuedouble, (double)node.min_temp, (double)node.max_temp);
+            current_mode = color_mode_t::color_temp;
+            light_value_changed = true;
+        }
+    }
+
+    if (light_value_changed)
+    {
+        if (current_mode == color_mode_t::color_temp)
+        {
+            ble_mesh_send_external_ctl_command(addr, temperature, lightness);
+        }
+        else if (current_mode == color_mode_t::hs)
+        {
+            ble_mesh_send_external_hsl_command(addr, hue, saturation, lightness);
+        }
+        else
+        {
+            ble_mesh_send_external_lightness_command(addr, lightness);
         }
     }
 

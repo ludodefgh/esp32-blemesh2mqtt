@@ -63,15 +63,25 @@ static std::mutex external_nodes_mutex;
 static std::vector<external_mesh_node_t> external_nodes;
 
 // Caller must hold external_nodes_mutex.
-static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, bool *was_new = nullptr)
+static external_mesh_node_t *find_external_node_locked(uint16_t addr)
 {
     for (auto &n : external_nodes)
     {
         if (n.unicast == addr)
         {
-            if (was_new) *was_new = false;
-            return n;
+            return &n;
         }
+    }
+    return nullptr;
+}
+
+// Caller must hold external_nodes_mutex.
+static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, bool *was_new = nullptr)
+{
+    if (external_mesh_node_t *n = find_external_node_locked(addr))
+    {
+        if (was_new) *was_new = false;
+        return *n;
     }
     external_mesh_node_t node{};
     node.unicast = addr;
@@ -84,13 +94,10 @@ static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, b
 bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
 {
     std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    for (const auto &n : external_nodes)
+    if (const external_mesh_node_t *n = find_external_node_locked(addr))
     {
-        if (n.unicast == addr)
-        {
-            out = n;
-            return true;
-        }
+        out = *n;
+        return true;
     }
     return false;
 }
@@ -210,13 +217,20 @@ static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16
     mqtt_notify_external_node_changed(addr, was_new);
 }
 
+// Range replies only ever answer our own unicast Range Get to an already-known node;
+// one for an unknown address (e.g. a late reply) is dropped rather than creating a
+// featureless node.
 static void upsert_external_node_lightness_range(uint16_t addr, uint16_t min_lightness, uint16_t max_lightness)
 {
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
-        auto &node = get_or_create_external_node_locked(addr);
-        node.min_lightness = min_lightness;
-        node.max_lightness = max_lightness;
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_lightness = min_lightness;
+        node->max_lightness = max_lightness;
     }
     // Re-announce discovery so HA picks up the real brightness_scale.
     mqtt_notify_external_node_changed(addr, true);
@@ -227,11 +241,15 @@ static void upsert_external_node_hsl_range(uint16_t addr, uint16_t min_hue, uint
 {
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
-        auto &node = get_or_create_external_node_locked(addr);
-        node.min_hue = min_hue;
-        node.max_hue = max_hue;
-        node.min_saturation = min_saturation;
-        node.max_saturation = max_saturation;
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_hue = min_hue;
+        node->max_hue = max_hue;
+        node->min_saturation = min_saturation;
+        node->max_saturation = max_saturation;
     }
     mqtt_notify_external_node_changed(addr, true);
 }
@@ -240,9 +258,13 @@ static void upsert_external_node_ctl_range(uint16_t addr, uint16_t min_temp, uin
 {
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
-        auto &node = get_or_create_external_node_locked(addr);
-        node.min_temp = min_temp;
-        node.max_temp = max_temp;
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_temp = min_temp;
+        node->max_temp = max_temp;
     }
     // Re-announce discovery so HA picks up the real min/max_kelvin.
     mqtt_notify_external_node_changed(addr, true);
@@ -1223,6 +1245,7 @@ esp_err_t ble_mesh_init(void)
 
     if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
     {
+#ifdef CONFIG_BLE_MESH_NODE
         // Join as a real node (provisioned by nRF Mesh etc.) rather than self-assigning
         // an address — avoids the address collisions from issue #40. AppKey arrives
         // later via Config AppKey Add.
@@ -1242,6 +1265,11 @@ esp_err_t ble_mesh_init(void)
         LOG_INFO(TAG, "BLE Mesh Node ready (mode=join_existing, addr=0x%04X)%s",
                  local_element_addr, local_element_addr == 0 ? " — not yet provisioned" : "");
         return ESP_OK;
+#else
+        // Mirror of the Node-only guard below: Node role isn't compiled into this SKU.
+        LOG_ERROR(TAG, "Join-existing mode requested but this firmware is a Provisioner-only build (CONFIG_BLE_MESH_NODE disabled)");
+        return ESP_ERR_NOT_SUPPORTED;
+#endif // CONFIG_BLE_MESH_NODE
     }
 
 #ifdef CONFIG_BLE_MESH_PROVISIONER
@@ -1283,30 +1311,29 @@ bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,
     mesh_config_t mesh_cfg = {};
     mesh_config_load(&mesh_cfg);
     bool is_node = mesh_cfg.mode == MESH_MODE_JOIN_EXISTING;
-    (void)is_node;
 
-#ifdef CONFIG_BLE_MESH_PROVISIONER
-    const uint8_t *net_key = is_node ? esp_ble_mesh_node_get_local_net_key(store.net_idx)
-                                      : esp_ble_mesh_provisioner_get_local_net_key(store.net_idx);
-#else
-    const uint8_t *net_key = esp_ble_mesh_node_get_local_net_key(store.net_idx);
+    // Each getter only exists in a build with its role compiled in.
+    const uint8_t *net_key = NULL;
+    const uint8_t *app_key = NULL;
+#ifdef CONFIG_BLE_MESH_NODE
+    if (is_node)
+    {
+        net_key = esp_ble_mesh_node_get_local_net_key(store.net_idx);
+        app_key = esp_ble_mesh_node_get_local_app_key(store.app_idx);
+    }
 #endif
-    if (net_key == NULL)
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    if (!is_node)
+    {
+        net_key = esp_ble_mesh_provisioner_get_local_net_key(store.net_idx);
+        app_key = esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx);
+    }
+#endif
+    if (net_key == NULL || app_key == NULL)
     {
         return false;
     }
     strlcpy(net_key_hex, bt_hex(net_key, 16), net_key_hex_len);
-
-#ifdef CONFIG_BLE_MESH_PROVISIONER
-    const uint8_t *app_key = is_node ? esp_ble_mesh_node_get_local_app_key(store.app_idx)
-                                      : esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx);
-#else
-    const uint8_t *app_key = esp_ble_mesh_node_get_local_app_key(store.app_idx);
-#endif
-    if (app_key == NULL)
-    {
-        return false;
-    }
     strlcpy(app_key_hex, bt_hex(app_key, 16), app_key_hex_len);
     return true;
 }
@@ -1507,7 +1534,7 @@ esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t light
     return ESP_OK;
 }
 
-esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation)
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness)
 {
     if (addr == 0)
     {
@@ -1515,9 +1542,9 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
     }
 
     external_mesh_node_t node{};
-    ble_mesh_find_external_node(addr, node); // lightness stays 0 if not yet known
+    ble_mesh_find_external_node(addr, node); // max_lightness keeps its 65535 default if unknown
 
-    external_node_queue().enqueue([addr, hue, saturation, lightness = node.lightness]()
+    external_node_queue().enqueue([addr, hue, saturation, lightness, max_lightness = node.max_lightness]()
                                    {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
@@ -1533,10 +1560,11 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
 
         set_state.hsl_set.hsl_hue = hue;
         set_state.hsl_set.hsl_saturation = saturation;
-        // See ble_mesh_light_hsl_set (ble_mesh_commands.cpp) — L=0.5 (half of max) is the
-        // pure saturated color in HSL space; external nodes have no known max_lightness,
-        // so this degenerates to lightness/2 (same as an un-ranged provisioned node).
-        set_state.hsl_set.hsl_lightness = (uint16_t)((uint32_t)lightness * (65535 / 2) / 65535);
+        // Same scaling as ble_mesh_light_hsl_set (ble_mesh_commands.cpp): L=0.5 of max is
+        // the pure saturated color in HSL space.
+        set_state.hsl_set.hsl_lightness = max_lightness > 0
+            ? (uint16_t)((uint32_t)lightness * (max_lightness / 2) / max_lightness)
+            : lightness;
         set_state.hsl_set.op_en = false;
         set_state.hsl_set.delay = 0;
         set_state.hsl_set.tid = store.tid++;
@@ -1550,17 +1578,14 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
     return ESP_OK;
 }
 
-esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature)
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature, uint16_t lightness)
 {
     if (addr == 0)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    external_mesh_node_t node{};
-    ble_mesh_find_external_node(addr, node); // lightness stays 0 if not yet known
-
-    external_node_queue().enqueue([addr, temperature, lightness = node.lightness]()
+    external_node_queue().enqueue([addr, temperature, lightness]()
                                    {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 

@@ -30,12 +30,6 @@ void external_node_queue_t::enqueue(std::function<void()> send)
     }
 }
 
-size_t external_node_queue_t::size() const
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    return queue_.size();
-}
-
 void external_node_queue_t::try_send_next(std::unique_lock<std::mutex> &lock)
 {
     if (queue_.empty())
@@ -59,9 +53,18 @@ void external_node_queue_t::try_send_next(std::unique_lock<std::mutex> &lock)
             .arg = this,
             .name = "ext_node_q_gap",
         };
-        esp_timer_create(&args, &gap_timer_);
+        if (esp_timer_create(&args, &gap_timer_) != ESP_OK)
+        {
+            gap_timer_ = nullptr;
+        }
     }
-    esp_timer_start_once(gap_timer_, SEND_GAP_US);
+    // Without the timer nothing would ever clear waiting_, stalling the queue for good.
+    if (!gap_timer_ || esp_timer_start_once(gap_timer_, SEND_GAP_US) != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Gap timer unavailable, dispatching next send immediately");
+        waiting_ = false;
+        try_send_next(lock);
+    }
 }
 
 void external_node_queue_t::gap_timer_cb(void *arg)

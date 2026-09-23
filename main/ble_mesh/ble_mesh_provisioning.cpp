@@ -345,6 +345,8 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         LOG_INFO(TAG, "ESP_BLE_MESH_PROV_REGISTER_COMP_EVT, err_code %d", param->prov_register_comp.err_code);
         break;
 
+#ifdef CONFIG_BLE_MESH_NODE
+    // Node-role-only (join-existing): these two cases.
     case ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT, err_code %d", param->node_prov_enable_comp.err_code);
         break;
@@ -378,6 +380,7 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         }
         break;
     }
+#endif // CONFIG_BLE_MESH_NODE
 
 #ifdef CONFIG_BLE_MESH_PROVISIONER
     // Provisioner-role-only from here to the end of the switch.

@@ -30,6 +30,9 @@ extern struct mesh_network_info_store store;
 
 long map(long x, long in_min, long in_max, long out_min, long out_max)
 {
+    // A node can report a degenerate range (min == max) — avoid dividing by zero.
+    if (in_max == in_min)
+        return out_min;
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 

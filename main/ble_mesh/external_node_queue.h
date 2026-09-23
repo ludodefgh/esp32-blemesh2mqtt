@@ -15,15 +15,13 @@ public:
     // synchronous send result — only "accepted into the queue".
     void enqueue(std::function<void()> send);
 
-    size_t size() const;
-
 private:
     // Caller must hold `lock`; released while invoking send() to avoid a self-deadlock
     // if a send re-enters enqueue().
     void try_send_next(std::unique_lock<std::mutex> &lock);
     static void gap_timer_cb(void *arg);
 
-    mutable std::mutex mutex_;
+    std::mutex mutex_;
     std::queue<std::function<void()>> queue_;
     esp_timer_handle_t gap_timer_ = nullptr;
     bool waiting_ = false;

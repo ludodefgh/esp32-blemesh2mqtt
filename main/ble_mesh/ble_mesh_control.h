@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <limits>
 #include <memory>
 
 #include "esp_err.h"
@@ -73,8 +74,8 @@ esp_err_t ble_mesh_discover_external_nodes();
 esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff);
 esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level);
 esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t lightness);
-esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation);
-esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature);
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness);
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature, uint16_t lightness);
 void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
 bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
 
