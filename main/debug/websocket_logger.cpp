@@ -10,6 +10,7 @@
 
 // ESP-IDF includes
 #include "esp_console.h"
+#include "sdkconfig.h"
 #include "esp_log_write.h"
 #include <freertos/ringbuf.h>
 
@@ -25,11 +26,13 @@ static RingbufHandle_t log_ringbuf = nullptr;
 static const char *TAG = "ws_logger";
 static vprintf_like_t original_vprintf = nullptr;
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 // Retained log history — off by default, see websocket_logger_set_history_enabled.
 static constexpr size_t LOG_HISTORY_MAX_LINES = 200;
 static std::deque<std::string> log_history;
 static std::mutex log_history_mutex;
 static std::atomic<bool> log_history_enabled{false};
+#endif
 
 // WebSocket connection management constants
 static constexpr size_t MAX_WS_CLIENTS = 4;
@@ -166,6 +169,7 @@ int log_ws_vprintf(const char *fmt, va_list args)
         }
     }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
     if (log_history_enabled.load(std::memory_order_relaxed))
     {
         std::lock_guard<std::mutex> lock(log_history_mutex);
@@ -175,10 +179,12 @@ int log_ws_vprintf(const char *fmt, va_list args)
             log_history.pop_front();
         }
     }
+#endif
 
     return len;
 }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 void websocket_logger_set_history_enabled(bool enabled)
 {
     log_history_enabled.store(enabled, std::memory_order_relaxed);
@@ -247,6 +253,7 @@ static void register_websocket_logger_commands(void)
 }
 
 REGISTER_DEBUG_COMMAND(register_websocket_logger_commands);
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 void ws_log_sender_task(void *arg)
 {

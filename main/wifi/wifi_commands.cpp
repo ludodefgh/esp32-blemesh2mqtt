@@ -1,5 +1,7 @@
 #include "wifi_commands.h"
 
+#include "sdkconfig.h"
+
 // ESP-IDF includes
 #include "esp_console.h"
 #include "esp_system.h"
@@ -80,6 +82,7 @@ static int wifi_status_cmd(int argc, char **argv)
     return 0;
 }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 // Sets WiFi + mesh mode over serial in one shot and restarts — for driving setup from
 // a script instead of the captive portal UI (which isn't reachable over the network
 // from a devcontainer with no path to the bridge's temporary AP).
@@ -110,9 +113,11 @@ static int wifi_set_cmd(int argc, char **argv)
     esp_restart();
     return 0;
 }
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 void register_wifi_commands(void)
 {
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
     const esp_console_cmd_t wifi_set_cmd_def = {
         .command = "wifi_set",
         .help = "Set WiFi credentials (+ join-existing mesh mode on a Node SKU) and restart: wifi_set <ssid> <password>",
@@ -120,6 +125,7 @@ void register_wifi_commands(void)
         .func = &wifi_set_cmd,
     };
     ESP_ERROR_CHECK(register_console_command(&wifi_set_cmd_def));
+#endif
 
     const esp_console_cmd_t wifi_clear_cmd_def = {
         .command = "wifi_clear",

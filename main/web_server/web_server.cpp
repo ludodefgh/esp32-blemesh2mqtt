@@ -476,13 +476,15 @@ esp_err_t mesh_settings_get_handler(httpd_req_t *req);
 esp_err_t mesh_settings_set_handler(httpd_req_t *req);
 esp_err_t mesh_settings_remove_handler(httpd_req_t *req);
 esp_err_t mesh_keys_get_handler(httpd_req_t *req);
-esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
 esp_err_t mesh_external_mqtt_handler(httpd_req_t *req);
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_reset_role_handler(httpd_req_t *req);
 esp_err_t logs_get_handler(httpd_req_t *req);
+#endif
 
 esp_err_t system_info_handler(httpd_req_t *req)
 {
@@ -738,15 +740,21 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return mesh_keys_get_handler(req);
     }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
     else if (strstr(req->uri, "/api/mesh/debug"))
     {
         return mesh_debug_status_handler(req);
     }
+#endif
     else if (strstr(req->uri, "/api/mesh/external/nodes"))
     {
         return mesh_external_nodes_get_handler(req);
     }
-    else if (strstr(req->uri, "/api/mesh/external/") || strstr(req->uri, "/api/mesh/reset_role"))
+    else if (strstr(req->uri, "/api/mesh/external/")
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
+             || strstr(req->uri, "/api/mesh/reset_role")
+#endif
+    )
     {
         // Everything else here sends mesh traffic, publishes, or restarts — POST only,
         // so a plain GET (link, <img src>) can't trigger it.
@@ -767,17 +775,21 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
         {
             return mesh_external_mqtt_handler(req);
         }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
         else if (strstr(req->uri, "/api/mesh/reset_role"))
         {
             return mesh_reset_role_handler(req);
         }
+#endif
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
         return ESP_FAIL;
     }
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
     else if (strstr(req->uri, "/api/logs"))
     {
         return logs_get_handler(req);
     }
+#endif
     else
     {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "API endpoint not found");
@@ -1396,6 +1408,7 @@ esp_err_t mesh_keys_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 // Consolidated mesh state dump for debugging via browser/curl instead of a serial capture.
 esp_err_t mesh_debug_status_handler(httpd_req_t *req)
 {
@@ -1467,6 +1480,7 @@ esp_err_t mesh_debug_status_handler(httpd_req_t *req)
     cJSON_Delete(root);
     return ESP_OK;
 }
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 esp_err_t mesh_external_discover_handler(httpd_req_t *req)
 {
@@ -1686,6 +1700,7 @@ esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 esp_err_t mesh_reset_role_handler(httpd_req_t *req)
 {
     // Recovery for a bridge stuck in a Provisioner/Node role mismatch (see ble_mesh_init).
@@ -1735,6 +1750,7 @@ esp_err_t logs_get_handler(httpd_req_t *req)
     free(buf);
     return ESP_OK;
 }
+#endif // CONFIG_BM2MQTT_DEBUG_TOOLS
 
 esp_err_t node_wildcard_handler(httpd_req_t *req)
 {

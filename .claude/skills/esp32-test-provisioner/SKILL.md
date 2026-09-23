@@ -26,6 +26,8 @@ Rebuild after editing: `cd /workspaces/provisioner_test && source /opt/esp/idf/e
 
 ## Running a full test cycle from scratch
 
+**Prerequisite:** the bridge must be built with `CONFIG_BM2MQTT_DEBUG_TOOLS=y` (local `sdkconfig.defaults`, not committed) — `wifi_set` and `/api/mesh/debug` used below don't exist otherwise. It also needs the Node SKU (`CONFIG_BLE_MESH_NODE=y`, `CONFIG_BLE_MESH_PROVISIONER` unset), which isn't the tracked default either.
+
 1. **Erase and reflash the bridge** (see `esp32-flash`): `idf.py -p /dev/ttyUSB0 erase-flash` then `flash`. This wipes WiFi credentials too, so the bridge boots into captive-portal mode — but there's no network path from this devcontainer to that temporary AP, so the wizard can't be driven over HTTP.
 2. **Configure WiFi + mesh mode over serial instead**, via the `wifi_set` debug console command (`main/wifi/wifi_commands.cpp`) added for exactly this: connects over UART and sends one line, no phone/browser needed:
    ```python
