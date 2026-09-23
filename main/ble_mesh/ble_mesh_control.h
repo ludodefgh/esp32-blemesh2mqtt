@@ -49,7 +49,11 @@ struct external_mesh_node_t
     uint16_t features; // bitmask of node_supported_features_t actually observed
     uint8_t onoff;
     int16_t level;
-    uint16_t lightness;
+    uint16_t lightness; // also HSL/CTL's lightness component — one brightness value per node
+    uint16_t hue;
+    uint16_t saturation;
+    uint16_t temperature; // CTL, raw Kelvin
+    color_mode_t color_mode;
     int64_t last_seen_us;
 };
 
@@ -57,6 +61,8 @@ esp_err_t ble_mesh_discover_external_nodes();
 esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff);
 esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level);
 esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t lightness);
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation);
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature);
 void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
 bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
 

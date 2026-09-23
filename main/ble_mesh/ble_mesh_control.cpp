@@ -73,7 +73,10 @@ static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, b
             return n;
         }
     }
-    external_nodes.push_back({addr, 0, 0, 0, 0, 0});
+    external_mesh_node_t node{};
+    node.unicast = addr;
+    node.color_mode = color_mode_t::brightness;
+    external_nodes.push_back(node);
     if (was_new) *was_new = true;
     return external_nodes.back();
 }
@@ -148,24 +151,37 @@ static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
     mqtt_notify_external_node_changed(addr, was_new);
 }
 
-// Detection only, no value storage or UI/command support — just enough to exclude
-// Generic Level correctly for HSL/CTL nodes too.
-static void upsert_external_node_hsl(uint16_t addr)
+static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness)
 {
-    std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    auto &node = get_or_create_external_node_locked(addr);
-    node.features |= FEATURE_LIGHT_HSL;
-    node.features &= ~FEATURE_GENERIC_LEVEL;
-    node.last_seen_us = esp_timer_get_time();
+    bool was_new = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        node.hue = hue;
+        node.saturation = saturation;
+        node.lightness = lightness;
+        node.color_mode = color_mode_t::hs;
+        node.features |= FEATURE_LIGHT_HSL;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.last_seen_us = esp_timer_get_time();
+    }
+    mqtt_notify_external_node_changed(addr, was_new);
 }
 
-static void upsert_external_node_ctl(uint16_t addr)
+static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16_t lightness)
 {
-    std::lock_guard<std::mutex> lock(external_nodes_mutex);
-    auto &node = get_or_create_external_node_locked(addr);
-    node.features |= FEATURE_LIGHT_CTL;
-    node.features &= ~FEATURE_GENERIC_LEVEL;
-    node.last_seen_us = esp_timer_get_time();
+    bool was_new = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        node.temperature = temperature;
+        node.lightness = lightness;
+        node.color_mode = color_mode_t::color_temp;
+        node.features |= FEATURE_LIGHT_CTL;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.last_seen_us = esp_timer_get_time();
+    }
+    mqtt_notify_external_node_changed(addr, was_new);
 }
 
 static struct esp_ble_mesh_key
@@ -860,18 +876,20 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         {
             upsert_external_node_lightness(addr, param->status_cb.lightness_status.present_lightness);
         }
-        // HSL/CTL: detection only, see upsert_external_node_hsl/ctl.
         else if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS))
         {
-            upsert_external_node_hsl(addr);
+            upsert_external_node_hsl(addr, param->status_cb.hsl_status.hsl_hue,
+                                      param->status_cb.hsl_status.hsl_saturation,
+                                      param->status_cb.hsl_status.hsl_lightness);
         }
         else if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_STATUS))
         {
-            upsert_external_node_ctl(addr);
+            upsert_external_node_ctl(addr, param->status_cb.ctl_status.present_ctl_temperature,
+                                      param->status_cb.ctl_status.present_ctl_lightness);
         }
         return;
     }
@@ -1366,6 +1384,89 @@ esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t light
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external Lightness Set to 0x%04X failed (err %d)", addr, err);
+        } });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    external_mesh_node_t node{};
+    ble_mesh_find_external_node(addr, node); // lightness stays 0 if not yet known
+
+    external_node_queue().enqueue([addr, hue, saturation, lightness = node.lightness]()
+                                   {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
+        common.model = hsl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = MSG_TIMEOUT;
+
+        set_state.hsl_set.hsl_hue = hue;
+        set_state.hsl_set.hsl_saturation = saturation;
+        // See ble_mesh_light_hsl_set (ble_mesh_commands.cpp) — L=0.5 (half of max) is the
+        // pure saturated color in HSL space; external nodes have no known max_lightness,
+        // so this degenerates to lightness/2 (same as an un-ranged provisioned node).
+        set_state.hsl_set.hsl_lightness = (uint16_t)((uint32_t)lightness * (65535 / 2) / 65535);
+        set_state.hsl_set.op_en = false;
+        set_state.hsl_set.delay = 0;
+        set_state.hsl_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external HSL Set to 0x%04X failed (err %d)", addr, err);
+        } });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    external_mesh_node_t node{};
+    ble_mesh_find_external_node(addr, node); // lightness stays 0 if not yet known
+
+    external_node_queue().enqueue([addr, temperature, lightness = node.lightness]()
+                                   {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET_UNACK;
+        common.model = ctl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = MSG_TIMEOUT;
+
+        set_state.ctl_set.ctl_temperature = temperature;
+        set_state.ctl_set.ctl_lightness = lightness;
+        set_state.ctl_set.ctl_delta_uv = 0;
+        set_state.ctl_set.op_en = false;
+        set_state.ctl_set.delay = 0;
+        set_state.ctl_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external CTL Set to 0x%04X failed (err %d)", addr, err);
         } });
 
     return ESP_OK;
