@@ -25,6 +25,7 @@
 // Project includes
 #include "common/log_common.h"
 #include "dns_server.h"
+#include "mesh_config.h"
 #include "security/credential_encryption.h"
 #include "wifi_provisioning.h"
 
@@ -1440,20 +1441,93 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     free(response_string);
     cJSON_Delete(response);
 
-    // Schedule restart to allow HTTP response to be sent
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    return ESP_OK;
+}
 
-    // Stop captive portal cleanly before restart
+
+static esp_err_t mesh_config_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0 || ret >= (int)sizeof(buf)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request size");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+    mesh_mode_t previous_mode = cfg.mode;
+
+    cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
+    if (cJSON_IsString(mode_item)) {
+        cfg.mode = (strcmp(mode_item->valuestring, "existing") == 0)
+                       ? MESH_MODE_JOIN_EXISTING
+                       : MESH_MODE_STANDALONE;
+    }
+
+    // Only one role is compiled into a given SKU (see CLAUDE.md) — refuse the other
+    // rather than saving a mode ble_mesh_init() can't start.
+#ifndef CONFIG_BLE_MESH_PROVISIONER
+    if (cfg.mode == MESH_MODE_STANDALONE) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Node-only build: only 'Join an existing mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+#ifndef CONFIG_BLE_MESH_NODE
+    if (cfg.mode == MESH_MODE_JOIN_EXISTING) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "This firmware is a Provisioner-only build: only 'Create a new mesh' is supported");
+        return ESP_FAIL;
+    }
+#endif
+
+    // No net_key/app_key to accept here anymore — joining an existing mesh means
+    // becoming a real node, provisioned by whatever already manages that mesh
+    // (nRF Mesh, etc.), which assigns NetKey/AppKey/address itself. See ble_mesh_init.
+
+    cJSON_Delete(json);
+
+    if (cfg.mode != previous_mode) {
+        // Switching between Provisioner (standalone) and Node (join-existing) role:
+        // the stack refuses to enable a role that mismatches whatever role it last
+        // persisted, to avoid corrupting that state — clear it so the new role can
+        // start clean. This does not touch WiFi or MQTT config, just the mesh
+        // stack's own NetKey/AppKey/seq/role namespace.
+        mesh_config_reset_stack_state();
+        cfg.node_addr = 0;
+        cfg.node_net_idx = 0;
+        cfg.node_app_idx = 0xFFFF;
+    }
+
+    esp_err_t err = mesh_config_save(&cfg);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save mesh config");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
+}
+
+static esp_err_t setup_restart_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"restarting\"}");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
     wifi_provisioning_stop_captive_portal();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // Additional delay to ensure all NVS operations are fully completed
-    LOG_INFO(TAG, "Final synchronization before restart...");
     vTaskDelay(pdMS_TO_TICKS(500));
-
-    LOG_INFO(TAG, "Restarting ESP32 to connect with new credentials...");
+    LOG_INFO(TAG, "Restarting ESP32 after setup completion...");
     esp_restart();
-
     return ESP_OK;
 }
 
@@ -1523,7 +1597,9 @@ constexpr httpd_uri_t captive_uris[] = {
         // API endpoints
         {.uri = "/api/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_handler},
         {.uri = "/api/wifi/connect", .method = HTTP_POST, .handler = wifi_connect_handler},
-        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler}};
+        {.uri = "/api/wifi/status", .method = HTTP_GET, .handler = wifi_status_handler},
+        {.uri = "/api/mesh/config", .method = HTTP_POST, .handler = mesh_config_handler},
+        {.uri = "/api/setup/restart", .method = HTTP_POST, .handler = setup_restart_handler}};
 }
 void wifi_provisioning_register_captive_portal_handlers(httpd_handle_t server)
 {

@@ -1,7 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.pythonInstallPath": "/usr/bin/python3",
-  "idf.port": "/dev/ttyUSB0",
+  "idf.port": "/dev/ttyACM0",
   "idf.flashType": "UART",
   "files.associations": {
     "COMMIT_EDITMSG": "plaintext",
@@ -101,5 +101,12 @@
     "shared_mutex": "cpp"
   },
   "files.autoSave": "afterDelay",
-  "editor.fontSize": 13
+  "editor.fontSize": 13,
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c3"
+  },
+  "idf.openOcdConfigs": [
+    "board/esp32c3-builtin.cfg"
+  ],
+  "idf.currentSetup": "/opt/esp/idf"
 }

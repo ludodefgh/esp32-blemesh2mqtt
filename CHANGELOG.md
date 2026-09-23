@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Join an existing BLE Mesh network as a Node (Node-only SKU, `CONFIG_BLE_MESH_NODE`),
+  provisioned by an external provisioner such as nRF Mesh.
+- External Mesh Nodes: discovery, dashboard control and full MQTT / Home Assistant
+  integration (on/off, level, lightness, HSL, CTL, Range Get) for nodes this bridge
+  did not provision.
+- Up to 3 group address subscriptions, managed live from the dashboard.
+- Read-only Mesh Keys view, `/api/mesh/debug`, retained log history (`/api/logs`).
+
+### Changed
+- `CONFIG_BLE_MESH_SEQ_STORE_RATE=8` to avoid sequence-number reuse after an abrupt reset.
+
 ### Planned
 - [ ] Additional BLE Mesh device types support
 - [ ] Performance optimizations

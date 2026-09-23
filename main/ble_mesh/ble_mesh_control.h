@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+#include <limits>
 #include <memory>
 
 #include "esp_err.h"
@@ -10,6 +12,7 @@ typedef enum
     FEATURE_LIGHT_LIGHTNESS = 1 << 1,
     FEATURE_LIGHT_HSL = 1 << 2,
     FEATURE_LIGHT_CTL = 1 << 3,
+    FEATURE_GENERIC_LEVEL = 1 << 4,
 } node_supported_features_t;
 
 long map(long x, long in_min, long in_max, long out_min, long out_max);
@@ -26,6 +29,55 @@ bool ble_mesh_get_provisioning_enabled(void);
 
 void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
 bool ble_mesh_get_auto_provisioning_enabled(void);
+
+void ble_mesh_subscribe_group_addr(uint16_t group_addr);
+void ble_mesh_unsubscribe_group_addr(uint16_t group_addr);
+// PROV_OWN_ADDR standalone, or the provisioner-assigned address once joined as a node.
+extern uint16_t local_element_addr;
+bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,
+                                  char *app_key_hex, size_t app_key_hex_len);
+// Standalone SKU only — must match the #ifdef on its definition or a Node-only build
+// compiles against this declaration and fails to link.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+esp_err_t ble_mesh_apply_local_app_key(const uint8_t app_key[16]);
+#endif
+
+// A device on a joined mesh we never provisioned (no DevKey, so no Composition Data
+// Get) — discovered by probing each model type against the group address and noting
+// who answers; `features` is the bitmask of what answered.
+struct external_mesh_node_t
+{
+    uint16_t unicast;
+    uint16_t features; // bitmask of node_supported_features_t actually observed
+    uint8_t onoff;
+    int16_t level;
+    uint16_t lightness{0}; // also HSL/CTL's lightness component — one brightness value per node
+    uint16_t min_lightness{0};
+    uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
+    uint16_t hue{0};
+    uint16_t min_hue{0};
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};
+    uint16_t saturation{0};
+    uint16_t min_saturation{0};
+    uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
+    uint16_t temperature{0}; // CTL, raw Kelvin
+    // Real range comes from a Range Get once the node's CTL feature is detected (see
+    // ble_mesh_control.cpp); these are just a friendlier placeholder than 0..65535 for
+    // the brief window before that reply arrives.
+    uint16_t min_temp{800};
+    uint16_t max_temp{20000};
+    color_mode_t color_mode{color_mode_t::brightness};
+    int64_t last_seen_us;
+};
+
+esp_err_t ble_mesh_discover_external_nodes();
+esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff);
+esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level);
+esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t lightness);
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness);
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature, uint16_t lightness);
+void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
+bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

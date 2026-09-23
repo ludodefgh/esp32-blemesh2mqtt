@@ -38,6 +38,8 @@ const char *get_color_mode_string(color_mode_t mode)
 
 uint16_t get_node_index(device_uuid128 uuid)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only build: no provisioner node table, always falls through to "not found".
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -46,6 +48,7 @@ uint16_t get_node_index(device_uuid128 uuid)
             return i;
         }
     }
+#endif
 
     return std::numeric_limits<uint16_t>::max(); // Return max value if not found
 }
@@ -225,13 +228,15 @@ void ble2mqtt_node_manager::print_registered_nodes()
         if (!node)
             continue;
 
-        // Get the node name from the provisioner
+        const char *node_name = "Unknown";
+#ifdef CONFIG_BLE_MESH_PROVISIONER
         uint16_t node_index = get_node_index(node->uuid); // Ensure node_index is set
-        const char *node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
+        node_name = esp_ble_mesh_provisioner_get_node_name(node_index);
         if (!node_name)
         {
             node_name = "Unknown";
         }
+#endif
 
         LOG_INFO(TAG, "==device uuid: %s", bt_hex(node->uuid.raw(), 16));
         LOG_INFO(TAG, "  Node Name: %s", node_name);
@@ -512,8 +517,10 @@ void ble2mqtt_node_manager::set_node_name(const device_uuid128 &uuid, const char
 {
     if (auto node = get_node(uuid))
     {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
         uint16_t node_index = get_node_index(uuid); // Ensure node_index is set
         esp_ble_mesh_provisioner_set_node_name(node_index, name);
+#endif
         mark_node_info_dirty();
     }
     else

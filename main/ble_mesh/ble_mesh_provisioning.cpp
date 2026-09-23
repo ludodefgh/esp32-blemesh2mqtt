@@ -3,6 +3,7 @@
 // Standard C/C++ libraries
 #include <inttypes.h>
 #include <memory>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -29,14 +30,20 @@
 #include "debug_console_common.h"
 #include "message_queue.h"
 #include "mqtt/mqtt_control.h"
+#include "wifi/mesh_config.h"
 
 #define TAG "APP_PROV"
 
 extern esp_ble_mesh_client_t config_client;
 std::vector<ble2mqtt_unprovisioned_device> unprovisioned_devices;
 
+// Guards unprovisioned_devices, touched from both the BLE task and HTTP/console contexts.
+// Recursive: ble_mesh_provision_device/recv_unprov_adv_pkt call into each other while held.
+static std::recursive_mutex unprovisioned_devices_mutex;
+
 void remove_unprovisioned_device(const device_uuid128 &uuid)
 {
+    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
     for (auto it = unprovisioned_devices.begin(); it != unprovisioned_devices.end(); ++it)
     {
         if (memcmp(it->dev_uuid, uuid.raw(), 16) == 0)
@@ -89,6 +96,8 @@ void print_model_name(uint16_t model_id)
 }
 esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_comp_param &node_aparam)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Provisioner-only: fires when this device just finished provisioning someone else.
     int node_idx = node_aparam.node_idx;
     const device_uuid128 uuid128{node_aparam.device_uuid};
     uint16_t unicast = node_aparam.unicast_addr;
@@ -159,6 +168,10 @@ esp_err_t prov_complete(esp_ble_mesh_prov_cb_param_t::ble_mesh_provisioner_prov_
     remove_unprovisioned_device(uuid128);
 
     return ESP_OK;
+#else
+    (void)node_aparam;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif // CONFIG_BLE_MESH_PROVISIONER
 }
 
 void prov_link_open(esp_ble_mesh_prov_bearer_t bearer)
@@ -172,17 +185,11 @@ void prov_link_close(esp_ble_mesh_prov_bearer_t bearer, uint8_t reason)
              bearer == ESP_BLE_MESH_PROV_ADV ? "PB-ADV" : "PB-GATT", reason);
 }
 
-// A device we provisioned ourselves is removed from this list right away
-// (see remove_unprovisioned_device). But one that stops advertising for some
-// other reason — provisioned by a different provisioner (e.g. joining an
-// existing mesh via nRF Mesh), powered off, moved out of range — just goes
-// quiet, and we have no way to ask it "are you provisioned now?" (BLE Mesh
-// has no such message: provisioning and normal network traffic are separate
-// bearers/protocols, so an entry can only be inferred stale by beacon absence).
-// Unprovisioned devices normally re-advertise every ~1s, so 30s of silence
-// is a generous margin before treating an entry as gone.
+// BLE Mesh has no "are you provisioned?" query, so a device provisioned by someone
+// else just goes quiet — inferred stale after 30s (re-adverts normally every ~1s).
 static constexpr int64_t UNPROV_DEVICE_STALE_US = 30 * 1000 * 1000;
 
+// Caller must hold unprovisioned_devices_mutex.
 static void prune_stale_unprovisioned_devices()
 {
     int64_t now = esp_timer_get_time();
@@ -202,6 +209,7 @@ static void prune_stale_unprovisioned_devices()
 
 void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned_device &unprov_device)> func)
 {
+    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
     prune_stale_unprovisioned_devices();
     for (const auto &unprov_dev : unprovisioned_devices)
     {
@@ -211,37 +219,54 @@ void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned
 
 void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
 {
-    bool already_registered = false;
+    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
     for (auto index = 0; index < unprovisioned_devices.size(); ++index)
     {
         if (memcmp(unprovisioned_devices[index].dev_uuid, unprov_device.dev_uuid, 16) == 0)
         {
             unprovisioned_devices[index].last_seen_us = esp_timer_get_time();
-            already_registered = true;
-            break;
+
+            // Device already known via PB-GATT — upgrade to PB-ADV if we now see it on that bearer.
+            // PB-ADV is preferred: it is connectionless and more reliable for provisioning.
+            if (unprovisioned_devices[index].bearer == ESP_BLE_MESH_PROV_GATT &&
+                unprov_device.bearer == ESP_BLE_MESH_PROV_ADV)
+            {
+                LOG_INFO(TAG, "Upgrading device %s from PB-GATT to PB-ADV",
+                         bt_hex(unprov_device.dev_uuid, 16));
+                unprovisioned_devices[index] = unprov_device;
+                unprovisioned_devices[index].last_seen_us = esp_timer_get_time();
+                // Re-trigger auto-provisioning with the better bearer.
+                if (ble_mesh_get_auto_provisioning_enabled())
+                {
+                    ble_mesh_provision_device(unprov_device.dev_uuid);
+                }
+            }
+            return;
         }
     }
 
-    if (!already_registered)
-    {
-        LOG_INFO(TAG, "Received unprovisioned device: %s, address: %s, address type: %d, adv type: %d",
-                 bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
-                 unprov_device.addr_type, unprov_device.adv_type);
-        unprovisioned_devices.emplace_back(unprov_device);
-        unprovisioned_devices.back().last_seen_us = esp_timer_get_time();
+    LOG_INFO(TAG, "Received unprovisioned device: %s, address: %s, bearer: %s",
+             bt_hex(unprov_device.dev_uuid, 16), bt_hex(unprov_device.addr, BD_ADDR_LEN),
+             (unprov_device.bearer & ESP_BLE_MESH_PROV_ADV) ? "PB-ADV" : "PB-GATT");
+    unprovisioned_devices.emplace_back(unprov_device);
+    unprovisioned_devices.back().last_seen_us = esp_timer_get_time();
 
-        // Auto-provision if enabled
-        if (ble_mesh_get_auto_provisioning_enabled())
-        {
-            LOG_INFO(TAG, "Auto-provisioning enabled - automatically provisioning device: %s", 
-                     bt_hex(unprov_device.dev_uuid, 16));
-            ble_mesh_provision_device(unprov_device.dev_uuid);
-        }
+    // Auto-provision immediately for PB-ADV devices.
+    // For PB-GATT devices, wait: if this device also supports PB-ADV, it will advertise that
+    // beacon shortly and we'll upgrade above, avoiding a double-provision attempt.
+    // PB-GATT-only devices must be provisioned manually from the web UI.
+    if (ble_mesh_get_auto_provisioning_enabled() && (unprov_device.bearer & ESP_BLE_MESH_PROV_ADV))
+    {
+        LOG_INFO(TAG, "Auto-provisioning device via PB-ADV: %s",
+                 bt_hex(unprov_device.dev_uuid, 16));
+        ble_mesh_provision_device(unprov_device.dev_uuid);
     }
 }
 
 void ble_mesh_provision_device(const uint8_t uuid[16])
 {
+    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
+
     ble2mqtt_unprovisioned_device *device = nullptr;
     for (auto index = 0; index < unprovisioned_devices.size(); ++index)
     {
@@ -254,15 +279,25 @@ void ble_mesh_provision_device(const uint8_t uuid[16])
 
     if (device != nullptr)
     {
-        recv_unprov_adv_pkt(device->dev_uuid, device->addr,
-                            device->addr_type, device->oob_info,
-                            device->adv_type, device->bearer);
+        // Copy out rather than pass pointers into the vector.
+        uint8_t dev_uuid[16];
+        memcpy(dev_uuid, device->dev_uuid, sizeof(dev_uuid));
+        uint8_t addr[BD_ADDR_LEN];
+        memcpy(addr, device->addr, sizeof(addr));
+        esp_ble_mesh_addr_type_t addr_type = device->addr_type;
+        uint16_t oob_info = device->oob_info;
+        uint8_t adv_type = device->adv_type;
+        esp_ble_mesh_prov_bearer_t bearer = device->bearer;
+
+        recv_unprov_adv_pkt(dev_uuid, addr, addr_type, oob_info, adv_type, bearer);
     }
 }
 void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
                          esp_ble_mesh_addr_type_t addr_type, uint16_t oob_info,
                          uint8_t adv_type, esp_ble_mesh_prov_bearer_t bearer)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Provisioning others is meaningless in a Node-only build.
     esp_ble_mesh_unprov_dev_add_t add_dev = {0};
     int err;
 
@@ -288,6 +323,15 @@ void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],
     {
         LOG_ERROR(TAG, "Add unprovisioned device into queue failed");
     }
+#else
+    (void)dev_uuid;
+    (void)addr;
+    (void)addr_type;
+    (void)oob_info;
+    (void)adv_type;
+    (void)bearer;
+    LOG_WARN(TAG, "Provisioning another device requested, but this is a Node-only build");
+#endif // CONFIG_BLE_MESH_PROVISIONER
 
     return;
 }
@@ -301,6 +345,45 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         LOG_INFO(TAG, "ESP_BLE_MESH_PROV_REGISTER_COMP_EVT, err_code %d", param->prov_register_comp.err_code);
         break;
 
+#ifdef CONFIG_BLE_MESH_NODE
+    // Node-role-only (join-existing): these two cases.
+    case ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT:
+        LOG_INFO(TAG, "ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT, err_code %d", param->node_prov_enable_comp.err_code);
+        break;
+    case ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT:
+    {
+        // Join-existing-as-node: net_idx/addr are real provisioner-assigned values.
+        // AppKey arrives separately via Config AppKey Add (see ble_mesh_config_server_cb).
+        uint16_t net_idx = param->node_prov_complete.net_idx;
+        uint16_t addr = param->node_prov_complete.addr;
+        LOG_INFO(TAG, "ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT: net_idx 0x%04x, addr 0x%04x, flags 0x%02x",
+                 net_idx, addr, param->node_prov_complete.flags);
+
+        // This fires on every boot, not just a fresh provisioning — check the stack's
+        // own local app key table (ground truth) rather than inferring from addr/net_idx,
+        // which a provisioner can legitimately reassign identically on a re-add.
+        mesh_config_t mesh_cfg = {};
+        mesh_config_load(&mesh_cfg);
+        bool app_key_still_valid = mesh_cfg.node_app_idx != ESP_BLE_MESH_KEY_UNUSED &&
+                                    esp_ble_mesh_node_get_local_app_key(mesh_cfg.node_app_idx) != NULL;
+
+        store.net_idx = net_idx;
+        store.app_idx = app_key_still_valid ? mesh_cfg.node_app_idx : ESP_BLE_MESH_KEY_UNUSED;
+        mesh_config_save_node_identity(addr, net_idx);
+
+        // Retry the group subscribe ble_mesh_init() attempted at boot (it failed then —
+        // local_element_addr was still 0, not yet provisioned).
+        local_element_addr = addr;
+        for (uint8_t i = 0; i < mesh_cfg.group_addr_count; i++)
+        {
+            ble_mesh_subscribe_group_addr(mesh_cfg.group_addrs[i]);
+        }
+        break;
+    }
+#endif // CONFIG_BLE_MESH_NODE
+
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Provisioner-role-only from here to the end of the switch.
     case ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT, err_code %d", param->provisioner_prov_enable_comp.err_code);
         break;
@@ -409,6 +492,7 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     case ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT, err_code %d", param->provisioner_bind_app_key_to_model_comp.err_code);
         break;
+#endif // CONFIG_BLE_MESH_PROVISIONER
     default:
 
         // LOG_INFO(TAG, "Other err_code %d", event);
@@ -420,6 +504,8 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
 
 void for_each_provisioned_node(std::function<void(const esp_ble_mesh_node_t *, int node_index)> func)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Node-only builds have no provisioner node table to iterate.
     for (int i = 0; i < CONFIG_BLE_MESH_MAX_PROV_NODES; i++)
     {
         const esp_ble_mesh_node_t *node = esp_ble_mesh_provisioner_get_node_table_entry()[i];
@@ -428,11 +514,17 @@ void for_each_provisioned_node(std::function<void(const esp_ble_mesh_node_t *, i
             func(node, i);
         }
     }
+#endif
 }
 
 int list_provisioned_nodes_esp(int argc, char **argv)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     uint16_t node_count = esp_ble_mesh_provisioner_get_prov_node_count();
+#else
+    // No provisioner node table in a Node-only build — always zero.
+    uint16_t node_count = 0;
+#endif
     LOG_INFO(TAG, "Provisioned nodes: %d", node_count);
 
     for_each_provisioned_node([](const esp_ble_mesh_node_t *node, int node_index)
@@ -474,7 +566,12 @@ void ble_mesh_unprovision_device(const device_uuid128 &uuid)
     }
     else
     {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+        // Not a tracked node_manager() node — force-remove from the provisioner's own table.
         esp_ble_mesh_provisioner_delete_node_with_uuid(uuid.raw());
+#else
+        LOG_WARN(TAG, "ble_mesh_unprovision_device: no such node, and no provisioner node table to remove it from (Node-only build)");
+#endif
     }
 }
 
@@ -515,7 +612,9 @@ int unprovision_all_nodes(int argc, char **argv)
                                                });
         }
 
+#ifdef CONFIG_BLE_MESH_PROVISIONER
         esp_ble_mesh_provisioner_delete_node_with_uuid(bla.raw());
+#endif
     }
 
     return 0;
@@ -559,14 +658,17 @@ int provision_device_index(int argc, char **argv)
         return 1;
     }
 
-    if (node_index_args.node_index->ival[0] < 0 || node_index_args.node_index->ival[0] >= unprovisioned_devices.size())
+    uint8_t dev_uuid[16];
     {
-        LOG_ERROR(TAG, "Invalid node index: %d", node_index_args.node_index->ival[0]);
-        return 1;
+        std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
+        if (node_index_args.node_index->ival[0] < 0 || node_index_args.node_index->ival[0] >= unprovisioned_devices.size())
+        {
+            LOG_ERROR(TAG, "Invalid node index: %d", node_index_args.node_index->ival[0]);
+            return 1;
+        }
+        memcpy(dev_uuid, unprovisioned_devices[node_index_args.node_index->ival[0]].dev_uuid, sizeof(dev_uuid));
     }
-
-    const ble2mqtt_unprovisioned_device &unprov_device = unprovisioned_devices[node_index_args.node_index->ival[0]];
-    ble_mesh_provision_device(unprov_device.dev_uuid);
+    ble_mesh_provision_device(dev_uuid);
 
     return 0;
 }
@@ -640,7 +742,9 @@ void ble_mesh_reset_node(std::shared_ptr<bm2mqtt_node_info> node)
         LOG_INFO(TAG, "Node reset successfully");
         LOG_INFO(TAG, "Resetting node 0x%04X", node->unicast);
         mqtt_remove_node(node);
+#ifdef CONFIG_BLE_MESH_PROVISIONER
         esp_ble_mesh_provisioner_delete_node_with_uuid(node->uuid.raw());
+#endif
         node_manager().remove_node(node->uuid);
         message_queue().clear_queue(node);
         node_manager().mark_node_info_dirty();

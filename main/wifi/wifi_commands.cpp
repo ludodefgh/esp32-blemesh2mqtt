@@ -8,6 +8,7 @@
 #include "common/log_common.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
+#include "mesh_config.h"
 #include "wifi_provisioning.h"
 
 static const char *TAG = "wifi_commands";
@@ -79,8 +80,50 @@ static int wifi_status_cmd(int argc, char **argv)
     return 0;
 }
 
+// Sets WiFi + mesh mode over serial in one shot and restarts — for driving setup from
+// a script instead of the captive portal UI (which isn't reachable over the network
+// from a devcontainer with no path to the bridge's temporary AP).
+static int wifi_set_cmd(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        LOG_ERROR(TAG, "Usage: wifi_set <ssid> <password>");
+        return 1;
+    }
+
+    esp_err_t err = wifi_provisioning_set_credentials(argv[1], argv[2]);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to save WiFi credentials: %s", esp_err_to_name(err));
+        return 1;
+    }
+
+#ifdef CONFIG_BLE_MESH_NODE
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+    cfg.mode = MESH_MODE_JOIN_EXISTING;
+    mesh_config_save(&cfg);
+
+    LOG_INFO(TAG, "WiFi credentials saved, mesh mode set to join-existing, restarting...");
+#else
+    // Provisioner-only SKU can't run join-existing mode — leave the mesh mode alone.
+    LOG_INFO(TAG, "WiFi credentials saved, restarting...");
+#endif
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+    return 0;
+}
+
 void register_wifi_commands(void)
 {
+    const esp_console_cmd_t wifi_set_cmd_def = {
+        .command = "wifi_set",
+        .help = "Set WiFi credentials (+ join-existing mesh mode on a Node SKU) and restart: wifi_set <ssid> <password>",
+        .hint = NULL,
+        .func = &wifi_set_cmd,
+    };
+    ESP_ERROR_CHECK(register_console_command(&wifi_set_cmd_def));
+
     const esp_console_cmd_t wifi_clear_cmd_def = {
         .command = "wifi_clear",
         .help = "Clear stored WiFi credentials and restart in captive portal mode",

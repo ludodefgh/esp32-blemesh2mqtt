@@ -721,7 +721,7 @@ function refreshDevices() {
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Refreshing...';
 
-  loadNodes().finally(() => {
+  Promise.all([loadNodes(), loadExternalNodes()]).finally(() => {
     button.disabled = false;
     button.innerHTML = originalHtml;
     showToast('Device list refreshed', 'info');
@@ -887,6 +887,214 @@ function createDeviceElement(device) {
   `;
   
   return el;
+}
+
+function loadExternalNodes() {
+  return fetch("/api/mesh/external/nodes")
+    .then(res => res.json())
+    .then(data => {
+      const container = document.getElementById("external-nodes");
+      container.innerHTML = '';
+
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach(node => {
+          container.appendChild(createExternalNodeElement(node));
+        });
+        toggleEmptyState('external-nodes', 'no-external-nodes', true);
+      } else {
+        toggleEmptyState('external-nodes', 'no-external-nodes', false);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load external nodes:', err);
+    });
+}
+
+function createExternalNodeElement(node) {
+  // Same card style as a provisioned node (.node), minus what needs a DevKey
+  // (rename, unprovision).
+  const el = document.createElement("div");
+  el.className = "node";
+  el.dataset.addr = node.addr;
+
+  const ageSec = Math.round((node.last_seen_ms_ago || 0) / 1000);
+  const online = ageSec < 60;
+  const features = node.features || [];
+
+  let controls = '';
+  if (features.includes('onoff')) {
+    controls += `
+      <div class="controls">
+        <button class="btn btn-primary btn-small" onclick="sendExternalNodeCommand('${node.addr}', true)">On</button>
+        <button class="btn btn-warning btn-small" onclick="sendExternalNodeCommand('${node.addr}', false)">Off</button>
+      </div>`;
+  }
+  if (features.includes('level')) {
+    controls += `
+      <div class="lightness-control">
+        <span>🎚️</span>
+        <input type="range" min="-32768" max="32767" step="256" value="${node.level || 0}"
+          onchange="sendExternalLevelCommand('${node.addr}', this.value)">
+        <output>${node.level || 0}</output>
+      </div>`;
+  }
+  if (node.lightness !== undefined) {
+    controls += `
+      <div class="lightness-control">
+        <span>💡</span>
+        <input type="range" min="0" max="${node.max_lightness || 65535}" step="500" value="${node.lightness || 0}"
+          onchange="sendExternalLightnessCommand('${node.addr}', this.value)">
+        <output>${node.lightness || 0}</output>
+      </div>`;
+  }
+  if (!features.length) {
+    controls = '<p class="control-none">No known model responded yet</p>';
+  } else {
+    controls += `
+      <div class="controls">
+        <button class="btn btn-primary btn-small" onclick="republishExternalNodeMqtt('${node.addr}')">
+          <span class="icon">📡</span>
+          MQTT Discovery
+        </button>
+      </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="node-header">
+      <div class="node-name-container">
+        <span class="node-name">${node.addr}</span>
+      </div>
+      <span class="node-status ${online ? 'online' : 'offline'}">
+        ${online ? 'Online' : 'Offline'}
+      </span>
+    </div>
+
+    <div class="node-info-grid">
+      <div class="info-row">
+        <span class="info-label">Address:</span>
+        <span class="info-value">${node.addr}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Features:</span>
+        <span class="info-value">${features.length ? features.join(', ') : 'unknown'}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Last seen:</span>
+        <span class="info-value">${ageSec}s ago</span>
+      </div>
+    </div>
+
+    ${controls}
+  `;
+
+  return el;
+}
+
+function discoverExternalNodes() {
+  const button = event.target.closest('button');
+  button.disabled = true;
+  button.innerHTML = '<span class="icon">⏳</span> Discovering...';
+
+  fetch("/api/mesh/external/discover", { method: "POST" })
+    .then(res => {
+      if (!res.ok) throw new Error('Discovery request failed');
+      showToast('Discovery sent — refreshing in a moment', 'info');
+      setTimeout(loadExternalNodes, 1500);
+    })
+    .catch(err => {
+      console.error('Failed to discover external nodes:', err);
+      showToast('Failed to send discovery request', 'error');
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = '<span class="icon">📡</span> Discover';
+    });
+}
+
+function sendExternalNodeCommand(addr, onoff) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, onoff: onoff })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external node command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function sendExternalLevelCommand(addr, level) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, level: parseInt(level, 10) })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external level command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function sendExternalLightnessCommand(addr, lightness) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, lightness: parseInt(lightness, 10) })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      setTimeout(loadExternalNodes, 500);
+    })
+    .catch(err => {
+      console.error('Failed to send external lightness command:', err);
+      showToast('Failed to send command', 'error');
+    });
+}
+
+function republishExternalNodeMqtt(addr) {
+  fetch("/api/mesh/external/mqtt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Republish failed');
+      showToast('MQTT discovery and status published', 'success');
+    })
+    .catch(err => {
+      console.error('Failed to republish external node to MQTT:', err);
+      showToast('Failed to publish to MQTT', 'error');
+    });
+}
+
+function sendExternalGroupCommand(onoff) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ onoff: onoff })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      showToast('Sent to group', 'success');
+      // Group Set is unacknowledged (BLE Mesh spec), so there's no per-node ack to
+      // update the cache with — re-discover to see each node's new state.
+      setTimeout(() => {
+        fetch("/api/mesh/external/discover", { method: "POST" })
+          .then(() => setTimeout(loadExternalNodes, 1500));
+      }, 300);
+    })
+    .catch(err => {
+      console.error('Failed to send group command:', err);
+      showToast('Failed to send group command', 'error');
+    });
 }
 
 function createCommandElement(command) {
@@ -1115,6 +1323,42 @@ function loadSystemInfo() {
         connectionStatus.style.color = 'var(--danger)';
       }
     });
+
+  loadMeshKeys();
+}
+
+function loadMeshKeys() {
+  fetch("/api/mesh/keys")
+    .then(res => res.json())
+    .then(data => {
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
+      if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
+    })
+    .catch(err => {
+      console.error('Failed to load mesh keys:', err);
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl) netKeyEl.textContent = 'Unavailable';
+      if (appKeyEl) appKeyEl.textContent = 'Unavailable';
+    });
+}
+
+function copyMeshKey(elementId) {
+  const el = document.getElementById(elementId);
+  const key = el.textContent;
+  if (!key || key === 'Loading...' || key === 'Unavailable') return;
+  navigator.clipboard.writeText(key).then(() => {
+    const originalText = el.textContent;
+    el.textContent = '✓ Copied!';
+    setTimeout(() => {
+      el.textContent = originalText;
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+    showToast('Failed to copy key — select it and copy manually', 'error');
+  });
 }
 
 function updateVersionInfo(data) {
@@ -1187,9 +1431,12 @@ function loadMqttStatus() {
         // Don't populate password for security
       }
       
-      // Show error if any
-      if (data.last_error) {
+      // Only show last_error when not currently connected — errors are stale once connected
+      if (data.last_error && data.state !== 'connected') {
         showMqttError(data.last_error);
+      } else {
+        const errorEl = document.getElementById("mqtt-error");
+        if (errorEl) errorEl.style.display = 'none';
       }
     })
     .catch(err => {
@@ -1336,6 +1583,9 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Load auto-provisioning state
   loadAutoProvisioningState();
+
+  // Load mesh group address
+  loadMeshGroupAddr();
   
   // Refresh system info every 5 seconds for real-time uptime display
   setInterval(loadSystemInfo, 5000);
@@ -1348,6 +1598,7 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Load nodes data
   loadNodes();
+  loadExternalNodes();
 
   // Load console commands
   fetch("/api/console_commands")
@@ -1825,4 +2076,78 @@ function toggleAutoProvisioning(enabled) {
   .finally(() => {
     toggle.disabled = false;
   });
+}
+
+function loadMeshGroupAddr() {
+  fetch('/api/mesh/settings')
+    .then(r => r.json())
+    .then(data => renderGroupAddrList(data.group_addrs || []))
+    .catch(err => console.error('Error loading mesh settings:', err));
+}
+
+function renderGroupAddrList(addrs) {
+  const list = document.getElementById('group-addr-list');
+  if (!list) return;
+  list.innerHTML = '';
+  addrs.forEach(addr => {
+    const chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#eee;border-radius:12px;font-family:monospace;font-size:0.85em;';
+    chip.textContent = addr;
+    const removeBtn = document.createElement('a');
+    removeBtn.href = '#';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.style.cssText = 'color:#c00;font-weight:bold;text-decoration:none;';
+    removeBtn.onclick = (e) => { e.preventDefault(); removeMeshGroupAddr(addr); };
+    chip.appendChild(removeBtn);
+    list.appendChild(chip);
+  });
+}
+
+function addMeshGroupAddr() {
+  const input = document.getElementById('group-addr-input');
+  const raw = input ? input.value.trim() : '';
+  if (!raw) {
+    showToast('Enter a group address first', 'error');
+    return;
+  }
+  const parsed = parseInt(raw, 16);
+  if (isNaN(parsed) || parsed < 0 || parsed > 0xFFFF) {
+    showToast('Invalid group address — use hex format like 0xC000', 'error');
+    return;
+  }
+  fetch('/api/mesh/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: parsed })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      input.value = '';
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address added', 'success');
+    } else {
+      showToast('Failed to add group address', 'error');
+    }
+  })
+  .catch(err => showToast('Error adding group address: ' + err.message, 'error'));
+}
+
+function removeMeshGroupAddr(addr) {
+  fetch('/api/mesh/settings/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: addr })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address removed', 'success');
+    } else {
+      showToast('Failed to remove group address', 'error');
+    }
+  })
+  .catch(err => showToast('Error removing group address: ' + err.message, 'error'));
 }
