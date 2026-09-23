@@ -1101,27 +1101,53 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 bool enable_provisioning = true;
 bool enable_auto_provisioning = false;
 
+static const uint16_t GROUP_SUBSCRIBABLE_MODELS[] = {
+    ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI,
+    ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI,
+};
+
 void ble_mesh_subscribe_group_addr(uint16_t group_addr)
 {
     if (group_addr == 0) return;
 
-    static const uint16_t models[] = {
-        ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI,
-        ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI,
-        ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI,
-        ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_CLI,
-        ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI,
-    };
-
-    for (size_t i = 0; i < sizeof(models) / sizeof(models[0]); i++) {
+    for (size_t i = 0; i < sizeof(GROUP_SUBSCRIBABLE_MODELS) / sizeof(GROUP_SUBSCRIBABLE_MODELS[0]); i++) {
         esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
-            local_element_addr, ESP_BLE_MESH_CID_NVAL, models[i], group_addr);
+            local_element_addr, ESP_BLE_MESH_CID_NVAL, GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
         if (err != ESP_OK) {
             LOG_WARN(TAG, "Failed to subscribe model 0x%04X to group 0x%04X: %s",
-                     models[i], group_addr, esp_err_to_name(err));
+                     GROUP_SUBSCRIBABLE_MODELS[i], group_addr, esp_err_to_name(err));
         } else {
-            LOG_INFO(TAG, "Subscribed model 0x%04X to group 0x%04X", models[i], group_addr);
+            LOG_INFO(TAG, "Subscribed model 0x%04X to group 0x%04X", GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
         }
+    }
+}
+
+void ble_mesh_unsubscribe_group_addr(uint16_t group_addr)
+{
+    if (group_addr == 0) return;
+
+    for (size_t i = 0; i < sizeof(GROUP_SUBSCRIBABLE_MODELS) / sizeof(GROUP_SUBSCRIBABLE_MODELS[0]); i++) {
+        esp_err_t err = esp_ble_mesh_model_unsubscribe_group_addr(
+            local_element_addr, ESP_BLE_MESH_CID_NVAL, GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        if (err != ESP_OK) {
+            LOG_WARN(TAG, "Failed to unsubscribe model 0x%04X from group 0x%04X: %s",
+                     GROUP_SUBSCRIBABLE_MODELS[i], group_addr, esp_err_to_name(err));
+        } else {
+            LOG_INFO(TAG, "Unsubscribed model 0x%04X from group 0x%04X", GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        }
+    }
+}
+
+static void ble_mesh_subscribe_all_configured_groups(void)
+{
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    for (uint8_t i = 0; i < count; i++) {
+        ble_mesh_subscribe_group_addr(group_addrs[i]);
     }
 }
 
@@ -1211,7 +1237,7 @@ esp_err_t ble_mesh_init(void)
             return err;
         }
 
-        ble_mesh_subscribe_group_addr(mesh_cfg.group_addr);
+        ble_mesh_subscribe_all_configured_groups();
 
         LOG_INFO(TAG, "BLE Mesh Node ready (mode=join_existing, addr=0x%04X)%s",
                  local_element_addr, local_element_addr == 0 ? " — not yet provisioned" : "");
@@ -1234,7 +1260,7 @@ esp_err_t ble_mesh_init(void)
         return err;
     }
 
-    ble_mesh_subscribe_group_addr(mesh_cfg.group_addr);
+    ble_mesh_subscribe_all_configured_groups();
 
     LOG_INFO(TAG, "BLE Mesh Provisioner initialized (mode=standalone)");
 
@@ -1316,18 +1342,10 @@ static esp_err_t send_group_get(esp_ble_mesh_model_t *model, uint32_t opcode, ui
     return esp_ble_mesh_generic_client_get_state(&common, &get_state);
 }
 
-esp_err_t ble_mesh_discover_external_nodes()
+// Serialized via external_node_queue (see external_node_queue.h). Lightness/HSL/CTL
+// are queued before Level so upsert_external_node_level already knows to exclude them.
+static void queue_discovery_burst_for_group(uint16_t group_addr)
 {
-    uint16_t group_addr = 0;
-    mesh_config_load_group_addr(&group_addr);
-    if (group_addr == 0)
-    {
-        LOG_WARN(TAG, "Cannot discover external nodes: no group address configured");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // Serialized via external_node_queue (see external_node_queue.h). Lightness/HSL/CTL
-    // are queued before Level so upsert_external_node_level already knows to exclude them.
     external_node_queue().enqueue([group_addr]()
                                    {
         esp_err_t err = send_group_get(onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET, group_addr, false);
@@ -1365,6 +1383,23 @@ esp_err_t ble_mesh_discover_external_nodes()
         } });
 
     LOG_INFO(TAG, "Queued external node discovery Gets to group 0x%04X", group_addr);
+}
+
+esp_err_t ble_mesh_discover_external_nodes()
+{
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    if (count == 0)
+    {
+        LOG_WARN(TAG, "Cannot discover external nodes: no group address configured");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    for (uint8_t i = 0; i < count; i++)
+    {
+        queue_discovery_burst_for_group(group_addrs[i]);
+    }
     return ESP_OK;
 }
 

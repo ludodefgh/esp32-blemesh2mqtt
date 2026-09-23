@@ -30,6 +30,7 @@ void ble_mesh_set_auto_provisioning_enabled(bool enabled_value);
 bool ble_mesh_get_auto_provisioning_enabled(void);
 
 void ble_mesh_subscribe_group_addr(uint16_t group_addr);
+void ble_mesh_unsubscribe_group_addr(uint16_t group_addr);
 // PROV_OWN_ADDR standalone, or the provisioner-assigned address once joined as a node.
 extern uint16_t local_element_addr;
 bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,

@@ -365,6 +365,7 @@ esp_err_t auto_provisioning_get_handler(httpd_req_t *req);
 esp_err_t auto_provisioning_set_handler(httpd_req_t *req);
 esp_err_t mesh_settings_get_handler(httpd_req_t *req);
 esp_err_t mesh_settings_set_handler(httpd_req_t *req);
+esp_err_t mesh_settings_remove_handler(httpd_req_t *req);
 esp_err_t mesh_keys_get_handler(httpd_req_t *req);
 esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
@@ -593,6 +594,15 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     else if (strstr(req->uri, "/api/reset_wifi"))
     {
         return reset_wifi_handler(req);
+    }
+    else if (strstr(req->uri, "/api/mesh/settings/remove"))
+    {
+        if (req->method != HTTP_POST)
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        return mesh_settings_remove_handler(req);
     }
     else if (strstr(req->uri, "/api/mesh/settings"))
     {
@@ -1066,56 +1076,125 @@ esp_err_t auto_provisioning_set_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t mesh_settings_get_handler(httpd_req_t *req)
+// Shared by all three handlers below: {"group_addr": <first addr, "" if none — legacy
+// single-address key some tooling still reads>, "group_addrs": [...], "max": N}.
+static void add_group_addrs_to_json(cJSON *root)
 {
-    uint16_t group_addr = 0;
-    mesh_config_load_group_addr(&group_addr);
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"group_addr\":\"0x%04X\"}", group_addr);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, buf, -1);
-    return ESP_OK;
+    char hex[8];
+    if (count > 0) {
+        snprintf(hex, sizeof(hex), "0x%04X", group_addrs[0]);
+        cJSON_AddStringToObject(root, "group_addr", hex);
+    } else {
+        cJSON_AddStringToObject(root, "group_addr", "0x0000");
+    }
+
+    cJSON *arr = cJSON_CreateArray();
+    for (uint8_t i = 0; i < count; i++) {
+        snprintf(hex, sizeof(hex), "0x%04X", group_addrs[i]);
+        cJSON_AddItemToArray(arr, cJSON_CreateString(hex));
+    }
+    cJSON_AddItemToObject(root, "group_addrs", arr);
+    cJSON_AddNumberToObject(root, "max", MESH_MAX_GROUP_ADDRS);
 }
 
-esp_err_t mesh_settings_set_handler(httpd_req_t *req)
+static void send_group_addrs_json(httpd_req_t *req, bool success)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", success);
+    add_group_addrs_to_json(root);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+}
+
+// Parses {"group_addr": "0xC000" | <number>} from the request body. Returns false (and
+// sends the error response itself) if the body is missing/invalid.
+static bool parse_group_addr_body(httpd_req_t *req, uint16_t *out_addr)
 {
     char buf[128];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
-        return ESP_FAIL;
+        return false;
     }
     buf[received] = '\0';
 
     cJSON *json = cJSON_Parse(buf);
     if (!json) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
+        return false;
     }
 
     cJSON *addr_item = cJSON_GetObjectItem(json, "group_addr");
-    uint16_t group_addr = 0;
-
+    bool ok = true;
     if (cJSON_IsString(addr_item)) {
         char *end;
-        group_addr = (uint16_t)strtoul(addr_item->valuestring, &end, 16);
+        *out_addr = (uint16_t)strtoul(addr_item->valuestring, &end, 16);
     } else if (cJSON_IsNumber(addr_item)) {
-        group_addr = (uint16_t)addr_item->valuedouble;
+        *out_addr = (uint16_t)addr_item->valuedouble;
     } else {
-        cJSON_Delete(json);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid group_addr");
-        return ESP_FAIL;
+        ok = false;
     }
     cJSON_Delete(json);
 
-    mesh_config_save_group_addr(group_addr);
+    if (!ok) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid group_addr");
+    }
+    return ok;
+}
+
+esp_err_t mesh_settings_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    add_group_addrs_to_json(root);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Adds a group address (up to MESH_MAX_GROUP_ADDRS). Kept as the POST body shape
+// existing tooling already uses (esp32-test-provisioner skill, etc.) — was "set the
+// one group address", now "add one to the list".
+esp_err_t mesh_settings_set_handler(httpd_req_t *req)
+{
+    uint16_t group_addr = 0;
+    if (!parse_group_addr_body(req, &group_addr)) {
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = mesh_config_add_group_addr(group_addr);
+    if (err == ESP_ERR_NO_MEM) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Already have the maximum number of group addresses");
+        return ESP_FAIL;
+    }
     ble_mesh_subscribe_group_addr(group_addr);
 
-    char resp[64];
-    snprintf(resp, sizeof(resp), "{\"success\":true,\"group_addr\":\"0x%04X\"}", group_addr);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, resp, -1);
+    send_group_addrs_json(req, true);
+    return ESP_OK;
+}
+
+esp_err_t mesh_settings_remove_handler(httpd_req_t *req)
+{
+    uint16_t group_addr = 0;
+    if (!parse_group_addr_body(req, &group_addr)) {
+        return ESP_FAIL;
+    }
+
+    mesh_config_remove_group_addr(group_addr);
+    ble_mesh_unsubscribe_group_addr(group_addr);
+
+    send_group_addrs_json(req, true);
     return ESP_OK;
 }
 
@@ -1170,8 +1249,15 @@ esp_err_t mesh_debug_status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "net_idx", hex);
     snprintf(hex, sizeof(hex), "0x%04X", store.app_idx);
     cJSON_AddStringToObject(root, "app_idx", hex);
-    snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addr);
+    snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addr_count > 0 ? cfg.group_addrs[0] : 0);
     cJSON_AddStringToObject(root, "group_addr", hex);
+    cJSON *group_addrs_arr = cJSON_CreateArray();
+    for (uint8_t i = 0; i < cfg.group_addr_count; i++)
+    {
+        snprintf(hex, sizeof(hex), "0x%04X", cfg.group_addrs[i]);
+        cJSON_AddItemToArray(group_addrs_arr, cJSON_CreateString(hex));
+    }
+    cJSON_AddItemToObject(root, "group_addrs", group_addrs_arr);
 
     cJSON_AddBoolToObject(root, "local_keys_available", keys_available);
     if (keys_available)
@@ -1319,8 +1405,14 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
     }
     else
     {
-        // No specific address: broadcast to the configured group address instead.
-        mesh_config_load_group_addr(&addr);
+        // No specific address: broadcast to the first configured group address instead.
+        uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+        uint8_t count = 0;
+        mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+        if (count > 0)
+        {
+            addr = group_addrs[0];
+        }
     }
     cJSON_Delete(json);
 

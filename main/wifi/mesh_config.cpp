@@ -8,7 +8,9 @@
 #define KEY_MODE     "mode"
 #define KEY_NET_KEY  "net_key"
 #define KEY_APP_KEY  "app_key"
-#define KEY_GRP_ADDR "group_addr"
+#define KEY_GRP_ADDR "group_addr"      // legacy single-address key, migrated on load
+#define KEY_GRP_ADDRS "group_addrs"    // uint16_t[] blob, KEY_GRP_ADDR_COUNT entries
+#define KEY_GRP_ADDR_COUNT "grp_cnt"
 #define KEY_NODE_ADDR    "node_addr"
 #define KEY_NODE_NET_IDX "node_net_idx"
 #define KEY_NODE_APP_IDX "node_app_idx"
@@ -26,7 +28,8 @@ esp_err_t mesh_config_load(mesh_config_t *cfg)
     cfg->mode = MESH_MODE_STANDALONE;
     memcpy(cfg->app_key, DEFAULT_APP_KEY, 16);
     memset(cfg->net_key, 0, 16);
-    cfg->group_addr = 0;
+    memset(cfg->group_addrs, 0, sizeof(cfg->group_addrs));
+    cfg->group_addr_count = 0;
     cfg->node_addr = 0;
     cfg->node_net_idx = 0;
     cfg->node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED — 0 is itself a valid index
@@ -51,17 +54,29 @@ esp_err_t mesh_config_load(mesh_config_t *cfg)
     key_len = 16;
     nvs_get_blob(handle, KEY_APP_KEY, cfg->app_key, &key_len);
 
-    uint16_t group_addr = 0;
-    if (nvs_get_u16(handle, KEY_GRP_ADDR, &group_addr) == ESP_OK) {
-        cfg->group_addr = group_addr;
+    uint8_t count = 0;
+    if (nvs_get_u8(handle, KEY_GRP_ADDR_COUNT, &count) == ESP_OK) {
+        size_t blob_len = sizeof(cfg->group_addrs);
+        if (nvs_get_blob(handle, KEY_GRP_ADDRS, cfg->group_addrs, &blob_len) == ESP_OK) {
+            cfg->group_addr_count = count > MESH_MAX_GROUP_ADDRS ? MESH_MAX_GROUP_ADDRS : count;
+        }
+    } else {
+        // Migrate from the old single-address key — never written back here, just
+        // presented as a 1-item list; the next add/remove call persists it properly.
+        uint16_t legacy_addr = 0;
+        if (nvs_get_u16(handle, KEY_GRP_ADDR, &legacy_addr) == ESP_OK && legacy_addr != 0) {
+            cfg->group_addrs[0] = legacy_addr;
+            cfg->group_addr_count = 1;
+        }
     }
+
     nvs_get_u16(handle, KEY_NODE_ADDR, &cfg->node_addr);
     nvs_get_u16(handle, KEY_NODE_NET_IDX, &cfg->node_net_idx);
     nvs_get_u16(handle, KEY_NODE_APP_IDX, &cfg->node_app_idx);
 
     nvs_close(handle);
     // DEBUG not INFO: called on nearly every request, would drown out the log otherwise.
-    LOG_DEBUG(TAG, "Mesh config loaded: mode=%d, group_addr=0x%04X", cfg->mode, cfg->group_addr);
+    LOG_DEBUG(TAG, "Mesh config loaded: mode=%d, group_addr_count=%d", cfg->mode, cfg->group_addr_count);
     return ESP_OK;
 }
 
@@ -85,7 +100,10 @@ esp_err_t mesh_config_save(const mesh_config_t *cfg)
     err = nvs_set_blob(handle, KEY_APP_KEY, cfg->app_key, 16);
     if (err != ESP_OK) goto cleanup;
 
-    err = nvs_set_u16(handle, KEY_GRP_ADDR, cfg->group_addr);
+    err = nvs_set_blob(handle, KEY_GRP_ADDRS, cfg->group_addrs, sizeof(cfg->group_addrs));
+    if (err != ESP_OK) goto cleanup;
+
+    err = nvs_set_u8(handle, KEY_GRP_ADDR_COUNT, cfg->group_addr_count);
     if (err != ESP_OK) goto cleanup;
 
     err = nvs_set_u16(handle, KEY_NODE_ADDR, cfg->node_addr);
@@ -98,38 +116,65 @@ esp_err_t mesh_config_save(const mesh_config_t *cfg)
     if (err != ESP_OK) goto cleanup;
 
     err = nvs_commit(handle);
-    LOG_INFO(TAG, "Mesh config saved: mode=%d, group_addr=0x%04X", cfg->mode, cfg->group_addr);
+    LOG_INFO(TAG, "Mesh config saved: mode=%d, group_addr_count=%d", cfg->mode, cfg->group_addr_count);
 
 cleanup:
     nvs_close(handle);
     return err;
 }
 
-esp_err_t mesh_config_load_group_addr(uint16_t *group_addr)
+esp_err_t mesh_config_load_group_addrs(uint16_t *out_addrs, uint8_t max_count, uint8_t *out_count)
 {
-    if (!group_addr) return ESP_ERR_INVALID_ARG;
-    *group_addr = 0;
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(MESH_CONFIG_NAMESPACE, NVS_READONLY, &handle);
-    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
-    if (err != ESP_OK) return ESP_OK;
-    nvs_get_u16(handle, KEY_GRP_ADDR, group_addr);
-    nvs_close(handle);
+    if (!out_addrs || !out_count) return ESP_ERR_INVALID_ARG;
+    *out_count = 0;
+
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg); // handles the legacy-key migration too
+
+    uint8_t n = cfg.group_addr_count > max_count ? max_count : cfg.group_addr_count;
+    for (uint8_t i = 0; i < n; i++) {
+        out_addrs[i] = cfg.group_addrs[i];
+    }
+    *out_count = n;
     return ESP_OK;
 }
 
-esp_err_t mesh_config_save_group_addr(uint16_t group_addr)
+esp_err_t mesh_config_add_group_addr(uint16_t group_addr)
 {
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(MESH_CONFIG_NAMESPACE, NVS_READWRITE, &handle);
-    if (err != ESP_OK) return err;
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
 
-    err = nvs_set_u16(handle, KEY_GRP_ADDR, group_addr);
-    if (err == ESP_OK) {
-        err = nvs_commit(handle);
+    for (uint8_t i = 0; i < cfg.group_addr_count; i++) {
+        if (cfg.group_addrs[i] == group_addr) {
+            return ESP_OK; // already present
+        }
     }
-    nvs_close(handle);
-    return err;
+    if (cfg.group_addr_count >= MESH_MAX_GROUP_ADDRS) {
+        return ESP_ERR_NO_MEM;
+    }
+    cfg.group_addrs[cfg.group_addr_count++] = group_addr;
+    return mesh_config_save(&cfg);
+}
+
+esp_err_t mesh_config_remove_group_addr(uint16_t group_addr)
+{
+    mesh_config_t cfg = {};
+    mesh_config_load(&cfg);
+
+    uint8_t write = 0;
+    for (uint8_t read = 0; read < cfg.group_addr_count; read++) {
+        if (cfg.group_addrs[read] != group_addr) {
+            cfg.group_addrs[write++] = cfg.group_addrs[read];
+        }
+    }
+    if (write == cfg.group_addr_count) {
+        return ESP_OK; // wasn't present
+    }
+    for (uint8_t i = write; i < cfg.group_addr_count; i++) {
+        cfg.group_addrs[i] = 0;
+    }
+    cfg.group_addr_count = write;
+    return mesh_config_save(&cfg);
 }
 
 esp_err_t mesh_config_save_node_identity(uint16_t addr, uint16_t net_idx)

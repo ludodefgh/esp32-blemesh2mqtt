@@ -9,6 +9,10 @@ extern "C" {
 
 #define MESH_CONFIG_NAMESPACE "mesh_cfg"
 
+// Matches CONFIG_BLE_MESH_MODEL_GROUP_COUNT's default (3) — each Client model's own
+// subscription list is that deep, so more than this many wouldn't all fit anyway.
+#define MESH_MAX_GROUP_ADDRS 3
+
 typedef enum {
     MESH_MODE_STANDALONE = 0,
     MESH_MODE_JOIN_EXISTING = 1,
@@ -18,7 +22,8 @@ typedef struct {
     mesh_mode_t mode;
     uint8_t net_key[16];
     uint8_t app_key[16];
-    uint16_t group_addr;
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS];
+    uint8_t group_addr_count;
     // Join-existing-as-node identity: unlike net_key/app_key above (manual entry,
     // superseded for this mode — see ble_mesh_init), these are never typed in.
     // They're learned from the real provisioning handshake (node_addr, node_net_idx)
@@ -32,8 +37,12 @@ typedef struct {
 
 esp_err_t mesh_config_load(mesh_config_t *cfg);
 esp_err_t mesh_config_save(const mesh_config_t *cfg);
-esp_err_t mesh_config_load_group_addr(uint16_t *group_addr);
-esp_err_t mesh_config_save_group_addr(uint16_t group_addr);
+// Replaces the old single-address mesh_config_load_group_addr/save_group_addr.
+esp_err_t mesh_config_load_group_addrs(uint16_t *out_addrs, uint8_t max_count, uint8_t *out_count);
+// No-op (ESP_OK) if already present. ESP_ERR_NO_MEM if MESH_MAX_GROUP_ADDRS is already used.
+esp_err_t mesh_config_add_group_addr(uint16_t group_addr);
+// No-op (ESP_OK) if not present.
+esp_err_t mesh_config_remove_group_addr(uint16_t group_addr);
 esp_err_t mesh_config_save_node_identity(uint16_t addr, uint16_t net_idx);
 esp_err_t mesh_config_save_node_app_idx(uint16_t app_idx);
 // Erases the BLE Mesh stack's own persisted state (NVS namespace "mesh_core" — its

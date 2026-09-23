@@ -123,12 +123,13 @@
                 <span class="toggle-description">Automatically provision newly discovered BLE Mesh devices</span>
               </div>
               <div class="form-group" style="margin-top:14px;">
-                <label for="group-addr-input" style="font-size:0.9em;font-weight:600;">Group Address Subscription</label>
+                <label style="font-size:0.9em;font-weight:600;">Group Address Subscriptions</label>
+                <div id="group-addr-list" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>
                 <div style="display:flex;gap:8px;align-items:center;">
                   <input type="text" id="group-addr-input" placeholder="e.g. 0xC000" style="font-family:monospace;max-width:160px;">
-                  <button class="btn btn-primary" style="width:auto;padding:8px 16px;" onclick="saveMeshGroupAddr()">Save</button>
+                  <button class="btn btn-primary" style="width:auto;padding:8px 16px;" onclick="addMeshGroupAddr()">Add</button>
                 </div>
-                <span style="font-size:0.8em;color:#666;">Subscribe bridge models to a group address (0x0000 = disabled). Restart required to apply.</span>
+                <span style="font-size:0.8em;color:#666;">Subscribe bridge models to up to 3 group addresses — applied immediately, no restart needed.</span>
               </div>
             </div>
             

@@ -1928,18 +1928,36 @@ function toggleAutoProvisioning(enabled) {
 function loadMeshGroupAddr() {
   fetch('/api/mesh/settings')
     .then(r => r.json())
-    .then(data => {
-      const input = document.getElementById('group-addr-input');
-      if (input && data.group_addr) {
-        input.value = data.group_addr === '0x0000' ? '' : data.group_addr;
-      }
-    })
+    .then(data => renderGroupAddrList(data.group_addrs || []))
     .catch(err => console.error('Error loading mesh settings:', err));
 }
 
-function saveMeshGroupAddr() {
+function renderGroupAddrList(addrs) {
+  const list = document.getElementById('group-addr-list');
+  if (!list) return;
+  list.innerHTML = '';
+  addrs.forEach(addr => {
+    const chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#eee;border-radius:12px;font-family:monospace;font-size:0.85em;';
+    chip.textContent = addr;
+    const removeBtn = document.createElement('a');
+    removeBtn.href = '#';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.style.cssText = 'color:#c00;font-weight:bold;text-decoration:none;';
+    removeBtn.onclick = (e) => { e.preventDefault(); removeMeshGroupAddr(addr); };
+    chip.appendChild(removeBtn);
+    list.appendChild(chip);
+  });
+}
+
+function addMeshGroupAddr() {
   const input = document.getElementById('group-addr-input');
-  const raw = (input ? input.value.trim() : '') || '0x0000';
+  const raw = input ? input.value.trim() : '';
+  if (!raw) {
+    showToast('Enter a group address first', 'error');
+    return;
+  }
   const parsed = parseInt(raw, 16);
   if (isNaN(parsed) || parsed < 0 || parsed > 0xFFFF) {
     showToast('Invalid group address — use hex format like 0xC000', 'error');
@@ -1953,10 +1971,30 @@ function saveMeshGroupAddr() {
   .then(r => r.json())
   .then(data => {
     if (data.success) {
-      showToast('Group address saved. Restart bridge to apply.', 'success');
+      input.value = '';
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address added', 'success');
     } else {
-      showToast('Failed to save group address', 'error');
+      showToast('Failed to add group address', 'error');
     }
   })
-  .catch(err => showToast('Error saving group address: ' + err.message, 'error'));
+  .catch(err => showToast('Error adding group address: ' + err.message, 'error'));
+}
+
+function removeMeshGroupAddr(addr) {
+  fetch('/api/mesh/settings/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: addr })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address removed', 'success');
+    } else {
+      showToast('Failed to remove group address', 'error');
+    }
+  })
+  .catch(err => showToast('Error removing group address: ' + err.message, 'error'));
 }

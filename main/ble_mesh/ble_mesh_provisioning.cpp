@@ -372,7 +372,10 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         // Retry the group subscribe ble_mesh_init() attempted at boot (it failed then —
         // local_element_addr was still 0, not yet provisioned).
         local_element_addr = addr;
-        ble_mesh_subscribe_group_addr(mesh_cfg.group_addr);
+        for (uint8_t i = 0; i < mesh_cfg.group_addr_count; i++)
+        {
+            ble_mesh_subscribe_group_addr(mesh_cfg.group_addrs[i]);
+        }
         break;
     }
 
