@@ -113,6 +113,14 @@ static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
 static constexpr uint16_t GENERIC_LEVEL_EXTENDING_FEATURES =
     FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
 
+// Unicast Range Get, same as the provisioned-node path (ble_mesh_commands.cpp) — an
+// AppKey-bound op, not DevKey-bound, so it works for a node we never provisioned too.
+// Defined near the other external send functions further down; forward-declared here
+// since the upsert_* functions below fire them on first sighting of each feature.
+static void send_external_lightness_range_get(uint16_t addr);
+static void send_external_hsl_range_get(uint16_t addr);
+static void send_external_ctl_temperature_range_get(uint16_t addr);
+
 static void upsert_external_node_level(uint16_t addr, int16_t level)
 {
     bool was_new = false;
@@ -140,13 +148,19 @@ static void upsert_external_node_level(uint16_t addr, int16_t level)
 static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
 {
     bool was_new = false;
+    bool feature_newly_set = false;
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_LIGHTNESS);
         node.lightness = lightness;
         node.features |= FEATURE_LIGHT_LIGHTNESS;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
         node.last_seen_us = esp_timer_get_time();
+    }
+    if (feature_newly_set)
+    {
+        send_external_lightness_range_get(addr);
     }
     mqtt_notify_external_node_changed(addr, was_new);
 }
@@ -154,9 +168,11 @@ static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
 static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness)
 {
     bool was_new = false;
+    bool feature_newly_set = false;
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_HSL);
         node.hue = hue;
         node.saturation = saturation;
         node.lightness = lightness;
@@ -165,15 +181,21 @@ static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t satur
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
         node.last_seen_us = esp_timer_get_time();
     }
+    if (feature_newly_set)
+    {
+        send_external_hsl_range_get(addr);
+    }
     mqtt_notify_external_node_changed(addr, was_new);
 }
 
 static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16_t lightness)
 {
     bool was_new = false;
+    bool feature_newly_set = false;
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_CTL);
         node.temperature = temperature;
         node.lightness = lightness;
         node.color_mode = color_mode_t::color_temp;
@@ -181,7 +203,49 @@ static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
         node.last_seen_us = esp_timer_get_time();
     }
+    if (feature_newly_set)
+    {
+        send_external_ctl_temperature_range_get(addr);
+    }
     mqtt_notify_external_node_changed(addr, was_new);
+}
+
+static void upsert_external_node_lightness_range(uint16_t addr, uint16_t min_lightness, uint16_t max_lightness)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr);
+        node.min_lightness = min_lightness;
+        node.max_lightness = max_lightness;
+    }
+    // Re-announce discovery so HA picks up the real brightness_scale.
+    mqtt_notify_external_node_changed(addr, true);
+}
+
+static void upsert_external_node_hsl_range(uint16_t addr, uint16_t min_hue, uint16_t max_hue,
+                                            uint16_t min_saturation, uint16_t max_saturation)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr);
+        node.min_hue = min_hue;
+        node.max_hue = max_hue;
+        node.min_saturation = min_saturation;
+        node.max_saturation = max_saturation;
+    }
+    mqtt_notify_external_node_changed(addr, true);
+}
+
+static void upsert_external_node_ctl_range(uint16_t addr, uint16_t min_temp, uint16_t max_temp)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr);
+        node.min_temp = min_temp;
+        node.max_temp = max_temp;
+    }
+    // Re-announce discovery so HA picks up the real min/max_kelvin.
+    mqtt_notify_external_node_changed(addr, true);
 }
 
 static struct esp_ble_mesh_key
@@ -891,6 +955,25 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
             upsert_external_node_ctl(addr, param->status_cb.ctl_status.present_ctl_temperature,
                                       param->status_cb.ctl_status.present_ctl_lightness);
         }
+        // Range Get replies: always unicast (see send_external_*_range_get), so only
+        // ever arrive as a GET_STATE_EVT ack, never PUBLISH_EVT.
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET)
+        {
+            upsert_external_node_lightness_range(addr, param->status_cb.lightness_range_status.range_min,
+                                                  param->status_cb.lightness_range_status.range_max);
+        }
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET)
+        {
+            upsert_external_node_hsl_range(addr, param->status_cb.hsl_range_status.hue_range_min,
+                                            param->status_cb.hsl_range_status.hue_range_max,
+                                            param->status_cb.hsl_range_status.saturation_range_min,
+                                            param->status_cb.hsl_range_status.saturation_range_max);
+        }
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET)
+        {
+            upsert_external_node_ctl_range(addr, param->status_cb.ctl_temperature_range_status.range_min,
+                                            param->status_cb.ctl_temperature_range_status.range_max);
+        }
         return;
     }
 
@@ -1470,6 +1553,71 @@ esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature
         } });
 
     return ESP_OK;
+}
+
+// Range Get carries no payload — just the opcode — same as the provisioned-node
+// versions (ble_mesh_commands.cpp's ble_mesh_lightness_range_get and friends).
+static void send_external_lightness_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue([addr]()
+                                   {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET;
+        common.model = lightness_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = MSG_TIMEOUT;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external Lightness Range Get to 0x%04X failed (err %d)", addr, err);
+        } });
+}
+
+static void send_external_hsl_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue([addr]()
+                                   {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET;
+        common.model = hsl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = MSG_TIMEOUT;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external HSL Range Get to 0x%04X failed (err %d)", addr, err);
+        } });
+}
+
+static void send_external_ctl_temperature_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue([addr]()
+                                   {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET;
+        common.model = ctl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = MSG_TIMEOUT;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external CTL Temperature Range Get to 0x%04X failed (err %d)", addr, err);
+        } });
 }
 
 void ble_mesh_refresh_all_nodes()

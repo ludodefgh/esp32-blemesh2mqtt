@@ -49,11 +49,22 @@ struct external_mesh_node_t
     uint16_t features; // bitmask of node_supported_features_t actually observed
     uint8_t onoff;
     int16_t level;
-    uint16_t lightness; // also HSL/CTL's lightness component — one brightness value per node
-    uint16_t hue;
-    uint16_t saturation;
-    uint16_t temperature; // CTL, raw Kelvin
-    color_mode_t color_mode;
+    uint16_t lightness{0}; // also HSL/CTL's lightness component — one brightness value per node
+    uint16_t min_lightness{0};
+    uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
+    uint16_t hue{0};
+    uint16_t min_hue{0};
+    uint16_t max_hue{std::numeric_limits<uint16_t>::max()};
+    uint16_t saturation{0};
+    uint16_t min_saturation{0};
+    uint16_t max_saturation{std::numeric_limits<uint16_t>::max()};
+    uint16_t temperature{0}; // CTL, raw Kelvin
+    // Real range comes from a Range Get once the node's CTL feature is detected (see
+    // ble_mesh_control.cpp); these are just a friendlier placeholder than 0..65535 for
+    // the brief window before that reply arrives.
+    uint16_t min_temp{800};
+    uint16_t max_temp{20000};
+    color_mode_t color_mode{color_mode_t::brightness};
     int64_t last_seen_us;
 };
 

@@ -16,12 +16,6 @@
 
 #define TAG "APP_MQTT_EXT"
 
-// BLE Mesh spec's own default (unconfigured) Light CTL Server temperature range — used
-// since external nodes never get a Range Get (unicast, AppKey-bound, would be doable,
-// but no device-specific range is tracked today).
-static constexpr int EXTERNAL_NODE_DEFAULT_MIN_KELVIN = 800;
-static constexpr int EXTERNAL_NODE_DEFAULT_MAX_KELVIN = 20000;
-
 static std::string external_node_id(uint16_t addr)
 {
     char buf[16];
@@ -98,7 +92,7 @@ static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node
         if (node.features & light_features)
         {
             cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
-            cJSON_AddNumberToObject(root, "brightness_scale", 65535);
+            cJSON_AddNumberToObject(root, "brightness_scale", node.max_lightness);
         }
 
         cJSON *sup_clrm = nullptr;
@@ -110,8 +104,8 @@ static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node
             {
                 cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("color_temp"));
                 cJSON_AddItemToObject(root, "color_temp_kelvin", cJSON_CreateBool(1));
-                cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(EXTERNAL_NODE_DEFAULT_MIN_KELVIN));
-                cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(EXTERNAL_NODE_DEFAULT_MAX_KELVIN));
+                cJSON_AddItemToObject(root, "min_kelvin", cJSON_CreateNumber(node.min_temp));
+                cJSON_AddItemToObject(root, "max_kelvin", cJSON_CreateNumber(node.max_temp));
                 has_color = true;
             }
             if (node.features & FEATURE_LIGHT_HSL)
@@ -157,8 +151,8 @@ static CJsonPtr make_external_status_message(const external_mesh_node_t &node)
             cJSON_AddItemToObject(root, "color", color = cJSON_CreateObject());
             if (color)
             {
-                cJSON_AddNumberToObject(color, "h", (uint16_t)map(node.hue, 0, 65535, 0, 360));
-                cJSON_AddNumberToObject(color, "s", (uint16_t)map(node.saturation, 0, 65535, 0, 100));
+                cJSON_AddNumberToObject(color, "h", (uint16_t)map(node.hue, node.min_hue, node.max_hue, 0, 360));
+                cJSON_AddNumberToObject(color, "s", (uint16_t)map(node.saturation, node.min_saturation, node.max_saturation, 0, 100));
             }
         }
         else if (node.features & FEATURE_LIGHT_LIGHTNESS)
@@ -335,12 +329,12 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
 
                 if (const cJSON *h = cJSON_GetObjectItemCaseSensitive(color, "h"); cJSON_IsNumber(h))
                 {
-                    hue = (uint16_t)map(h->valuedouble, 0, 360, 0, 65535);
+                    hue = (uint16_t)map(h->valuedouble, 0, 360, node.min_hue, node.max_hue);
                     changed = true;
                 }
                 if (const cJSON *s = cJSON_GetObjectItemCaseSensitive(color, "s"); cJSON_IsNumber(s))
                 {
-                    saturation = (uint16_t)map(s->valuedouble, 0, 100, 0, 65535);
+                    saturation = (uint16_t)map(s->valuedouble, 0, 100, node.min_saturation, node.max_saturation);
                     changed = true;
                 }
                 if (changed)
@@ -358,8 +352,7 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
             if (cJSON_IsNumber(color_temp))
             {
                 double clamped = color_temp->valuedouble;
-                clamped = clamped < EXTERNAL_NODE_DEFAULT_MIN_KELVIN ? EXTERNAL_NODE_DEFAULT_MIN_KELVIN
-                          : (clamped > EXTERNAL_NODE_DEFAULT_MAX_KELVIN ? EXTERNAL_NODE_DEFAULT_MAX_KELVIN : clamped);
+                clamped = clamped < node.min_temp ? node.min_temp : (clamped > node.max_temp ? node.max_temp : clamped);
                 ble_mesh_send_external_ctl_command(addr, (uint16_t)clamped);
             }
         }
