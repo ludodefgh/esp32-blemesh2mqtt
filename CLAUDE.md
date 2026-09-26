@@ -8,13 +8,13 @@ ESP32 firmware (ESP-IDF v5.5-dev, C++23) that bridges a BLE Mesh network to MQTT
 
 ## Build, flash, monitor
 
-Up to three ESP-IDF projects exist on this devcontainer, each with real attached hardware for live testing (see the **`esp32-test-provisioner`** skill for how they fit together as a fully-automated, nRF-Mesh-free test setup):
+Three boards are attached to this devcontainer for live testing, each running its own ESP-IDF project (see the **`esp32-test-provisioner`** skill and `test/README.md` for how they fit together as a fully-automated, nRF-Mesh-free test setup, and `test/scripts/` for hardware regression tests):
 
 | Project | Chip | Port | Role |
 |---|---|---|---|
 | `/workspaces/ESPIDFSengledB11N1EProto` (this repo) | ESP32 WROOM | `/dev/ttyUSB0` | the bridge |
-| `/workspaces/provisioner_test` | ESP32-C3 | `/dev/ttyACM0` | test-harness Provisioner (Espressif's stock `provisioner` example, adapted) — auto-provisions and configures whatever unprovisioned device it sees, standing in for nRF Mesh |
-| `/workspaces/onoff_server_test` | ESP32-C3 | `/dev/ttyACM1` (varies) | disposable "External Mesh Node" test target running Espressif's stock `onoff_server` example (not this project's code) |
+| `test/firmware/provisioner` (in this repo) | ESP32-C3 | `/dev/ttyACM0` | test-harness Provisioner (Espressif's `provisioner` example, adapted) — auto-provisions and configures whatever unprovisioned device it sees, standing in for nRF Mesh |
+| `test/firmware/hsl_server` (in this repo) | ESP32-C3 | `/dev/ttyACM1` (varies) | HSL test bulb — the "External Mesh Node" target; logs its real state as `STATE ...` lines. `test/firmware/onoff_server` is a simpler on/off-only alternative |
 
 Use the **`esp32-flash`** and **`esp32-monitor`** skills for build/flash/serial-log workflows — they encode hard-won gotchas (non-interactive `idf.py monitor` doesn't work, `ttyACM0`-style ports reset on every open, Kconfig *choice* options can silently revert on `reconfigure`, etc.) that are easy to rediscover the hard way otherwise.
 

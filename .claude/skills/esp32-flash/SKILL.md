@@ -1,16 +1,17 @@
 ---
 name: esp32-flash
-description: Build and flash either the bridge (ESP32 WROOM, /dev/ttyUSB0, this repo) or the C3 test node (ESP32-C3, /dev/ttyACM0, /workspaces/onoff_server_test). Use whenever the user asks to flash, reflash, build, or erase either board.
+description: Build and flash either the bridge (ESP32 WROOM, /dev/ttyUSB0, this repo) or the ESP32-C3 test-rig boards (test/firmware/*). Use whenever the user asks to flash, reflash, build, or erase either board.
 ---
 
 # esp32-flash
 
-Two boards live on this devcontainer:
+Three boards live on this devcontainer (C3 ports can swap after a replug/restart — check with `esptool.py --port <p> chip_id`):
 
 | Target   | Chip       | Port           | Project dir                              |
 |----------|------------|----------------|-------------------------------------------|
 | `bridge` | ESP32 WROOM (CH340 USB bridge) | `/dev/ttyUSB0` | `/workspaces/ESPIDFSengledB11N1EProto` (this repo) |
-| `c3`     | ESP32-C3 (native USB-Serial-JTAG) | `/dev/ttyACM0` | `/workspaces/onoff_server_test` (Espressif's stock `onoff_server` example — a disposable test fixture, not project code; safe to erase/reflash freely) |
+| `provisioner` | ESP32-C3 (native USB-Serial-JTAG) | `/dev/ttyACM0` | `test/firmware/provisioner` (test-harness Provisioner — don't `erase-flash` it mid-cycle, see `esp32-test-provisioner`) |
+| `bulb`   | ESP32-C3 (native USB-Serial-JTAG) | `/dev/ttyACM1` | `test/firmware/hsl_server` (or `onoff_server`) — disposable External Mesh Node target, safe to erase/reflash freely |
 
 ## Steps
 
@@ -20,12 +21,13 @@ Two boards live on this devcontainer:
    ```
    (Cheap to re-run if unsure whether it's already exported.)
 
-2. **cd into the right project dir** for the target (see table above) before running any `idf.py` command — the two projects are entirely separate ESP-IDF projects with their own `sdkconfig`/`build/`.
+2. **cd into the right project dir** for the target (see table above) before running any `idf.py` command — the projects are entirely separate ESP-IDF projects with their own `sdkconfig`/`build/`.
 
 3. **Build + flash**, always with an explicit `-p` (both ports can be attached at once, so an implicit/default port is not safe to assume):
    ```bash
    idf.py -p /dev/ttyUSB0 flash   # bridge
-   idf.py -p /dev/ttyACM0 flash   # c3
+   idf.py -p /dev/ttyACM0 flash   # provisioner (from test/firmware/provisioner)
+   idf.py -p /dev/ttyACM1 flash   # bulb (from test/firmware/hsl_server)
    ```
    `flash` implies a build first; no need to call `build` separately unless you want to see compile errors before committing to a flash.
 

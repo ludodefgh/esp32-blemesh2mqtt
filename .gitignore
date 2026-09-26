@@ -165,3 +165,6 @@ yarn.lock
 # Partition tables (keep them)
 !partitions/
 !partitions/*.csv
+
+# Test-rig firmware: component lock holds machine-specific absolute IDF paths
+test/firmware/*/dependencies.lock
