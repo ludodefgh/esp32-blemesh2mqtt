@@ -50,7 +50,7 @@ External Mesh Nodes also get their own parallel MQTT/HA integration (`mqtt/mqtt_
 
 ### BLE Mesh sends are serialized through one queue
 
-Concurrent unacknowledged sends to the mesh stack are unreliable, so outbound BLE Mesh messages that need a response (Config Client ops, composition reads) go through `message_queue()` (`ble_mesh/message_queue.*`) — a single queue with per-message retry — rather than being fired directly from callbacks.
+Concurrent unacknowledged sends to the mesh stack are unreliable, so outbound BLE Mesh messages that need a response (Config Client ops, composition reads) go through `message_queue()` (`ble_mesh/message_queue.*`) — a single queue with per-message retry — rather than being fired directly from callbacks. External Mesh Nodes have the equivalent `external_node_queue()` (`ble_mesh/external_node_queue.*`), since `message_queue()` is keyed by provisioned node/DevKey: acknowledged unicast sends wait for their ack (the client callbacks report it via `on_send_complete`) and are retried up to 3 times with a 2 s ack timeout; group sends just keep a 300 ms gap; a still-queued Set to the same addr+opcode is replaced by a newer one (HA slider bursts). Without the ack wait, a lost ack — frequent on the WROOM, likely WiFi/BLE coexistence — both dropped HA's state update and made the next Set to that node fail with `Busy`.
 
 ### Debug console commands self-register
 

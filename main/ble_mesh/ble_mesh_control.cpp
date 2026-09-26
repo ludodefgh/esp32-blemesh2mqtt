@@ -972,7 +972,14 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     if (param->error_code)
     {
         LOG_ERROR(TAG, "Send generic client message failed, opcode 0x%04" PRIx32, opcode);
+        external_node_queue().on_send_complete(addr, opcode, false);
         return;
+    }
+    // Lets the external node queue move on (ack) or retry (timeout); no-op for sends it
+    // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
+    if (event == ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT)
+    {
+        external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT);
     }
 
     auto node = node_manager().get_node(addr);
@@ -1117,7 +1124,14 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     if (param->error_code)
     {
         LOG_ERROR(TAG, "Send light client message failed, opcode 0x%04" PRIx32, opcode);
+        external_node_queue().on_send_complete(addr, opcode, false);
         return;
+    }
+    // Lets the external node queue move on (ack) or retry (timeout); no-op for sends it
+    // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
+    if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT)
+    {
+        external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT);
     }
 
     auto node = node_manager().get_node(addr);
@@ -1570,41 +1584,46 @@ static esp_err_t send_group_get(esp_ble_mesh_model_t *model, uint32_t opcode, ui
 // are queued before Level so upsert_external_node_level already knows to exclude them.
 static void queue_discovery_burst_for_group(uint16_t group_addr)
 {
-    external_node_queue().enqueue([group_addr]()
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
                                    {
         esp_err_t err = send_group_get(onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET, group_addr, false);
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Failed to send OnOff discovery Get to group 0x%04X (err %d)", group_addr, err);
-        } });
-    external_node_queue().enqueue([group_addr]()
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
                                    {
         esp_err_t err = send_group_get(lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET, group_addr, true);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to send Lightness discovery Get to group 0x%04X (err %d)", group_addr, err);
-        } });
-    external_node_queue().enqueue([group_addr]()
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
                                    {
         esp_err_t err = send_group_get(hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET, group_addr, true);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to send HSL discovery Get to group 0x%04X (err %d)", group_addr, err);
-        } });
-    external_node_queue().enqueue([group_addr]()
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
                                    {
         esp_err_t err = send_group_get(ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET, group_addr, true);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to send CTL discovery Get to group 0x%04X (err %d)", group_addr, err);
-        } });
-    external_node_queue().enqueue([group_addr]()
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
                                    {
         esp_err_t err = send_group_get(level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_GET, group_addr, false);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Failed to send Level discovery Get to group 0x%04X (err %d)", group_addr, err);
-        } });
+        }
+        return err; }});
 
     LOG_INFO(TAG, "Queued external node discovery Gets to group 0x%04X", group_addr);
 }
@@ -1691,9 +1710,11 @@ esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Queued (external_node_queue.h) — caller only gets "accepted", not a send result.
-    external_node_queue().enqueue([addr, onoff]()
-                                   {
+    // Queued (external_node_queue.h) — caller only gets "accepted"; acked sends are retried.
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, onoff]() -> esp_err_t
+        {
         // Group Sets should be unacknowledged (Mesh spec) since multiple elements may reply.
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
@@ -1705,7 +1726,7 @@ esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         set_state.onoff_set.op_en = false;
         set_state.onoff_set.onoff = onoff ? 1 : 0;
@@ -1715,7 +1736,11 @@ esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external OnOff Set to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET,
+    });
 
     return ESP_OK;
 }
@@ -1727,8 +1752,10 @@ esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level)
         return ESP_ERR_INVALID_ARG;
     }
 
-    external_node_queue().enqueue([addr, level]()
-                                   {
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, level]() -> esp_err_t
+        {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
         esp_ble_mesh_client_common_param_t common = {0};
@@ -1739,7 +1766,7 @@ esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level)
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         set_state.level_set.op_en = false;
         set_state.level_set.level = level;
@@ -1749,7 +1776,11 @@ esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level)
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external Level Set to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET,
+    });
 
     return ESP_OK;
 }
@@ -1761,8 +1792,10 @@ esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t light
         return ESP_ERR_INVALID_ARG;
     }
 
-    external_node_queue().enqueue([addr, lightness]()
-                                   {
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, lightness]() -> esp_err_t
+        {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
         esp_ble_mesh_client_common_param_t common = {0};
@@ -1773,7 +1806,7 @@ esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t light
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         set_state.lightness_set.op_en = false;
         set_state.lightness_set.lightness = lightness;
@@ -1783,7 +1816,11 @@ esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t light
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external Lightness Set to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET,
+    });
 
     return ESP_OK;
 }
@@ -1798,8 +1835,10 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
     external_mesh_node_t node{};
     ble_mesh_find_external_node(addr, node); // max_lightness keeps its 65535 default if unknown
 
-    external_node_queue().enqueue([addr, hue, saturation, lightness, max_lightness = node.max_lightness]()
-                                   {
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, hue, saturation, lightness, max_lightness = node.max_lightness]() -> esp_err_t
+        {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
         esp_ble_mesh_client_common_param_t common = {0};
@@ -1810,7 +1849,7 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         set_state.hsl_set.hsl_hue = hue;
         set_state.hsl_set.hsl_saturation = saturation;
@@ -1827,7 +1866,11 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external HSL Set to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET,
+    });
 
     return ESP_OK;
 }
@@ -1839,8 +1882,10 @@ esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature
         return ESP_ERR_INVALID_ARG;
     }
 
-    external_node_queue().enqueue([addr, temperature, lightness]()
-                                   {
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, temperature, lightness]() -> esp_err_t
+        {
         bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
 
         esp_ble_mesh_client_common_param_t common = {0};
@@ -1851,7 +1896,7 @@ esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         set_state.ctl_set.ctl_temperature = temperature;
         set_state.ctl_set.ctl_lightness = lightness;
@@ -1864,7 +1909,11 @@ esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature
         if (err != ESP_OK)
         {
             LOG_ERROR(TAG, "Queued external CTL Set to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET,
+    });
 
     return ESP_OK;
 }
@@ -1873,8 +1922,9 @@ esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature
 // versions (ble_mesh_commands.cpp's ble_mesh_lightness_range_get and friends).
 static void send_external_lightness_range_get(uint16_t addr)
 {
-    external_node_queue().enqueue([addr]()
-                                   {
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state = {0};
         common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET;
@@ -1883,19 +1933,24 @@ static void send_external_lightness_range_get(uint16_t addr)
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Queued external Lightness Range Get to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET,
+    });
 }
 
 static void send_external_hsl_range_get(uint16_t addr)
 {
-    external_node_queue().enqueue([addr]()
-                                   {
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state = {0};
         common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET;
@@ -1904,19 +1959,24 @@ static void send_external_hsl_range_get(uint16_t addr)
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Queued external HSL Range Get to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET,
+    });
 }
 
 static void send_external_ctl_temperature_range_get(uint16_t addr)
 {
-    external_node_queue().enqueue([addr]()
-                                   {
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
         esp_ble_mesh_client_common_param_t common = {0};
         esp_ble_mesh_light_client_get_state_t get_state = {0};
         common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET;
@@ -1925,13 +1985,17 @@ static void send_external_ctl_temperature_range_get(uint16_t addr)
         common.ctx.app_idx = store.app_idx;
         common.ctx.addr = addr;
         common.ctx.send_ttl = MSG_SEND_TTL;
-        common.msg_timeout = MSG_TIMEOUT;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
 
         esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
         if (err != ESP_OK)
         {
             LOG_WARN(TAG, "Queued external CTL Temperature Range Get to 0x%04X failed (err %d)", addr, err);
-        } });
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET,
+    });
 }
 
 void ble_mesh_refresh_all_nodes()

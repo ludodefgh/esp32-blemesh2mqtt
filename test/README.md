@@ -31,7 +31,6 @@ python3 test/scripts/external_node_regression.py --bridge-topic blemesh2mqtt_<br
 MQTT credentials come from the environment or the repo's `.env`
 (`MQTT_BROKER_HOST/PORT/USERNAME/PASSWORD`). Exit code = number of failed tests.
 
-Known flakiness: unicast commands to External Mesh Nodes aren't retried yet, and the
-bridge loses a noticeable share of acks (likely WiFi/BLE coexistence on the WROOM). A
-lost ack shows up as HA not receiving the new state (`HA not told …`) even though the
-bulb check passes.
+Commands are spaced 5 s apart. Before the external node queue waited for acks and
+retried, lost acks (likely WiFi/BLE coexistence on the WROOM) made these tests flaky —
+consistently failing runs now point at a real regression.
