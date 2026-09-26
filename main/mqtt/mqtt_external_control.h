@@ -9,7 +9,6 @@
 // node_manager()-based flow, but keyed by unicast address instead of a DevKey/UUID,
 // since external nodes have neither.
 
-void mqtt_subscribe_all_external_nodes(esp_mqtt_client_handle_t client);
 void mqtt_republish_all_external_nodes(void);
 
 // Called by ble_mesh_control.cpp whenever a discovery probe reply updates an external

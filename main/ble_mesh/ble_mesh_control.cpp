@@ -1,11 +1,13 @@
 #include "ble_mesh_control.h"
 
 // Standard C/C++ libraries
+#include <algorithm>
 #include <inttypes.h>
 #include <memory>
 #include <mutex>
 #include <stdio.h>
 #include <string.h>
+#include <type_traits>
 #include <vector>
 
 // ESP-IDF includes
@@ -22,6 +24,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 
 // Project includes
@@ -102,15 +105,125 @@ bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
     return false;
 }
 
+// External Mesh Nodes are persisted like node_manager()'s provisioned nodes, so their
+// HA entities and MQTT subscriptions come back at boot without waiting for a node to
+// answer a discovery probe. Only structural changes (new node, new feature, ranges)
+// mark it dirty — not every state change — and saves are debounced, to spare flash.
+static constexpr const char *EXT_NODES_NVS_NAMESPACE = "ble_mesh";
+static constexpr const char *EXT_NODES_NVS_KEY = "ext_nodes";
+static constexpr const char *EXT_NODES_NVS_VERSION_KEY = "ext_ver";
+static constexpr uint32_t EXT_NODES_SCHEMA_VERSION = 1; // bump on external_mesh_node_t layout change
+static_assert(std::is_trivially_copyable_v<external_mesh_node_t>, "persisted as a raw blob");
+static esp_timer_handle_t s_ext_nodes_save_timer = nullptr;
+
+static void save_external_nodes()
+{
+    std::vector<external_mesh_node_t> nodes;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        nodes = external_nodes;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(EXT_NODES_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "External nodes NOT saved (nvs_open failed): %s", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_set_u32(handle, EXT_NODES_NVS_VERSION_KEY, EXT_NODES_SCHEMA_VERSION);
+    if (err == ESP_OK)
+    {
+        err = nodes.empty() ? nvs_erase_key(handle, EXT_NODES_NVS_KEY)
+                            : nvs_set_blob(handle, EXT_NODES_NVS_KEY, nodes.data(), nodes.size() * sizeof(external_mesh_node_t));
+        if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (err == ESP_OK)
+    {
+        LOG_INFO(TAG, "Saved %u external node(s)", (unsigned)nodes.size());
+    }
+    else
+    {
+        LOG_ERROR(TAG, "External nodes NOT saved: %s", esp_err_to_name(err));
+    }
+}
+
+static void mark_external_nodes_dirty()
+{
+    if (!s_ext_nodes_save_timer)
+    {
+        const esp_timer_create_args_t args = {
+            .callback = [](void *) { save_external_nodes(); },
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "ext_nodes_save",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &s_ext_nodes_save_timer) != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to create external nodes save timer");
+            return;
+        }
+    }
+    esp_timer_stop(s_ext_nodes_save_timer); // debounce: restart the countdown
+    esp_timer_start_once(s_ext_nodes_save_timer, 10 * 1000 * 1000);
+}
+
+static void load_external_nodes()
+{
+    nvs_handle_t handle;
+    if (nvs_open(EXT_NODES_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK)
+    {
+        return;
+    }
+    uint32_t version = 0;
+    size_t size = 0;
+    std::vector<external_mesh_node_t> nodes;
+    if (nvs_get_u32(handle, EXT_NODES_NVS_VERSION_KEY, &version) == ESP_OK && version == EXT_NODES_SCHEMA_VERSION &&
+        nvs_get_blob(handle, EXT_NODES_NVS_KEY, nullptr, &size) == ESP_OK && size % sizeof(external_mesh_node_t) == 0)
+    {
+        nodes.resize(size / sizeof(external_mesh_node_t));
+        if (nvs_get_blob(handle, EXT_NODES_NVS_KEY, nodes.data(), &size) != ESP_OK)
+        {
+            nodes.clear();
+        }
+    }
+    nvs_close(handle);
+
+    for (auto &node : nodes)
+    {
+        node.last_seen_us = 0; // not seen since this boot
+    }
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        external_nodes = std::move(nodes);
+    }
+    LOG_INFO(TAG, "Restored %u external node(s) from NVS", (unsigned)external_nodes.size());
+}
+
 static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
 {
     bool was_new = false;
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
+        was_new |= !(node.features & FEATURE_GENERIC_ONOFF);
         node.onoff = onoff;
         node.features |= FEATURE_GENERIC_ONOFF;
         node.last_seen_us = esp_timer_get_time();
+    }
+    if (was_new)
+    {
+        mark_external_nodes_dirty();
     }
     mqtt_notify_external_node_changed(addr, was_new);
 }
@@ -125,6 +238,13 @@ static constexpr uint16_t GENERIC_LEVEL_EXTENDING_FEATURES =
 // Defined near the other external send functions further down; forward-declared here
 // since the upsert_* functions below fire them on first sighting of each feature.
 static void send_external_lightness_range_get(uint16_t addr);
+
+// External node auto-discovery scheduling (defined next to ble_mesh_discover_external_nodes).
+static constexpr uint64_t EXT_DISCOVERY_BOOT_DELAY_US = 15ULL * 1000 * 1000;
+static constexpr uint64_t EXT_DISCOVERY_AFTER_BIND_US = 5ULL * 1000 * 1000;
+static constexpr uint64_t EXT_DISCOVERY_PERIOD_US = 10ULL * 60 * 1000 * 1000;
+static void schedule_external_discovery(uint64_t delay_us);
+static void start_external_discovery_timers();
 static void send_external_hsl_range_get(uint16_t addr);
 static void send_external_ctl_temperature_range_get(uint16_t addr);
 
@@ -132,6 +252,7 @@ static void upsert_external_node_level(uint16_t addr, int16_t level)
 {
     bool was_new = false;
     bool excluded = false;
+    bool structural_change = false;
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
@@ -141,14 +262,44 @@ static void upsert_external_node_level(uint16_t addr, int16_t level)
         }
         else
         {
+            structural_change = was_new || !(node.features & FEATURE_GENERIC_LEVEL);
             node.level = level;
             node.features |= FEATURE_GENERIC_LEVEL;
             node.last_seen_us = esp_timer_get_time();
         }
     }
+    if (structural_change)
+    {
+        mark_external_nodes_dirty();
+    }
     if (!excluded)
     {
         mqtt_notify_external_node_changed(addr, was_new);
+    }
+}
+
+// HSL sends map HA brightness 0..max onto HSL lightness 0..max/2 (L=0.5 is the pure
+// colour, see ble_mesh_light_hsl_set). This is the inverse, rounded so a
+// send/status round-trip doesn't lose brightness each time.
+static uint16_t hsl_lightness_to_brightness(uint16_t hsl_lightness, uint16_t max_lightness)
+{
+    const uint32_t half = max_lightness / 2;
+    if (half == 0)
+    {
+        return hsl_lightness;
+    }
+    const uint32_t brightness = ((uint32_t)hsl_lightness * max_lightness + half / 2) / half;
+    return (uint16_t)std::min<uint32_t>(brightness, max_lightness);
+}
+
+// Lightness 0 means off (Generic OnOff is bound to Light Lightness Actual).
+static void set_external_node_brightness_locked(external_mesh_node_t &node, uint16_t brightness)
+{
+    node.lightness = brightness;
+    node.onoff = brightness > 0;
+    if (brightness > 0)
+    {
+        node.last_lightness = brightness;
     }
 }
 
@@ -160,7 +311,10 @@ static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         feature_newly_set = !(node.features & FEATURE_LIGHT_LIGHTNESS);
-        node.lightness = lightness;
+        // An HSL light's Lightness Actual is bound to its HSL lightness, i.e. halved.
+        set_external_node_brightness_locked(node, node.color_mode == color_mode_t::hs
+                                                      ? hsl_lightness_to_brightness(lightness, node.max_lightness)
+                                                      : lightness);
         node.features |= FEATURE_LIGHT_LIGHTNESS;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
         node.last_seen_us = esp_timer_get_time();
@@ -168,6 +322,10 @@ static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
     if (feature_newly_set)
     {
         send_external_lightness_range_get(addr);
+    }
+    if (feature_newly_set || was_new)
+    {
+        mark_external_nodes_dirty();
     }
     mqtt_notify_external_node_changed(addr, was_new);
 }
@@ -182,7 +340,7 @@ static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t satur
         feature_newly_set = !(node.features & FEATURE_LIGHT_HSL);
         node.hue = hue;
         node.saturation = saturation;
-        node.lightness = lightness;
+        set_external_node_brightness_locked(node, hsl_lightness_to_brightness(lightness, node.max_lightness));
         node.color_mode = color_mode_t::hs;
         node.features |= FEATURE_LIGHT_HSL;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
@@ -191,6 +349,10 @@ static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t satur
     if (feature_newly_set)
     {
         send_external_hsl_range_get(addr);
+    }
+    if (feature_newly_set || was_new)
+    {
+        mark_external_nodes_dirty();
     }
     mqtt_notify_external_node_changed(addr, was_new);
 }
@@ -204,7 +366,7 @@ static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         feature_newly_set = !(node.features & FEATURE_LIGHT_CTL);
         node.temperature = temperature;
-        node.lightness = lightness;
+        set_external_node_brightness_locked(node, lightness);
         node.color_mode = color_mode_t::color_temp;
         node.features |= FEATURE_LIGHT_CTL;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
@@ -213,6 +375,10 @@ static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16
     if (feature_newly_set)
     {
         send_external_ctl_temperature_range_get(addr);
+    }
+    if (feature_newly_set || was_new)
+    {
+        mark_external_nodes_dirty();
     }
     mqtt_notify_external_node_changed(addr, was_new);
 }
@@ -233,6 +399,7 @@ static void upsert_external_node_lightness_range(uint16_t addr, uint16_t min_lig
         node->max_lightness = max_lightness;
     }
     // Re-announce discovery so HA picks up the real brightness_scale.
+    mark_external_nodes_dirty();
     mqtt_notify_external_node_changed(addr, true);
 }
 
@@ -251,6 +418,7 @@ static void upsert_external_node_hsl_range(uint16_t addr, uint16_t min_hue, uint
         node->min_saturation = min_saturation;
         node->max_saturation = max_saturation;
     }
+    mark_external_nodes_dirty();
     mqtt_notify_external_node_changed(addr, true);
 }
 
@@ -267,6 +435,7 @@ static void upsert_external_node_ctl_range(uint16_t addr, uint16_t min_temp, uin
         node->max_temp = max_temp;
     }
     // Re-announce discovery so HA picks up the real min/max_kelvin.
+    mark_external_nodes_dirty();
     mqtt_notify_external_node_changed(addr, true);
 }
 
@@ -1007,7 +1176,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET:
         {
             node->hsl_h = param->status_cb.hsl_status.hsl_hue;
-            node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
+            node->hsl_l = hsl_lightness_to_brightness(param->status_cb.hsl_status.hsl_lightness, node->max_lightness);
             node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
             LOG_INFO(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s, node->hsl_l);
         }
@@ -1181,24 +1350,50 @@ static void ble_mesh_config_server_cb(esp_ble_mesh_cfg_server_cb_event_t event,
         return;
     }
 
-    // Join-existing-as-node: AppKey Add tells us which app_idx to use. Model App Bind
-    // is a separate step the provisioner sends per model — until it lands, sends fail
-    // with "Model not bound to AppKey".
-    if (param->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD)
+    // Join-existing-as-node: the app_idx to send with is the one our Client models are
+    // bound to (Model App Bind), not just the last AppKey added — a provisioner can add
+    // several AppKeys. AppKey Add only seeds it when nothing is bound yet.
+    const uint16_t op = param->ctx.recv_op;
+    if (op == ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD)
     {
         uint16_t app_idx = param->value.state_change.appkey_add.app_idx;
         LOG_INFO(TAG, "Config AppKey Add received: net_idx 0x%04x, app_idx 0x%04x",
                  param->value.state_change.appkey_add.net_idx, app_idx);
-        store.app_idx = app_idx;
-        mesh_config_save_node_app_idx(app_idx);
+        if (store.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+        {
+            store.app_idx = app_idx;
+            mesh_config_save_node_app_idx(app_idx);
+        }
     }
-    else if (param->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND)
+    else if (op == ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND)
     {
+        const auto &bind = param->value.state_change.mod_app_bind;
         LOG_INFO(TAG, "Config Model App Bind received: element 0x%04x, app_idx 0x%04x, company 0x%04x, model 0x%04x",
-                 param->value.state_change.mod_app_bind.element_addr,
-                 param->value.state_change.mod_app_bind.app_idx,
-                 param->value.state_change.mod_app_bind.company_id,
-                 param->value.state_change.mod_app_bind.model_id);
+                 bind.element_addr, bind.app_idx, bind.company_id, bind.model_id);
+        bool is_our_client_model = false;
+        for (uint16_t model_id : GROUP_SUBSCRIBABLE_MODELS)
+        {
+            is_our_client_model |= (bind.model_id == model_id);
+        }
+        if (is_our_client_model && bind.company_id == ESP_BLE_MESH_CID_NVAL)
+        {
+            if (store.app_idx != bind.app_idx)
+            {
+                store.app_idx = bind.app_idx;
+                mesh_config_save_node_app_idx(bind.app_idx);
+            }
+            schedule_external_discovery(EXT_DISCOVERY_AFTER_BIND_US);
+        }
+    }
+    else if (op == ESP_BLE_MESH_MODEL_OP_APP_KEY_DELETE)
+    {
+        uint16_t app_idx = param->value.state_change.appkey_delete.app_idx;
+        LOG_INFO(TAG, "Config AppKey Delete received: app_idx 0x%04x", app_idx);
+        if (store.app_idx == app_idx)
+        {
+            store.app_idx = ESP_BLE_MESH_KEY_UNUSED;
+            mesh_config_save_node_app_idx(ESP_BLE_MESH_KEY_UNUSED);
+        }
     }
 }
 
@@ -1261,6 +1456,8 @@ esp_err_t ble_mesh_init(void)
         }
 
         ble_mesh_subscribe_all_configured_groups();
+        load_external_nodes();
+        start_external_discovery_timers();
 
         LOG_INFO(TAG, "BLE Mesh Node ready (mode=join_existing, addr=0x%04X)%s",
                  local_element_addr, local_element_addr == 0 ? " — not yet provisioned" : "");
@@ -1428,6 +1625,63 @@ esp_err_t ble_mesh_discover_external_nodes()
         queue_discovery_burst_for_group(group_addrs[i]);
     }
     return ESP_OK;
+}
+
+// External Mesh Nodes live only in RAM, so re-discover them on our own (after boot,
+// after an AppKey gets bound, then periodically) — otherwise their HA entities stay
+// dead after any reboot until someone clicks Discover in the dashboard.
+static esp_timer_handle_t s_ext_discovery_once = nullptr;
+static esp_timer_handle_t s_ext_discovery_periodic = nullptr;
+
+static void external_discovery_timer_cb(void *)
+{
+    if (local_element_addr == 0 || store.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+    {
+        return; // not provisioned / no AppKey yet — nothing we could send with
+    }
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    if (count > 0)
+    {
+        ble_mesh_discover_external_nodes();
+    }
+}
+
+static void schedule_external_discovery(uint64_t delay_us)
+{
+    if (!s_ext_discovery_once)
+    {
+        return;
+    }
+    esp_timer_stop(s_ext_discovery_once); // re-arm if already pending
+    esp_timer_start_once(s_ext_discovery_once, delay_us);
+}
+
+static void start_external_discovery_timers()
+{
+    if (s_ext_discovery_once)
+    {
+        return;
+    }
+    esp_timer_create_args_t args = {
+        .callback = &external_discovery_timer_cb,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "ext_disc_once",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&args, &s_ext_discovery_once) != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to create external discovery timer");
+        return;
+    }
+    args.name = "ext_disc_periodic";
+    if (esp_timer_create(&args, &s_ext_discovery_periodic) == ESP_OK)
+    {
+        esp_timer_start_periodic(s_ext_discovery_periodic, EXT_DISCOVERY_PERIOD_US);
+    }
+    schedule_external_discovery(EXT_DISCOVERY_BOOT_DELAY_US);
 }
 
 esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)

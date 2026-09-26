@@ -917,8 +917,9 @@ function createExternalNodeElement(node) {
   el.className = "node";
   el.dataset.addr = node.addr;
 
-  const ageSec = Math.round((node.last_seen_ms_ago || 0) / 1000);
-  const online = ageSec < 60;
+  const seen = node.last_seen_ms_ago != null; // null: restored at boot, not heard from yet
+  const ageSec = seen ? Math.round(node.last_seen_ms_ago / 1000) : null;
+  const online = seen && ageSec < 60;
   const features = node.features || [];
 
   let controls = '';
@@ -980,7 +981,7 @@ function createExternalNodeElement(node) {
       </div>
       <div class="info-row">
         <span class="info-label">Last seen:</span>
-        <span class="info-value">${ageSec}s ago</span>
+        <span class="info-value">${seen ? ageSec + 's ago' : 'not seen since boot'}</span>
       </div>
     </div>
 
@@ -1324,8 +1325,11 @@ function loadSystemInfo() {
       }
     });
 
-  loadMeshKeys();
+  // Keys only change on (re)provisioning — stop re-fetching them once loaded.
+  if (!meshKeysLoaded) loadMeshKeys();
 }
+
+let meshKeysLoaded = false;
 
 function loadMeshKeys() {
   fetch("/api/mesh/keys")
@@ -1335,6 +1339,7 @@ function loadMeshKeys() {
       const appKeyEl = document.getElementById("mesh-app-key");
       if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
       if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
+      meshKeysLoaded = Boolean(data.net_key && data.app_key);
     })
     .catch(err => {
       console.error('Failed to load mesh keys:', err);

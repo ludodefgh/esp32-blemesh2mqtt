@@ -88,7 +88,7 @@ static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node
         cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString((id + "_cover").c_str()));
         cJSON_AddItemToObject(root, "pos_t", cJSON_CreateString("~/state"));
         cJSON_AddItemToObject(root, "set_pos_t", cJSON_CreateString("~/set_position"));
-        cJSON_AddItemToObject(root, "pos_template", cJSON_CreateString("{{ value_json.position }}"));
+        cJSON_AddItemToObject(root, "pos_tpl", cJSON_CreateString("{{ value_json.position }}"));
         cJSON_AddItemToObject(root, "value_template", cJSON_CreateString("{{ value_json.state }}"));
         cJSON_AddItemToObject(root, "device_class", cJSON_CreateString("blind"));
     }
@@ -198,14 +198,6 @@ static std::vector<external_mesh_node_t> snapshot_external_nodes()
     for_each_external_node([&nodes](const external_mesh_node_t &node)
                             { nodes.push_back(node); });
     return nodes;
-}
-
-void mqtt_subscribe_all_external_nodes(esp_mqtt_client_handle_t client)
-{
-    for (const auto &node : snapshot_external_nodes())
-    {
-        mqtt_subscribe_external_node(client, node);
-    }
 }
 
 static void mqtt_publish_external_discovery(const external_mesh_node_t &node)
@@ -425,6 +417,14 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
 
     if (light_value_changed)
     {
+        // A colour picked on an off light (HA sends state ON + colour, no brightness)
+        // would otherwise go out with the cached lightness 0 and switch it back off.
+        if (lightness == 0 && current_mode != color_mode_t::brightness &&
+            !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(payload.get(), "brightness")))
+        {
+            lightness = node.last_lightness ? node.last_lightness : node.max_lightness;
+        }
+
         if (current_mode == color_mode_t::color_temp)
         {
             ble_mesh_send_external_ctl_command(addr, temperature, lightness);

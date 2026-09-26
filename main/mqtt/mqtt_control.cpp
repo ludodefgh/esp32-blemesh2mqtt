@@ -177,7 +177,7 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
 
         mqtt_subscribe_all_nodes(client);
-        mqtt_subscribe_all_external_nodes(client);
+        mqtt_republish_all_external_nodes(); // subscribes + (re)announces restored/known nodes
         mqtt_bridge_subscribe(client);
 
         {
@@ -435,7 +435,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
             cJSON_AddItemToObject(root, "pos_t", cJSON_CreateString("~/state"));
             cJSON_AddItemToObject(root, "set_pos_t", cJSON_CreateString("~/set_position"));
-            cJSON_AddItemToObject(root, "pos_template", cJSON_CreateString("{{ value_json.position }}"));
+            cJSON_AddItemToObject(root, "pos_tpl", cJSON_CreateString("{{ value_json.position }}"));
             cJSON_AddItemToObject(root, "value_template", cJSON_CreateString("{{ value_json.state }}"));
             cJSON_AddItemToObject(root, "device_class", cJSON_CreateString("blind"));
         }
@@ -554,6 +554,18 @@ void on_home_assistant_restart_timer(void *arg)
     }
 }
 
+// Queued behind the Set it follows, so the published state reflects the ack.
+static void enqueue_node_status_publish(std::shared_ptr<bm2mqtt_node_info> &node_info)
+{
+    message_queue().enqueue(node_info, message_payload{
+                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                           { mqtt_node_send_status(node_info); },
+                                           .opcode = 0x0000,
+                                           .retries_left = 0,
+                                           .type = message_type_t::mqtt_message,
+                                       });
+}
+
 void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 {
     if (strncmp(event->topic, "homeassistant/status", event->topic_len) == 0)
@@ -657,6 +669,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                 pos = pos < 0 ? 0 : (pos > 100 ? 100 : pos);
                 node_info->level = (int16_t)map(pos, 0, 100, -32768, 32767);
                 ble_mesh_gen_level_set(node_info);
+                enqueue_node_status_publish(node_info);
                 return;
             }
 
@@ -667,9 +680,11 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                 if (cmd == "OPEN") {
                     node_info->level = 32767;
                     ble_mesh_gen_level_set(node_info);
+                    enqueue_node_status_publish(node_info);
                 } else if (cmd == "CLOSE") {
                     node_info->level = -32768;
                     ble_mesh_gen_level_set(node_info);
+                    enqueue_node_status_publish(node_info);
                 }
                 return;
             }
@@ -773,15 +788,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         }
                     }
 
-                    message_queue().enqueue(node_info, message_payload{
-                                                           .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
-                                                           {
-                                                               mqtt_node_send_status(node_info);
-                                                           },
-                                                           .opcode = 0x0000, // No specific opcode, just a marker
-                                                           .retries_left = 0,
-                                                           .type = message_type_t::mqtt_message, // Indicate this is a MQTT message
-                                                       });
+                    enqueue_node_status_publish(node_info);
                 }
                 // cJSON automatically deleted by smart pointer
             }

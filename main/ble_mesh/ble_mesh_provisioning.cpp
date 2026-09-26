@@ -209,9 +209,15 @@ static void prune_stale_unprovisioned_devices()
 
 void for_each_unprovisioned_node(std::function<void(const ble2mqtt_unprovisioned_device &unprov_device)> func)
 {
-    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
-    prune_stale_unprovisioned_devices();
-    for (const auto &unprov_dev : unprovisioned_devices)
+    // Iterate a copy: callers send HTTP responses from func, and the BLE task needs this
+    // mutex for every unprovisioned beacon — don't hold it across network I/O.
+    std::vector<ble2mqtt_unprovisioned_device> snapshot;
+    {
+        std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
+        prune_stale_unprovisioned_devices();
+        snapshot = unprovisioned_devices;
+    }
+    for (const auto &unprov_dev : snapshot)
     {
         func(unprov_dev);
     }
@@ -265,31 +271,27 @@ void recv_unprov_adv_pkt(const ble2mqtt_unprovisioned_device &unprov_device)
 
 void ble_mesh_provision_device(const uint8_t uuid[16])
 {
-    std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
-
-    ble2mqtt_unprovisioned_device *device = nullptr;
-    for (auto index = 0; index < unprovisioned_devices.size(); ++index)
+    // Copy out under the lock, call into the stack after releasing it: the stack call
+    // posts to the BTC task, which itself takes this mutex for every beacon.
+    ble2mqtt_unprovisioned_device device{};
+    bool found = false;
     {
-        if (memcmp(unprovisioned_devices[index].dev_uuid, uuid, 16) == 0)
+        std::lock_guard<std::recursive_mutex> lock(unprovisioned_devices_mutex);
+        for (const auto &candidate : unprovisioned_devices)
         {
-            device = &unprovisioned_devices[index];
-            break;
+            if (memcmp(candidate.dev_uuid, uuid, 16) == 0)
+            {
+                device = candidate;
+                found = true;
+                break;
+            }
         }
     }
 
-    if (device != nullptr)
+    if (found)
     {
-        // Copy out rather than pass pointers into the vector.
-        uint8_t dev_uuid[16];
-        memcpy(dev_uuid, device->dev_uuid, sizeof(dev_uuid));
-        uint8_t addr[BD_ADDR_LEN];
-        memcpy(addr, device->addr, sizeof(addr));
-        esp_ble_mesh_addr_type_t addr_type = device->addr_type;
-        uint16_t oob_info = device->oob_info;
-        uint8_t adv_type = device->adv_type;
-        esp_ble_mesh_prov_bearer_t bearer = device->bearer;
-
-        recv_unprov_adv_pkt(dev_uuid, addr, addr_type, oob_info, adv_type, bearer);
+        recv_unprov_adv_pkt(device.dev_uuid, device.addr, device.addr_type, device.oob_info,
+                            device.adv_type, device.bearer);
     }
 }
 void recv_unprov_adv_pkt(uint8_t dev_uuid[16], uint8_t addr[BD_ADDR_LEN],

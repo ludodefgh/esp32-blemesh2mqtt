@@ -52,6 +52,7 @@ struct external_mesh_node_t
     uint8_t onoff;
     int16_t level;
     uint16_t lightness{0}; // also HSL/CTL's lightness component — one brightness value per node
+    uint16_t last_lightness{0}; // last non-zero brightness, restored when a color is set on an off light
     uint16_t min_lightness{0};
     uint16_t max_lightness{std::numeric_limits<uint16_t>::max()};
     uint16_t hue{0};

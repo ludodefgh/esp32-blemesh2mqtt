@@ -1468,7 +1468,14 @@ esp_err_t mesh_debug_status_handler(httpd_req_t *req)
         snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
         cJSON_AddStringToObject(item, "addr", addr_hex);
         cJSON_AddNumberToObject(item, "features", node.features);
-        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        if (node.last_seen_us > 0)
+        {
+            cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        }
+        else
+        {
+            cJSON_AddNullToObject(item, "last_seen_ms_ago"); // restored from NVS, not heard from since boot
+        }
         cJSON_AddItemToArray(ext_nodes, item); });
     cJSON_AddNumberToObject(root, "external_node_count", ext_count);
     cJSON_AddItemToObject(root, "external_nodes", ext_nodes);
@@ -1508,7 +1515,14 @@ esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
         char addr_hex[8];
         snprintf(addr_hex, sizeof(addr_hex), "0x%04X", node.unicast);
         cJSON_AddStringToObject(item, "addr", addr_hex);
-        cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        if (node.last_seen_us > 0)
+        {
+            cJSON_AddNumberToObject(item, "last_seen_ms_ago", (double)((esp_timer_get_time() - node.last_seen_us) / 1000));
+        }
+        else
+        {
+            cJSON_AddNullToObject(item, "last_seen_ms_ago"); // restored from NVS, not heard from since boot
+        }
 
         cJSON *features = cJSON_CreateArray();
         if (node.features & FEATURE_GENERIC_ONOFF)
@@ -1590,15 +1604,28 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
 
     uint16_t addr = 0;
     cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
-    if (cJSON_IsString(addr_item))
+    if (addr_item)
     {
         // Explicit target must be a single unicast node — group/broadcast addresses
         // (0xC000-0xFFFF) are only reachable via the configured group address below,
         // never directly from client input, to avoid a request accidentally (or
-        // maliciously) commanding every device on the mesh at once.
-        char *end = nullptr;
-        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
-        if (end == addr_item->valuestring || *end != '\0' || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw) || raw > 0xFFFF)
+        // maliciously) commanding every device on the mesh at once. A present-but-
+        // malformed addr is an error, never a silent fallback to the group.
+        unsigned long raw = 0;
+        bool valid = false;
+        if (cJSON_IsString(addr_item))
+        {
+            char *end = nullptr;
+            raw = strtoul(addr_item->valuestring, &end, 16);
+            valid = end != addr_item->valuestring && *end == '\0';
+        }
+        else if (cJSON_IsNumber(addr_item))
+        {
+            valid = addr_item->valuedouble >= 0 && addr_item->valuedouble <= 0xFFFF &&
+                    addr_item->valuedouble == (double)(unsigned long)addr_item->valuedouble;
+            raw = valid ? (unsigned long)addr_item->valuedouble : 0;
+        }
+        if (!valid || raw > 0xFFFF || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw))
         {
             cJSON_Delete(json);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "addr must be a valid unicast address (0x0001-0x7FFF)");
