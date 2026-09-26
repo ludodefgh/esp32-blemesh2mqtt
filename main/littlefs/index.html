@@ -99,15 +99,6 @@
                 </label>
                 <span class="toggle-description">Automatically provision newly discovered BLE Mesh devices</span>
               </div>
-              <div class="form-group" style="margin-top:14px;">
-                <label style="font-size:0.9em;font-weight:600;">Group Address Subscriptions</label>
-                <div id="group-addr-list" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                  <input type="text" id="group-addr-input" placeholder="e.g. 0xC000" style="font-family:monospace;max-width:160px;">
-                  <button class="btn btn-primary" style="width:auto;padding:8px 16px;" onclick="addMeshGroupAddr()">Add</button>
-                </div>
-                <span style="font-size:0.8em;color:var(--text-muted);">Subscribe bridge models to up to 3 group addresses — applied immediately, no restart needed.</span>
-              </div>
             </div>
             
             <div class="controls-grid">
@@ -284,30 +275,43 @@
               </div>
             </div>
           </section>
+        </div>
+      </div>
+
+      <!-- Mesh Section -->
+      <div class="section-content" id="ble-mesh-section">
+        <div class="section-grid">
+          <!-- Group Address Subscriptions -->
+          <section class="card mesh-groups-section">
+            <div class="section-header">
+              <h2>Group Address Subscriptions</h2>
+            </div>
+            <div id="group-addr-list" class="group-addr-list"></div>
+            <div class="group-addr-form">
+              <input type="text" id="group-addr-input" placeholder="e.g. 0xC000">
+              <button class="btn btn-primary btn-small" onclick="addMeshGroupAddr()">Add</button>
+            </div>
+            <p class="hint">Subscribe the bridge's models to up to 3 group addresses — applied immediately, no restart needed.</p>
+          </section>
 
           <!-- Mesh Keys -->
           <section class="card mesh-keys-section">
             <div class="section-header">
               <h2>Mesh Keys</h2>
             </div>
-
-            <div class="version-info-grid">
+            <div class="version-info-grid mesh-keys-grid">
               <div class="info-row">
-                <span class="info-label">NetKey:</span>
-                <span class="info-value" id="mesh-net-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-net-key')">Loading...</span>
+                <span class="info-label">NetKey</span>
+                <span class="info-value mesh-key" id="mesh-net-key" title="Click to copy" onclick="copyMeshKey('mesh-net-key')">Loading...</span>
               </div>
               <div class="info-row">
-                <span class="info-label">AppKey:</span>
-                <span class="info-value" id="mesh-app-key" style="font-family: monospace; cursor: pointer; user-select: all;" title="Click to copy" onclick="copyMeshKey('mesh-app-key')">Loading...</span>
+                <span class="info-label">AppKey</span>
+                <span class="info-value mesh-key" id="mesh-app-key" title="Click to copy" onclick="copyMeshKey('mesh-app-key')">Loading...</span>
               </div>
             </div>
-            <span style="font-size:0.8em;color:var(--text-muted);">Read-only. In standalone mode these are self-generated; in "Join an existing mesh" mode they're received from the real provisioning handshake — see External Mesh Nodes. Click a value to copy it.</span>
+            <p class="hint">Read-only. In standalone mode these are self-generated; in "Join an existing mesh" mode they're received from the real provisioning handshake. Click a value to copy it.</p>
           </section>
-        </div>
-      </div>
 
-      <!-- Mesh Section -->
-      <div class="section-content" id="ble-mesh-section">
         <section class="card mesh-section">
           <div class="section-header">
             <h2>Mesh</h2>
@@ -362,6 +366,7 @@
             <div id="no-external-nodes" class="empty-state">No external nodes discovered yet</div>
           </div>
         </section>
+        </div>
       </div>
 
       <!-- Firmware Section -->

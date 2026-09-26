@@ -1363,3 +1363,61 @@ input[type="range"].hue-slider {
   .seg-hint { min-height: 0; }
   .slider-row output, .lightness-control output { min-width: 2.6rem; }
 }
+
+/* ========================= Mesh page: settings cards ========================= */
+
+.mesh-section { grid-column: 1 / -1; }
+
+.hint { font-size: 0.78rem; color: var(--text-muted); margin: 0.75rem 0 0; }
+
+.group-addr-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.group-addr-list:empty { display: none; }
+.group-addr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.4rem 0.2rem 0.65rem;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-weak);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.group-addr-chip button {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.group-addr-chip button:hover { color: var(--danger); }
+
+.group-addr-form { display: flex; gap: 0.5rem; align-items: center; }
+.group-addr-form input {
+  width: 10rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+.group-addr-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+
+/* A 32-hex-digit key must stay on one line: narrow label column, no wrapping. */
+.mesh-keys-grid .info-row { grid-template-columns: 4.5rem minmax(0, 1fr); }
+.mesh-key {
+  white-space: nowrap;
+  overflow-x: auto;
+  cursor: pointer;
+  user-select: all;
+}
+
+@media (max-width: 480px) {
+  /* .info-row .info-value sets font-size too — needs the same specificity to win. */
+  .mesh-keys-grid .info-row .mesh-key { font-size: 0.68rem; }
+}

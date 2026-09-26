@@ -261,6 +261,29 @@ static bool needs_announce(const external_mesh_node_t &node)
     return it == s_announced_as_cover.end() || it->second != external_node_is_cover(node);
 }
 
+void mqtt_forget_external_node(const external_mesh_node_t &node)
+{
+    bool announced_as_cover = external_node_is_cover(node);
+    {
+        std::lock_guard<std::mutex> lock(s_announced_mutex);
+        auto it = s_announced_as_cover.find(node.unicast);
+        if (it != s_announced_as_cover.end())
+        {
+            announced_as_cover = it->second;
+            s_announced_as_cover.erase(it);
+        }
+    }
+    if (mqtt_credentials().get_connection_state() != mqtt_connection_state_t::CONNECTED)
+    {
+        return;
+    }
+    // Empty discovery payload removes the entity from HA.
+    esp_mqtt_client_publish(mqtt_get_client(), discovery_id_for(node.unicast, announced_as_cover).c_str(), "", 0, 0, 0);
+    const std::string base = external_node_base_topic(node.unicast);
+    esp_mqtt_client_unsubscribe(mqtt_get_client(), (base + "/set").c_str());
+    esp_mqtt_client_unsubscribe(mqtt_get_client(), (base + "/set_position").c_str());
+}
+
 void mqtt_republish_all_external_nodes(void)
 {
     for (const auto &node : snapshot_external_nodes())
@@ -346,12 +369,22 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
 
     // MQTT payloads aren't NUL-terminated.
     CJsonPtr payload(cJSON_ParseWithLength(data, data_len), cJSON_Delete);
-    if (!payload)
+    if (payload)
     {
-        return true;
+        external_node_apply_ha_command(addr, payload.get());
+    }
+    return true;
+}
+
+bool external_node_apply_ha_command(uint16_t addr, const cJSON *payload)
+{
+    external_mesh_node_t node;
+    if (!payload || !ble_mesh_find_external_node(addr, node))
+    {
+        return false;
     }
 
-    if (const cJSON *state = cJSON_GetObjectItemCaseSensitive(payload.get(), "state"))
+    if (const cJSON *state = cJSON_GetObjectItemCaseSensitive(payload, "state"))
     {
         if (cJSON_IsString(state) && state->valuestring)
         {
@@ -379,7 +412,7 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
     const uint16_t light_features = FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
     if (node.features & light_features)
     {
-        if (const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(payload.get(), "brightness"); cJSON_IsNumber(brightness))
+        if (const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(payload, "brightness"); cJSON_IsNumber(brightness))
         {
             lightness = (uint16_t)std::clamp(brightness->valuedouble, 0.0, (double)node.max_lightness);
             light_value_changed = true;
@@ -388,7 +421,7 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
 
     if (node.features & FEATURE_LIGHT_HSL)
     {
-        if (const cJSON *color = cJSON_GetObjectItemCaseSensitive(payload.get(), "color"); cJSON_IsObject(color))
+        if (const cJSON *color = cJSON_GetObjectItemCaseSensitive(payload, "color"); cJSON_IsObject(color))
         {
             if (const cJSON *h = cJSON_GetObjectItemCaseSensitive(color, "h"); cJSON_IsNumber(h))
             {
@@ -407,7 +440,7 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
 
     if (node.features & FEATURE_LIGHT_CTL)
     {
-        if (const cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(payload.get(), "color_temp"); cJSON_IsNumber(color_temp))
+        if (const cJSON *color_temp = cJSON_GetObjectItemCaseSensitive(payload, "color_temp"); cJSON_IsNumber(color_temp))
         {
             temperature = (uint16_t)std::clamp(color_temp->valuedouble, (double)node.min_temp, (double)node.max_temp);
             current_mode = color_mode_t::color_temp;
@@ -420,7 +453,7 @@ bool mqtt_handle_external_node_data(const std::string &topic, const char *data, 
         // A colour picked on an off light (HA sends state ON + colour, no brightness)
         // would otherwise go out with the cached lightness 0 and switch it back off.
         if (lightness == 0 && current_mode != color_mode_t::brightness &&
-            !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(payload.get(), "brightness")))
+            !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(payload, "brightness")))
         {
             lightness = node.last_lightness ? node.last_lightness : node.max_lightness;
         }

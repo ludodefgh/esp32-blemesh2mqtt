@@ -79,6 +79,10 @@ esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16
 esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature, uint16_t lightness);
 void for_each_external_node(std::function<void(const external_mesh_node_t &)> func);
 bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
+// Drops a node from the table (and NVS). A real unprovision isn't possible: Config Node
+// Reset only works with the node's DevKey, which only its provisioner has. If the node
+// is still on the mesh, the next discovery finds it again.
+bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed);
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

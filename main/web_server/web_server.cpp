@@ -479,7 +479,9 @@ esp_err_t mesh_keys_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_discover_handler(httpd_req_t *req);
 esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req);
 esp_err_t mesh_external_command_handler(httpd_req_t *req);
+esp_err_t mesh_external_light_handler(httpd_req_t *req);
 esp_err_t mesh_external_mqtt_handler(httpd_req_t *req);
+esp_err_t mesh_external_forget_handler(httpd_req_t *req);
 #ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_reset_role_handler(httpd_req_t *req);
@@ -770,6 +772,14 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
         else if (strstr(req->uri, "/api/mesh/external/command"))
         {
             return mesh_external_command_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/light"))
+        {
+            return mesh_external_light_handler(req);
+        }
+        else if (strstr(req->uri, "/api/mesh/external/forget"))
+        {
+            return mesh_external_forget_handler(req);
         }
         else if (strstr(req->uri, "/api/mesh/external/mqtt"))
         {
@@ -1542,10 +1552,19 @@ esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
         if (node.features & FEATURE_LIGHT_HSL)
         {
             cJSON_AddItemToArray(features, cJSON_CreateString("hsl"));
+            cJSON_AddNumberToObject(item, "hue", node.hue);
+            cJSON_AddNumberToObject(item, "min_hue", node.min_hue);
+            cJSON_AddNumberToObject(item, "max_hue", node.max_hue);
+            cJSON_AddNumberToObject(item, "saturation", node.saturation);
+            cJSON_AddNumberToObject(item, "min_saturation", node.min_saturation);
+            cJSON_AddNumberToObject(item, "max_saturation", node.max_saturation);
         }
         if (node.features & FEATURE_LIGHT_CTL)
         {
             cJSON_AddItemToArray(features, cJSON_CreateString("ctl"));
+            cJSON_AddNumberToObject(item, "temperature", node.temperature);
+            cJSON_AddNumberToObject(item, "min_temp", node.min_temp);
+            cJSON_AddNumberToObject(item, "max_temp", node.max_temp);
         }
         // HSL/CTL Servers extend Light Lightness, so any of the three is dimmable.
         if (node.features & (FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL))
@@ -1562,6 +1581,73 @@ esp_err_t mesh_external_nodes_get_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, json_str);
     cJSON_free(json_str);
     cJSON_Delete(arr);
+    return ESP_OK;
+}
+
+// "0x0006" or 6 -> 0x0006; false for anything that isn't a single unicast address.
+static bool parse_unicast_addr(const cJSON *item, uint16_t *out)
+{
+    unsigned long raw = 0;
+    bool valid = false;
+    if (cJSON_IsString(item))
+    {
+        char *end = nullptr;
+        raw = strtoul(item->valuestring, &end, 16);
+        valid = end != item->valuestring && *end == '\0';
+    }
+    else if (cJSON_IsNumber(item))
+    {
+        valid = item->valuedouble >= 0 && item->valuedouble <= 0xFFFF &&
+                item->valuedouble == (double)(unsigned long)item->valuedouble;
+        raw = valid ? (unsigned long)item->valuedouble : 0;
+    }
+    if (!valid || raw > 0xFFFF || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw))
+    {
+        return false;
+    }
+    *out = (uint16_t)raw;
+    return true;
+}
+
+// Dashboard light controls for one External Mesh Node, in Home Assistant's JSON light
+// shape ({"addr", "state", "brightness", "color":{"h","s"}, "color_temp"}) — goes
+// through the same code as an MQTT command from HA.
+esp_err_t mesh_external_light_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    uint16_t addr = 0;
+    if (!parse_unicast_addr(cJSON_GetObjectItem(json, "addr"), &addr))
+    {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "addr must be a valid unicast address (0x0001-0x7FFF)");
+        return ESP_FAIL;
+    }
+
+    const bool known = external_node_apply_ha_command(addr, json);
+    cJSON_Delete(json);
+    if (!known)
+    {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown external node");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
     return ESP_OK;
 }
 
@@ -1611,27 +1697,12 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req)
         // never directly from client input, to avoid a request accidentally (or
         // maliciously) commanding every device on the mesh at once. A present-but-
         // malformed addr is an error, never a silent fallback to the group.
-        unsigned long raw = 0;
-        bool valid = false;
-        if (cJSON_IsString(addr_item))
-        {
-            char *end = nullptr;
-            raw = strtoul(addr_item->valuestring, &end, 16);
-            valid = end != addr_item->valuestring && *end == '\0';
-        }
-        else if (cJSON_IsNumber(addr_item))
-        {
-            valid = addr_item->valuedouble >= 0 && addr_item->valuedouble <= 0xFFFF &&
-                    addr_item->valuedouble == (double)(unsigned long)addr_item->valuedouble;
-            raw = valid ? (unsigned long)addr_item->valuedouble : 0;
-        }
-        if (!valid || raw > 0xFFFF || !ESP_BLE_MESH_ADDR_IS_UNICAST((uint16_t)raw))
+        if (!parse_unicast_addr(addr_item, &addr))
         {
             cJSON_Delete(json);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "addr must be a valid unicast address (0x0001-0x7FFF)");
             return ESP_FAIL;
         }
-        addr = (uint16_t)raw;
     }
     else
     {
@@ -1696,20 +1767,13 @@ esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
     }
 
     uint16_t addr = 0;
-    cJSON *addr_item = cJSON_GetObjectItem(json, "addr");
-    if (cJSON_IsString(addr_item))
-    {
-        char *end = nullptr;
-        unsigned long raw = strtoul(addr_item->valuestring, &end, 16);
-        if (end != addr_item->valuestring && *end == '\0' && raw <= 0xFFFF)
-        {
-            addr = (uint16_t)raw;
-        }
-    }
+    const bool addr_valid = parse_unicast_addr(cJSON_GetObjectItem(json, "addr"), &addr);
+    // Status only (the card's "MQTT Status"), or discovery + status ("MQTT Discovery").
+    const bool status_only = cJSON_IsTrue(cJSON_GetObjectItem(json, "status_only"));
     cJSON_Delete(json);
 
     external_mesh_node_t node;
-    if (addr == 0 || !ble_mesh_find_external_node(addr, node))
+    if (!addr_valid || !ble_mesh_find_external_node(addr, node))
     {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown external node");
         return ESP_FAIL;
@@ -1720,10 +1784,44 @@ esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    mqtt_notify_external_node_changed(addr, true);
+    mqtt_notify_external_node_changed(addr, !status_only);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"published\"}");
+    return ESP_OK;
+}
+
+esp_err_t mesh_external_forget_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body required");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    uint16_t addr = 0;
+    const bool addr_valid = parse_unicast_addr(cJSON_GetObjectItem(json, "addr"), &addr);
+    cJSON_Delete(json);
+
+    external_mesh_node_t removed;
+    if (!addr_valid || !ble_mesh_forget_external_node(addr, &removed))
+    {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown external node");
+        return ESP_FAIL;
+    }
+    mqtt_forget_external_node(removed);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"forgotten\"}");
     return ESP_OK;
 }
 

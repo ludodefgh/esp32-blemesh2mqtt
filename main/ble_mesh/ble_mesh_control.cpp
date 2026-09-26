@@ -64,6 +64,7 @@ uint16_t local_element_addr = PROV_OWN_ADDR;
 
 static std::mutex external_nodes_mutex;
 static std::vector<external_mesh_node_t> external_nodes;
+static void mark_external_nodes_dirty(); // NVS persistence, defined below
 
 // Caller must hold external_nodes_mutex.
 static external_mesh_node_t *find_external_node_locked(uint16_t addr)
@@ -103,6 +104,27 @@ bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
         return true;
     }
     return false;
+}
+
+bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto it = std::find_if(external_nodes.begin(), external_nodes.end(),
+                               [addr](const external_mesh_node_t &n) { return n.unicast == addr; });
+        if (it == external_nodes.end())
+        {
+            return false;
+        }
+        if (removed)
+        {
+            *removed = *it;
+        }
+        external_nodes.erase(it);
+    }
+    mark_external_nodes_dirty();
+    LOG_INFO(TAG, "Forgot external node 0x%04X", addr);
+    return true;
 }
 
 // External Mesh Nodes are persisted like node_manager()'s provisioned nodes, so their

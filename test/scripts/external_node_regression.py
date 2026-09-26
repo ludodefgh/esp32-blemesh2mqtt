@@ -26,9 +26,11 @@ from pathlib import Path
 import paho.mqtt.client as mqtt
 import serial
 
-# A Set whose ack is still pending makes the next acked Set to the same node fail with
-# "Busy" for up to MSG_TIMEOUT (4 s) — keep commands further apart than that.
-COMMAND_SPACING_S = 5.0
+# A command is settled once neither the bulb nor HA has changed for SETTLE_S. Lost acks
+# are retried by the bridge (2 s each), so a command can legitimately take several
+# seconds — MAX_WAIT_S only bounds a genuinely stuck one.
+SETTLE_S = 3.0  # > the bridge's 2 s ack timeout + 0.3 s queue gap, so a pending retry isn't cut off
+MAX_WAIT_S = 15.0
 STATE_RE = re.compile(r"STATE \((?P<cause>[^)]*)\) onoff=(?P<onoff>\d+) lightness=(?P<lightness>\d+) "
                       r"hsl\(h=(?P<h>\d+) s=(?P<s>\d+) l=(?P<l>\d+)\)")
 
@@ -67,6 +69,8 @@ class Bulb:
         with self._lock:
             return len(self._states)
 
+    count = mark
+
     def latest_since(self, mark):
         with self._lock:
             return self._states[-1] if len(self._states) > mark else None
@@ -100,6 +104,8 @@ class HomeAssistant:
         with self._lock:
             return len(self._states)
 
+    count = mark
+
     def latest_since(self, mark):
         with self._lock:
             return self._states[-1] if len(self._states) > mark else None
@@ -117,10 +123,18 @@ class Rig:
         self.ha = ha
 
     def command(self, payload):
-        """Sends a command; returns (bulb state, HA state) observed afterwards (or None)."""
+        """Sends a command, waits for it to settle; returns (bulb state, HA state) seen after it."""
         bulb_mark, ha_mark = self.bulb.mark(), self.ha.mark()
         self.ha.send(payload)
-        time.sleep(COMMAND_SPACING_S)
+        start = last_change = time.monotonic()
+        seen = (bulb_mark, ha_mark)
+        while time.monotonic() - start < MAX_WAIT_S:
+            time.sleep(0.25)
+            now_seen = (self.bulb.count(), self.ha.count())
+            if now_seen != seen:
+                seen, last_change = now_seen, time.monotonic()
+            if seen != (bulb_mark, ha_mark) and time.monotonic() - last_change >= SETTLE_S:
+                break
         return self.bulb.latest_since(bulb_mark), self.ha.latest_since(ha_mark)
 
 

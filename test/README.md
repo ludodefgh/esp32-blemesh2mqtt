@@ -31,6 +31,5 @@ python3 test/scripts/external_node_regression.py --bridge-topic blemesh2mqtt_<br
 MQTT credentials come from the environment or the repo's `.env`
 (`MQTT_BROKER_HOST/PORT/USERNAME/PASSWORD`). Exit code = number of failed tests.
 
-Commands are spaced 5 s apart. Before the external node queue waited for acks and
-retried, lost acks (likely WiFi/BLE coexistence on the WROOM) made these tests flaky —
-consistently failing runs now point at a real regression.
+Each command waits until neither the bulb nor HA has changed for 3 s (15 s max, longer than one ack retry), since
+a lost ack is retried by the bridge and can legitimately take a few seconds.
