@@ -14,10 +14,25 @@ An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant a
 
 📖 **[User Guide — Web Interface & Home Assistant Integration](documentation/USER_GUIDE.md)**
 
+## 🧭 Two editions: Standalone or Companion?
+
+The firmware comes in two editions. The only difference is **who is in charge of your
+BLE Mesh network**:
+
+- **Standalone**: the bridge creates the network and adds your lights itself. No other app
+  needed. *Not sure? Pick this one.*
+- **Companion**: your lights are already set up in a phone app such as nRF Mesh. The bridge
+  joins that network like one more device, and the app stays in charge.
+
+![Standalone vs Companion](documentation/images/editions.svg)
+
+👉 **[Which edition do I need?](documentation/EDITIONS.md)** (simple guide, with setup steps for each)
+
 ## 🌟 Key Features
 
-- **BLE Mesh ⇄ MQTT bridge**: discovers, provisions and manages BLE Mesh devices,
-  with bidirectional message forwarding to MQTT
+- **BLE Mesh ⇄ MQTT bridge**: discovers, provisions and manages BLE Mesh devices
+  (Standalone), or joins your existing mesh and controls its lights (Companion), with
+  bidirectional message forwarding to MQTT
 - **Home Assistant auto-discovery**: devices appear as native lights, switches and
   sensors — no manual YAML
 - **Web interface**: dark-first responsive dashboard with live status, per-node
@@ -49,7 +64,8 @@ An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant a
 
 1. **Download Pre-built Firmware**
    - Go to [Releases](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
-   - Download the `.zip` file for your board (e.g., `BleMesh2Mqtt-v0.1.8-esp32.zip`)
+   - Download the `.zip` file for your [edition](documentation/EDITIONS.md) and board
+     (e.g., `BleMesh2Mqtt-Standalone-v0.2.0-esp32.zip`)
    - Extract the archive
 
 2. **Flash to Device**
@@ -61,6 +77,8 @@ An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant a
    - Device creates WiFi AP: `BleMesh2MQTT-Setup-XX:XX:XX`
    - Connect and navigate to `192.168.4.1`
    - Configure WiFi and MQTT settings
+   - Then add your lights: from the bridge's dashboard (Standalone), or by adding the bridge
+     to your mesh from your phone app (Companion) — see [EDITIONS.md](documentation/EDITIONS.md)
 
 ### Option B: Build from Source (Dev Container) 🛠️
 
@@ -93,8 +111,15 @@ idf.py set-target esp32
 # Configure project (optional - defaults work for most cases)
 idf.py menuconfig
 
-# Build the project
+# Build the project (Standalone edition, the tracked sdkconfig.defaults)
 idf.py build
+
+# Or the Companion edition, in its own build directory
+idf.py -B build_companion -D SDKCONFIG=build_companion/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.companion" build
+
+# Release packages for both editions and all targets
+./build-all-targets.sh
 ```
 
 ### 4. Flash and Monitor
@@ -107,7 +132,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 1. **Connect to WiFi**: Device creates `BleMesh2MQTT-Setup` AP on first boot
 2. **Access Web Interface**: Navigate to `192.168.4.1` and configure WiFi
 3. **Configure MQTT**: Set your Home Assistant MQTT broker details
-4. **Start Provisioning**: Enable device discovery to begin adding BLE Mesh devices
+4. **Add your lights**: Standalone: enable device discovery and provision them from the
+   dashboard. Companion: add the bridge from your mesh app (see [EDITIONS.md](documentation/EDITIONS.md))
 
 ## 📱 Web Interface Guide
 

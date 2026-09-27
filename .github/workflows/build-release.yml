@@ -17,7 +17,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
+        # Two editions of the same firmware — see documentation/EDITIONS.md
+        edition: [Standalone, Companion]
         target: [esp32, esp32s3, esp32c3, esp32c5, esp32c6]
 
     steps:
@@ -51,13 +54,15 @@ jobs:
           . ./export.sh
           cd $GITHUB_WORKSPACE
           PREVIEW_FLAG=$([ "${{ matrix.target }}" = "esp32c5" ] && echo "--preview" || echo "")
-          idf.py $PREVIEW_FLAG set-target ${{ matrix.target }}
-          idf.py $PREVIEW_FLAG build
+          EDITION_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.$(echo '${{ matrix.edition }}' | tr '[:upper:]' '[:lower:]')"
+          idf.py $PREVIEW_FLAG -D SDKCONFIG_DEFAULTS="$EDITION_DEFAULTS" set-target ${{ matrix.target }}
+          idf.py $PREVIEW_FLAG -D SDKCONFIG_DEFAULTS="$EDITION_DEFAULTS" build
 
       - name: Prepare release package
         run: |
           VERSION="${{ github.event.release.tag_name || github.event.inputs.version }}"
-          PACKAGE_NAME="BleMesh2Mqtt-${VERSION}-${{ matrix.target }}"
+          EDITION="${{ matrix.edition }}"
+          PACKAGE_NAME="BleMesh2Mqtt-${EDITION}-${VERSION}-${{ matrix.target }}"
 
           mkdir -p ${PACKAGE_NAME}
 
@@ -85,6 +90,7 @@ jobs:
           echo "Detected storage offset: $STORAGE_OFFSET"
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "EDITION=${EDITION}" >> $GITHUB_ENV
 
           # Bootloader offset by chip family:
           #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
@@ -118,7 +124,7 @@ jobs:
 
           cd ${PACKAGE_NAME}
           esptool.py --chip ${{ matrix.target }} merge_bin \
-            -o BleMesh2Mqtt-${VERSION}-${{ matrix.target }}-merged.bin \
+            -o BleMesh2Mqtt-${EDITION}-${VERSION}-${{ matrix.target }}-merged.bin \
             --flash_mode dio \
             --flash_freq 40m \
             --flash_size 4MB \
@@ -135,10 +141,17 @@ jobs:
           BleMesh2MQTT Flash Instructions
           ==========================================
 
+          Edition: ${EDITION}
           Target: ${TARGET}
           Version: ${VERSION}
           Bootloader Offset: ${BOOTLOADER_OFFSET}
           Storage Offset: ${STORAGE_OFFSET}
+
+          EDITION: Standalone = the bridge creates its own BLE Mesh network and adds
+          your lights itself. Companion = the bridge joins a network you already
+          manage with nRF Mesh (or another app). Pick the one matching your setup:
+          https://github.com/ludodefgh/esp32-blemesh2mqtt/blob/main/documentation/EDITIONS.md
+          Updating over the air only accepts the same edition.
 
           IMPORTANT: This firmware uses a custom ESP-IDF fork with BLE Mesh fixes.
           Source: https://github.com/ludodefgh/esp-idf (branch: ble-mesh-fixes)
@@ -195,7 +208,7 @@ jobs:
           3. Select your device
           4. Click "Install" and choose "Manual Installation"
           5. Upload the merged binary:
-             - 0x0: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin
+             - 0x0: BleMesh2Mqtt-${EDITION}-${VERSION}-${TARGET}-merged.bin
 
           This single file contains all partitions at the correct offsets.
 
@@ -215,7 +228,7 @@ jobs:
           Option A - Single merged file (recommended):
           1. Download tool from: https://www.espressif.com/en/support/download/other-tools
           2. Select chip type: ${TARGET}
-          3. Add file: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin @ 0x0
+          3. Add file: BleMesh2Mqtt-${EDITION}-${VERSION}-${TARGET}-merged.bin @ 0x0
           4. Set COM port and click START
 
           Option B - Multiple files:
@@ -237,6 +250,9 @@ jobs:
           3. Navigate to: http://192.168.4.1
           4. Configure WiFi and MQTT settings
           5. Device will reboot and connect to your network
+          6. Companion edition only: add the bridge to your mesh with nRF Mesh
+             (it advertises as an unprovisioned device), then bind the AppKey
+             to its client models — see documentation/EDITIONS.md
 
           TROUBLESHOOTING:
           ----------------

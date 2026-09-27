@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Two editions, built and released separately: **Standalone** (the bridge runs its own mesh,
+  the existing firmware) and **Companion** (it joins an existing mesh). Shown in the dashboard
+  header and HA device model; OTA refuses the other edition's firmware. See
+  `documentation/EDITIONS.md`. Release files are now `BleMesh2Mqtt-<Edition>-<version>-<chip>.zip`.
 - Join an existing BLE Mesh network as a Node (Node-only SKU, `CONFIG_BLE_MESH_NODE`),
   provisioned by an external provisioner such as nRF Mesh.
 - External Mesh Nodes: discovery, dashboard control and full MQTT / Home Assistant
@@ -15,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   did not provision.
 - Up to 3 group address subscriptions, managed live from the dashboard.
 - Read-only Mesh Keys view, `/api/mesh/debug`, retained log history (`/api/logs`).
+
+### Fixed
+- OTA upload rejected every non-ESP32 image (chip ID check hardcoded to ESP32).
 
 ### Changed
 - `CONFIG_BLE_MESH_SEQ_STORE_RATE=8` to avoid sequence-number reuse after an abrupt reset.

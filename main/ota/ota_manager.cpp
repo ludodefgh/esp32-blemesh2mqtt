@@ -1,7 +1,9 @@
 #include "ota_manager.h"
 
 // Standard C/C++ libraries
+#include <algorithm>
 #include <cstring>
+#include <string_view>
 
 // ESP-IDF includes
 #include "esp_app_desc.h"
@@ -10,8 +12,14 @@
 
 // Project includes
 #include "common/log_common.h"
+#include "common/version.h"
 
 static const char *TAG = "OTA_MANAGER";
+
+// Embedded in every image so an OTA can refuse the other edition (its mesh role can't read ours).
+// The search prefix is derived from this string, never written as a separate literal.
+extern "C" const char bm2mqtt_edition_marker[] = "BM2MQTT-EDITION:" FIRMWARE_EDITION;
+static constexpr size_t EDITION_PREFIX_LEN = 16; // "BM2MQTT-EDITION:"
 
 ota_manager &ota_manager::instance()
 {
@@ -59,6 +67,8 @@ esp_err_t ota_manager::begin_ota_update(size_t firmware_size)
 
     ota_in_progress_ = true;
     storage_update_ = false;
+    edition_window_len_ = 0;
+    image_edition_[0] = '\0';
     update_progress("OTA update started");
 
     return ESP_OK;
@@ -159,6 +169,7 @@ esp_err_t ota_manager::write_ota_data(const uint8_t *data, size_t size)
             }
         }
 
+        scan_for_edition(data, size);
         err = esp_ota_write(ota_handle_, data, size);
         if (err != ESP_OK)
         {
@@ -232,6 +243,18 @@ esp_err_t ota_manager::end_ota_update()
             }
             ota_in_progress_ = false;
             return err;
+        }
+
+        // Images from before editions existed carry no marker; they were all Standalone.
+        const char *image_edition = image_edition_[0] ? image_edition_ : "Standalone";
+        if (strcmp(image_edition, FIRMWARE_EDITION) != 0)
+        {
+            snprintf(last_error_, sizeof(last_error_),
+                     "This is the %s edition firmware; this bridge runs the %s edition. Download the %s edition instead.",
+                     image_edition, FIRMWARE_EDITION, FIRMWARE_EDITION);
+            LOG_ERROR(TAG, "%s", last_error_);
+            ota_in_progress_ = false;
+            return ESP_ERR_INVALID_VERSION;
         }
 
         // Set boot partition
@@ -323,6 +346,44 @@ esp_err_t ota_manager::rollback_if_possible()
     return ESP_ERR_NOT_FOUND;
 }
 
+void ota_manager::scan_for_edition(const uint8_t *data, size_t size)
+{
+    if (image_edition_[0])
+    {
+        return;
+    }
+    // Search window = previous tail + head of this chunk, then the chunk itself.
+    std::string_view prefix(bm2mqtt_edition_marker, EDITION_PREFIX_LEN);
+    auto try_match = [&](const char *buf, size_t len) {
+        std::string_view view(buf, len);
+        for (size_t pos = view.find(prefix); pos != std::string_view::npos; pos = view.find(prefix, pos + 1))
+        {
+            size_t start = pos + prefix.size();
+            size_t end = view.find('\0', start);
+            if (end == std::string_view::npos || end - start == 0 || end - start >= sizeof(image_edition_))
+            {
+                continue; // cut off at the buffer end: the next window will contain it whole
+            }
+            memcpy(image_edition_, buf + start, end - start);
+            image_edition_[end - start] = '\0';
+            return true;
+        }
+        return false;
+    };
+
+    char joined[sizeof(edition_window_) * 2];
+    size_t head = std::min(size, sizeof(edition_window_));
+    memcpy(joined, edition_window_, edition_window_len_);
+    memcpy(joined + edition_window_len_, data, head);
+    if (try_match(joined, edition_window_len_ + head) || try_match(reinterpret_cast<const char *>(data), size))
+    {
+        return;
+    }
+    size_t tail = std::min(size, sizeof(edition_window_));
+    memcpy(edition_window_, data + size - tail, tail);
+    edition_window_len_ = tail;
+}
+
 bool ota_manager::validate_firmware_header(const uint8_t *data, size_t size)
 {
     if (size < sizeof(esp_image_header_t))
@@ -341,7 +402,7 @@ bool ota_manager::validate_firmware_header(const uint8_t *data, size_t size)
     }
 
     // Check chip ID
-    if (header->chip_id != ESP_CHIP_ID_ESP32)
+    if (header->chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID)
     {
         LOG_ERROR(TAG, "Invalid chip ID: %d", header->chip_id);
         return false;

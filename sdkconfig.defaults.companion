@@ -1,0 +1,5 @@
+# Companion edition (Node SKU): the bridge joins an existing BLE Mesh network run by another app (e.g. nRF Mesh).
+# Release overlay applied after sdkconfig.defaults by build-all-targets.sh and CI — see documentation/EDITIONS.md.
+CONFIG_BLE_MESH_NODE=y
+# CONFIG_BLE_MESH_PROVISIONER is not set
+# CONFIG_BM2MQTT_DEBUG_TOOLS is not set

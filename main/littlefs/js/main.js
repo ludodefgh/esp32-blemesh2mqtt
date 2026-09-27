@@ -1415,6 +1415,13 @@ function updateVersionInfo(data) {
     firmwareVersionEl.textContent = data.version;
   }
 
+  // Edition (Standalone / Companion) next to the product name — see documentation/EDITIONS.md
+  const editionEl = document.getElementById("app-edition");
+  if (editionEl && data.edition) {
+    editionEl.textContent = data.edition;
+    document.title = `BleMesh2MQTT ${data.edition}`;
+  }
+
   // Show version next to the header title
   const appVersionEl = document.getElementById("app-version");
   if (appVersionEl && data.version) {

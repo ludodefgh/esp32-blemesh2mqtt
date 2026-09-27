@@ -511,8 +511,8 @@ esp_err_t system_info_handler(httpd_req_t *req)
 
     char buf[768];
     snprintf(buf, sizeof(buf),
-             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\", \"git_version\": \"%s\", \"project\": \"%s\", \"idf_version\": \"%s\", \"build_date\": \"%s\", \"build_time\": \"%s\", \"mesh_role\": \"%s\", \"mesh_node_addr\": %u }",
-             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION, app_desc->version, app_desc->project_name, app_desc->idf_ver, BUILD_DATE, BUILD_TIME,
+             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\", \"git_version\": \"%s\", \"project\": \"%s\", \"idf_version\": \"%s\", \"build_date\": \"%s\", \"build_time\": \"%s\", \"edition\": \"%s\", \"mesh_role\": \"%s\", \"mesh_node_addr\": %u }",
+             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION, app_desc->version, app_desc->project_name, app_desc->idf_ver, BUILD_DATE, BUILD_TIME, FIRMWARE_EDITION,
              // Lets the dashboard hide what this SKU can't do (provisioning vs. leaving a joined mesh).
 #ifdef CONFIG_BLE_MESH_PROVISIONER
              "provisioner",
@@ -2352,8 +2352,8 @@ cleanup:
     err = ota_manager_end();
     if (err != ESP_OK)
     {
-        char error_msg[128];
-        snprintf(error_msg, sizeof(error_msg), "OTA finalization failed: %s", esp_err_to_name(err));
+        char error_msg[300];
+        snprintf(error_msg, sizeof(error_msg), "OTA finalization failed: %s", ota_manager::instance().get_last_error());
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
         return ESP_FAIL;
     }
@@ -2651,7 +2651,7 @@ esp_err_t ota_bundle_upload_handler(httpd_req_t *req)
     if (err != ESP_OK)
     {
         free(buffer);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Firmware finalization failed");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, ota_manager::instance().get_last_error());
         return ESP_FAIL;
     }
 

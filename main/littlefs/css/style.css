@@ -145,6 +145,18 @@ h1, h2, h3 { color: var(--text); }
   margin-left: 0.15rem;
 }
 
+.app-edition {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  vertical-align: middle;
+}
+
+.app-edition:empty { display: none; }
+
 .header-controls {
   display: flex;
   align-items: center;

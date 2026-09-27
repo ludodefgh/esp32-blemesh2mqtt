@@ -76,7 +76,7 @@ static cJSON *create_bridge_device_object()
 
     cJSON_AddItemToObject(device, "identifiers", identifiers);
     cJSON_AddStringToObject(device, "manufacturer", "ludodefgh");
-    cJSON_AddStringToObject(device, "model", "Bridge");
+    cJSON_AddStringToObject(device, "model", "Bridge (" FIRMWARE_EDITION " edition)");
     std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
     cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);

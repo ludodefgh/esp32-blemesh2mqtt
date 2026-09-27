@@ -1,5 +1,7 @@
 # ESP-IDF Build Artifacts
 build/
+build_release/
+build_*/
 sdkconfig
 sdkconfig.old
 dependencies.lock.old

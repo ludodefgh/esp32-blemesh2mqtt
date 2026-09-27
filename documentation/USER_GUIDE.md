@@ -2,6 +2,12 @@
 
 This guide explains how to use the bridge's web interface and how to find it in Home Assistant.
 
+> **Two editions.** The bridge exists as **Standalone** (it creates its own BLE Mesh network
+> and adds your lights) and **Companion** (it joins a network you already manage with a phone
+> app such as nRF Mesh). The header of the dashboard shows which one you have. Most of this
+> guide applies to both; sections marked *Standalone only* or *Companion only* don't.
+> Unsure which one you need? See **[Standalone or Companion?](EDITIONS.md)**
+
 ---
 
 ## Table of Contents
@@ -42,7 +48,7 @@ This panel shows the microcontroller's memory status and provides several action
 |---|---|
 | **FREE MEMORY** | Available memory on the ESP32 (here 46 KB). Monitor this if the bridge becomes unstable. |
 | **TOTAL MEMORY** | Total allocated memory (here 224 KB). |
-| **Auto-provisioning** | When enabled, the bridge automatically provisions any newly detected BLE Mesh bulb without manual intervention. Disabled by default. |
+| **Auto-provisioning** *(Standalone only)* | When enabled, the bridge automatically provisions any newly detected BLE Mesh bulb without manual intervention. Disabled by default. |
 | **Send MQTT Discovery** | Resends MQTT discovery messages to Home Assistant (useful if HA cannot see the devices). |
 | **Send MQTT Status** | Publishes the current state of all devices to MQTT. |
 | **Restart Bridge** | Restarts the bridge (equivalent to a reboot). |
@@ -79,7 +85,11 @@ Used to configure the connection to the MQTT broker:
 
 This page is used to manage BLE Mesh bulbs. It is divided into two columns:
 
-#### Provisioned Nodes (left column)
+In the **Companion** edition, the provisioning sections below are hidden: your phone app adds
+devices, and the lights the bridge finds in its group addresses are listed as
+**External Mesh Nodes** (see [1.2.1](#121-companion-edition--external-mesh-nodes)).
+
+#### Provisioned Nodes (left column) — *Standalone only*
 Lists all bulbs already provisioned (joined) into the bridge's BLE Mesh network. The badge in the top-right shows the total number of nodes (here: **3 nodes**).
 
 For each provisioned bulb, you can see:
@@ -94,7 +104,7 @@ For each provisioned bulb, you can see:
 
 The **Online** badge indicates the bulb is responding to BLE Mesh commands.
 
-#### Unprovisioned Devices (right column)
+#### Unprovisioned Devices (right column) — *Standalone only*
 Lists BLE Mesh bulbs detected within range but not yet joined to the network.
 
 - **UUID**: identifier of the detected bulb.
@@ -103,6 +113,18 @@ Lists BLE Mesh bulbs detected within range but not yet joined to the network.
 - **Refresh**: triggers a new BLE scan to detect nearby devices.
 
 > **Tip:** if a bulb does not appear in "Unprovisioned Devices", make sure it is powered on and within range of the bridge, then click **Refresh**.
+
+#### 1.2.1 Companion edition — External Mesh Nodes
+
+- **Group address subscriptions**: the group addresses (up to 3, e.g. `0xC000`) your lights
+  are subscribed to in your mesh app. The bridge looks for lights in these groups.
+- **Mesh Network**: the bridge's own address in the network, the keys it received, and
+  **Leave mesh network** (removing it from your phone app with "Reset node" is cleaner, since
+  the app then knows it's gone).
+- **External Mesh Nodes**: the lights found in your groups, with the same controls as above.
+  **Discover** scans again (the bridge also does it every 10 minutes). **Forget** removes a
+  light from the bridge and Home Assistant only; it stays in your network, since only your
+  phone app can remove it.
 
 ---
 
