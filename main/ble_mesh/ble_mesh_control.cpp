@@ -108,6 +108,8 @@ bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
 
 bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed)
 {
+    // A queued/retrying command's reply would otherwise recreate the node right away.
+    external_node_queue().drop_pending_for(addr);
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto it = std::find_if(external_nodes.begin(), external_nodes.end(),
@@ -240,6 +242,12 @@ static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         was_new |= !(node.features & FEATURE_GENERIC_ONOFF);
         node.onoff = onoff;
+        // Switched on from off: it comes back at its last level (OnOff is bound to
+        // Lightness), not at the 0 its last Lightness status reported while off.
+        if (onoff && node.lightness == 0 && node.last_lightness > 0)
+        {
+            node.lightness = node.last_lightness;
+        }
         node.features |= FEATURE_GENERIC_ONOFF;
         node.last_seen_us = esp_timer_get_time();
     }
@@ -296,7 +304,7 @@ static void upsert_external_node_level(uint16_t addr, int16_t level)
     }
     if (!excluded)
     {
-        mqtt_notify_external_node_changed(addr, was_new);
+        mqtt_notify_external_node_changed(addr, was_new || structural_change);
     }
 }
 
@@ -325,6 +333,41 @@ static void set_external_node_brightness_locked(external_mesh_node_t &node, uint
     }
 }
 
+// Lightness, HSL and CTL statuses all report the node's Light Lightness Actual (the
+// three are bound); in hs mode that's the halved HSL lightness, so the conversion to HA
+// brightness depends on the node's current mode, not on which status arrived.
+static uint16_t lightness_actual_to_brightness(const external_mesh_node_t &node, uint16_t lightness)
+{
+    return node.color_mode == color_mode_t::hs ? hsl_lightness_to_brightness(lightness, node.max_lightness)
+                                               : lightness;
+}
+
+// A node with both HSL and CTL answers both discovery Gets (CTL's always last), so only
+// a Set we sent may switch its mode; a single-colour-model node's mode is unambiguous.
+static void update_external_color_mode_locked(external_mesh_node_t &node, color_mode_t mode, bool from_set)
+{
+    const uint16_t both = FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+    if (from_set || (node.features & both) != both)
+    {
+        node.color_mode = mode;
+    }
+}
+
+static void finish_external_light_upsert(uint16_t addr, bool was_new, bool feature_newly_set,
+                                         void (*range_get)(uint16_t))
+{
+    if (feature_newly_set)
+    {
+        range_get(addr);
+    }
+    if (feature_newly_set || was_new)
+    {
+        mark_external_nodes_dirty();
+    }
+    // A new feature changes what HA should offer — re-announce, don't just publish state.
+    mqtt_notify_external_node_changed(addr, was_new || feature_newly_set);
+}
+
 static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
 {
     bool was_new = false;
@@ -333,26 +376,15 @@ static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         feature_newly_set = !(node.features & FEATURE_LIGHT_LIGHTNESS);
-        // An HSL light's Lightness Actual is bound to its HSL lightness, i.e. halved.
-        set_external_node_brightness_locked(node, node.color_mode == color_mode_t::hs
-                                                      ? hsl_lightness_to_brightness(lightness, node.max_lightness)
-                                                      : lightness);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
         node.features |= FEATURE_LIGHT_LIGHTNESS;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
         node.last_seen_us = esp_timer_get_time();
     }
-    if (feature_newly_set)
-    {
-        send_external_lightness_range_get(addr);
-    }
-    if (feature_newly_set || was_new)
-    {
-        mark_external_nodes_dirty();
-    }
-    mqtt_notify_external_node_changed(addr, was_new);
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_lightness_range_get);
 }
 
-static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness)
+static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness, bool from_set)
 {
     bool was_new = false;
     bool feature_newly_set = false;
@@ -360,26 +392,18 @@ static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t satur
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         feature_newly_set = !(node.features & FEATURE_LIGHT_HSL);
-        node.hue = hue;
-        node.saturation = saturation;
-        set_external_node_brightness_locked(node, hsl_lightness_to_brightness(lightness, node.max_lightness));
-        node.color_mode = color_mode_t::hs;
         node.features |= FEATURE_LIGHT_HSL;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.hue = hue;
+        node.saturation = saturation;
+        update_external_color_mode_locked(node, color_mode_t::hs, from_set);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
         node.last_seen_us = esp_timer_get_time();
     }
-    if (feature_newly_set)
-    {
-        send_external_hsl_range_get(addr);
-    }
-    if (feature_newly_set || was_new)
-    {
-        mark_external_nodes_dirty();
-    }
-    mqtt_notify_external_node_changed(addr, was_new);
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_hsl_range_get);
 }
 
-static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16_t lightness)
+static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16_t lightness, bool from_set)
 {
     bool was_new = false;
     bool feature_newly_set = false;
@@ -387,22 +411,14 @@ static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         auto &node = get_or_create_external_node_locked(addr, &was_new);
         feature_newly_set = !(node.features & FEATURE_LIGHT_CTL);
-        node.temperature = temperature;
-        set_external_node_brightness_locked(node, lightness);
-        node.color_mode = color_mode_t::color_temp;
         node.features |= FEATURE_LIGHT_CTL;
         node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.temperature = temperature;
+        update_external_color_mode_locked(node, color_mode_t::color_temp, from_set);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
         node.last_seen_us = esp_timer_get_time();
     }
-    if (feature_newly_set)
-    {
-        send_external_ctl_temperature_range_get(addr);
-    }
-    if (feature_newly_set || was_new)
-    {
-        mark_external_nodes_dirty();
-    }
-    mqtt_notify_external_node_changed(addr, was_new);
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_ctl_temperature_range_get);
 }
 
 // Range replies only ever answer our own unicast Range Get to an already-known node;
@@ -1173,14 +1189,16 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         {
             upsert_external_node_hsl(addr, param->status_cb.hsl_status.hsl_hue,
                                       param->status_cb.hsl_status.hsl_saturation,
-                                      param->status_cb.hsl_status.hsl_lightness);
+                                      param->status_cb.hsl_status.hsl_lightness,
+                                      event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT);
         }
         else if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET) ||
                  (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_STATUS))
         {
             upsert_external_node_ctl(addr, param->status_cb.ctl_status.present_ctl_temperature,
-                                      param->status_cb.ctl_status.present_ctl_lightness);
+                                      param->status_cb.ctl_status.present_ctl_lightness,
+                                      event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT);
         }
         // Range Get replies: always unicast (see send_external_*_range_get), so only
         // ever arrive as a GET_STATE_EVT ack, never PUBLISH_EVT.
@@ -1238,7 +1256,11 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                      param->status_cb.lightness_status.present_lightness,
                      param->status_cb.lightness_status.target_lightness,
                      param->status_cb.lightness_status.remain_time);
-            node->hsl_l = param->status_cb.lightness_status.present_lightness;
+            // Bound to the halved HSL lightness in hs mode — same inverse as the HSL Get
+            // above, or a refresh's Lightness Get (sent after it) undoes that one.
+            node->hsl_l = node->color_mode == color_mode_t::hs
+                              ? hsl_lightness_to_brightness(param->status_cb.lightness_status.present_lightness, node->max_lightness)
+                              : param->status_cb.lightness_status.present_lightness;
         }
         break;
 
@@ -1456,6 +1478,28 @@ esp_err_t ble_mesh_init(void)
 
     mesh_config_t mesh_cfg = {};
     mesh_config_load(&mesh_cfg);
+
+    // A saved mode this SKU can't run (e.g. a device that ran the Node build, then got
+    // the Provisioner release over OTA) would leave BLE Mesh down on every boot, with no
+    // way to change it outside the captive portal. Fall back to the compiled role —
+    // before esp_ble_mesh_init(), which is what loads the persisted stack role.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    mesh_mode_t supported_mode = MESH_MODE_STANDALONE;
+#else
+    mesh_mode_t supported_mode = MESH_MODE_JOIN_EXISTING;
+#endif
+    if (mesh_cfg.mode != supported_mode)
+    {
+        LOG_WARN(TAG, "Saved mesh mode %d isn't supported by this firmware, switching to %d", mesh_cfg.mode, supported_mode);
+        mesh_config_reset_stack_state(); // the other role's keys/seq/role are useless here
+        mesh_config_update([](mesh_config_t *cfg, void *ctx) {
+            cfg->mode = *static_cast<mesh_mode_t *>(ctx);
+            cfg->node_addr = 0;
+            cfg->node_net_idx = 0;
+            cfg->node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
+        }, &supported_mode);
+        mesh_config_load(&mesh_cfg);
+    }
 
     store.net_idx = ESP_BLE_MESH_KEY_PRIMARY;
     store.app_idx = APP_KEY_IDX;

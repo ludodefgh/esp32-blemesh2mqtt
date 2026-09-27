@@ -28,9 +28,12 @@ struct external_send_t
 class external_node_queue_t
 {
 public:
-    // A still-queued acknowledged send to the same addr+opcode is replaced rather than
-    // queued behind (latest value wins — e.g. an HA slider).
+    // A still-queued acknowledged send to the same addr+opcode is dropped in favour of
+    // this one, queued at the back (latest value wins — e.g. an HA slider).
     void enqueue(external_send_t item);
+
+    // Drops every queued (not yet sent) send to `addr` — e.g. a node being forgotten.
+    void drop_pending_for(uint16_t addr);
 
     // From the client model callbacks, for every response, timeout or send error.
     // Ignored unless it matches the send currently awaiting its ack.

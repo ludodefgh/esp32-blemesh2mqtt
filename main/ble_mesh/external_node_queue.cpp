@@ -38,12 +38,15 @@ void external_node_queue_t::enqueue(external_send_t item)
     std::unique_lock<std::mutex> lock(mutex_);
     if (item.ack_addr != 0)
     {
-        for (auto &queued : queue_)
+        // Superseded before it was even sent: drop the old one and queue the new one at
+        // the back. Replacing it in place would reorder it against that node's other
+        // queued commands (ON+brightness then OFF would end with the light back on).
+        for (auto it = queue_.begin(); it != queue_.end(); ++it)
         {
-            if (queued.ack_addr == item.ack_addr && queued.ack_opcode == item.ack_opcode)
+            if (it->ack_addr == item.ack_addr && it->ack_opcode == item.ack_opcode)
             {
-                queued = std::move(item); // superseded before it was even sent
-                return;
+                queue_.erase(it);
+                break;
             }
         }
     }
@@ -55,6 +58,16 @@ void external_node_queue_t::enqueue(external_send_t item)
     if (!busy_)
     {
         dispatch(lock);
+    }
+}
+
+void external_node_queue_t::drop_pending_for(uint16_t addr)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::erase_if(queue_, [addr](const external_send_t &queued) { return queued.ack_addr == addr; });
+    if (retry_ && retry_->ack_addr == addr)
+    {
+        retry_.reset();
     }
 }
 

@@ -3043,6 +3043,7 @@ namespace
         {"/api/wifi/connect", HTTP_POST},
         {"/api/wifi/status", HTTP_GET},
         {"/api/mesh/config", HTTP_POST},
+        {"/api/mesh/config", HTTP_GET},
         {"/api/setup/restart", HTTP_POST}};
 
     constexpr size_t captive_uris_count = sizeof(captive_uris) / sizeof(captive_uris[0]);

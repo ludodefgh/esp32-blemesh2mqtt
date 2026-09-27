@@ -987,7 +987,8 @@ function createExternalNodeElement(node) {
     id: node.addr,
     name: `Node ${node.addr}`,
     editableName: false,
-    online: seen && ageSec < 60,
+    // The bridge re-probes every 10 min (and on every command): Offline = missed two rounds.
+    online: seen && ageSec < 25 * 60,
     has: {
       onoff: features.includes('onoff'),
       lightness: node.lightness !== undefined,
@@ -2123,7 +2124,7 @@ function addMeshGroupAddr() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ group_addr: parsed })
   })
-  .then(r => r.json())
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
   .then(data => {
     if (data.success) {
       input.value = '';
@@ -2133,7 +2134,7 @@ function addMeshGroupAddr() {
       showToast('Failed to add group address', 'error');
     }
   })
-  .catch(err => showToast('Error adding group address: ' + err.message, 'error'));
+  .catch(err => showToast('Failed to add group address: ' + err.message, 'error'));
 }
 
 function removeMeshGroupAddr(addr) {
@@ -2142,7 +2143,7 @@ function removeMeshGroupAddr(addr) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ group_addr: addr })
   })
-  .then(r => r.json())
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
   .then(data => {
     if (data.success) {
       renderGroupAddrList(data.group_addrs || []);
@@ -2151,5 +2152,5 @@ function removeMeshGroupAddr(addr) {
       showToast('Failed to remove group address', 'error');
     }
   })
-  .catch(err => showToast('Error removing group address: ' + err.message, 'error'));
+  .catch(err => showToast('Failed to remove group address: ' + err.message, 'error'));
 }

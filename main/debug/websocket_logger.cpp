@@ -208,20 +208,19 @@ size_t websocket_logger_get_history(char *buf, size_t buf_size)
     }
 
     std::lock_guard<std::mutex> lock(log_history_mutex);
-    size_t pos = 0;
-    for (const auto &line : log_history)
+    // When everything doesn't fit, keep the newest lines — those are what you're debugging.
+    size_t first = log_history.size();
+    size_t total = 0;
+    while (first > 0 && total + log_history[first - 1].size() <= buf_size - 1)
     {
-        if (pos + 1 >= buf_size)
-        {
-            break; // no room left even for a null terminator
-        }
-        size_t to_copy = std::min(line.size(), buf_size - 1 - pos);
-        memcpy(buf + pos, line.data(), to_copy);
-        pos += to_copy;
-        if (to_copy < line.size())
-        {
-            break; // buffer full mid-line
-        }
+        total += log_history[--first].size();
+    }
+
+    size_t pos = 0;
+    for (size_t i = first; i < log_history.size(); i++)
+    {
+        memcpy(buf + pos, log_history[i].data(), log_history[i].size());
+        pos += log_history[i].size();
     }
     buf[pos] = '\0';
     return pos;
