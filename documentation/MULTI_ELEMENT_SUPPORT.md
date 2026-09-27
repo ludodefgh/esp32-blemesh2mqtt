@@ -62,6 +62,12 @@ Key things to look for:
 
 ## Implementation plan (ready to execute once data confirmed)
 
+> **Conflict to resolve first:** since the join-existing-mesh work, a node whose only light
+> model is Generic Level is announced to Home Assistant as a **cover** (`device_class: blind`,
+> `node_is_cover()` in `mqtt_control.cpp` and `mqtt_external_control.cpp`). The Häfele outputs
+> below are dimmable lights on plain Generic Level, so they would come out as blinds. Per-element
+> entities need a way to say which: a light (brightness from Level) or a cover.
+
 ### Step 1 — New `bm2mqtt_element_info` struct (`ble_mesh_node.h`)
 
 ```cpp

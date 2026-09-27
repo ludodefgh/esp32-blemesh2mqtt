@@ -48,10 +48,11 @@ flowchart LR
     B -- "adds + controls" --> L3["💡 Light"]
 ```
 
-1. Flash the **Standalone** firmware, then join the bridge's `BleMesh2MQTT-Setup-…` WiFi
-   and enter your WiFi and MQTT settings. The bridge creates a new mesh network by itself.
+1. Flash the **Standalone** firmware, join the bridge's `BleMesh2MQTT-Setup-…` WiFi and
+   enter your home WiFi. Once the bridge is on your network, open its dashboard and enter
+   your MQTT broker (Bridge page). The bridge creates a new mesh network by itself.
 2. Put your lights in pairing mode (factory reset). They appear under **Mesh → Unprovisioned
-   Devices** in the dashboard.
+   devices** in the dashboard.
 3. Click **Provision** (or turn on **Auto-provisioning**). Each light is added, configured,
    and shows up in Home Assistant.
 
@@ -67,8 +68,9 @@ flowchart LR
     B -- "controls" --> L2
 ```
 
-1. Flash the **Companion** firmware, then join the bridge's `BleMesh2MQTT-Setup-…` WiFi
-   and enter your WiFi and MQTT settings. No keys to type in.
+1. Flash the **Companion** firmware, join the bridge's `BleMesh2MQTT-Setup-…` WiFi and
+   enter your home WiFi (no mesh keys to type in). Once the bridge is on your network, open
+   its dashboard and enter your MQTT broker (Bridge page).
 2. In your mesh app (e.g. nRF Mesh), add the bridge like any new device. It shows up as
    an unprovisioned device.
 3. In the app, on the bridge's element, **bind your AppKey** to its client models

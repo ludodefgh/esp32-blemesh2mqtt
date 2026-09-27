@@ -1,85 +1,68 @@
-# Test plan: join-existing-mesh / External Mesh Nodes
+# Test plan: Companion edition with nRF Mesh
 
-Goal: validate the "join an existing mesh" flow (NetKey/AppKey join, group
-subscription, node discovery, individual + group commands) end-to-end,
-without touching the real production mesh. Uses a disposable test network
-created in nRF Mesh plus one spare ESP32.
+Goal: validate the Companion edition end-to-end against a real phone provisioner — the
+bridge joining an existing mesh as a node, finding its lights (External Mesh Nodes), and
+controlling them from the dashboard and Home Assistant — without touching a production mesh.
 
-Related: GitHub issue #40 (known problems on `feature/join-existing-mesh`,
-commit 63d5d42) — not blocking this test, but keep in mind while probing
-stability (see item 3, the message-queue concern).
+For repeatable, phone-free testing, use the automated rig instead (`test/README.md` and the
+`esp32-test-provisioner` skill): its provisioner stands in for nRF Mesh, and
+`test/scripts/external_node_regression.py` checks light control against a test bulb's real
+state. This plan covers what the rig can't: the real nRF Mesh flow a user goes through.
 
-## Hardware / software needed
+## What you need
 
-- The bridge under test (this project, already flashed with the
-  join-existing-mesh + External Mesh Nodes feature).
-- One spare ESP32 to act as a fake "existing mesh" light.
-- A phone with the **nRF Mesh** app installed.
+- The bridge, flashed with the **Companion** edition (`erase-flash` first for a clean start).
+- One spare ESP32-C3 as a test light, flashed with `test/firmware/hsl_server` (colour light)
+  or `test/firmware/onoff_server` (on/off only).
+- A phone with **nRF Mesh**, and an MQTT broker + Home Assistant.
 
-## 1. Flash the fake test node
+## 1. Set up the bridge
 
-Build and flash ESP-IDF's `onoff_server` example onto the spare ESP32:
+1. Join the bridge's `BleMesh2MQTT-Setup-…` WiFi and enter your WiFi. In step 2 of the
+   wizard, only "Join an existing mesh" can be selected. Then set the MQTT broker from the
+   dashboard's Bridge page.
+2. Open the dashboard: the header reads **BleMesh2MQTT Companion**, the Mesh page shows no
+   Address yet and no provisioning sections.
 
-```
-/opt/esp/idf/examples/bluetooth/esp_ble_mesh/onoff_models/onoff_server
-```
+## 2. Build a disposable network in nRF Mesh
 
-This is a minimal BLE Mesh node with a Generic OnOff Server model — it
-toggles the board's LED and is provisionable by any standard provisioner
-app (nRF Mesh included).
+1. Create a **new** network (never your real one).
+2. Add the test light: provision it, bind the AppKey to its Server models (OnOff, Level,
+   Lightness, HSL…), and subscribe those models to a new group, e.g. `0xC000`.
+3. Add the bridge the same way (it advertises as an unprovisioned device), then bind the
+   AppKey to its **Client** models: Generic OnOff, Generic Level, Light Lightness, Light
+   HSL and Light CTL Client.
 
-## 2. Create a disposable test network in nRF Mesh
+## 3. Connect the two
 
-- Create a **new** network in nRF Mesh — do not reuse the real one.
-- Note: nRF Mesh shows the NetKey and AppKey values directly (tap to
-  reveal hex) under the network's Key settings — no NVS extraction needed
-  this time.
+1. Dashboard → Mesh → **Group Address Subscriptions**: add `0xC000`.
+2. **Mesh Network** card: Address shows what nRF Mesh assigned; NetKey/AppKey match
+   nRF Mesh's keys.
+3. Within ~15 s (or click **Discover**), the light appears under **External mesh nodes**
+   with its features (onoff, lightness, hsl…).
 
-## 3. Provision the fake node
+## 4. Validate
 
-- Scan for unprovisioned devices in nRF Mesh, provision the onoff_server
-  board onto the new test network.
-- Bind its Generic OnOff Server model to the network's AppKey.
+- **Dashboard control**: Power, brightness and colour on the light's card change the test
+  light, and nRF Mesh shows the same state (proves it's one live network).
+- **Group ON / OFF**: switches the light through the group address.
+- **Home Assistant**: the light appears as *External Node XXXX* under the bridge device,
+  with the right controls; changes from HA reach the light and the state flows back.
+- **Brightness vs. colour**: change the colour several times — brightness must not drift.
+- **Reboot the bridge**: the light and its HA entity are back right away (restored from
+  NVS), and its state refreshes within a minute.
+- **Forget**: the card and the HA entity disappear; **Discover** brings them back.
+- **Leave mesh network**: the bridge drops its address and all external nodes (HA entities
+  removed) and can be added again from nRF Mesh without a reboot.
+- **"Reset node" from nRF Mesh**: same result as Leave, triggered from the phone.
+- **OTA guard**: uploading a Standalone firmware on the Firmware page is refused.
 
-## 4. Create a group and subscribe the fake node to it
+## Known pitfalls
 
-- In nRF Mesh, create a Group (e.g. address `0xC000`).
-- On the provisioned node's Generic OnOff Server model, use "Subscribe"
-  to subscribe it to that group.
-
-(This project's bridge currently has no UI to subscribe a *provisioned
-node's* model to a group — only its own local client models — so this
-step has to happen from nRF Mesh for now.)
-
-## 5. Join the test mesh from the bridge
-
-- Trigger the bridge's captive-portal setup (Reset WiFi button, or first
-  boot) → Step 2 "Join an existing mesh".
-- Paste the NetKey and AppKey copied from nRF Mesh.
-- Set **Group Address Subscription** to the same group address used in
-  step 4 (e.g. `0xC000`).
-- Save & restart.
-
-## 6. Validate
-
-- **Mesh Keys panel** (Bridge section): confirm NetKey/AppKey shown match
-  what nRF Mesh has for the test network.
-- **Discover**: click Discover under External Mesh Nodes → the fake node
-  should appear with its unicast address.
-- **Individual command**: On/Off buttons for the discovered node → LED on
-  the spare ESP32 should respond; nRF Mesh should reflect the same state
-  (confirms it's genuinely the same live network, not two isolated ones).
-- **Group command**: "Turn Group ON/OFF" → same check via the group
-  address; the panel re-discovers automatically afterward since group
-  Set is unacknowledged (no per-node ack to update the cache with).
-
-## Notes / open risk while testing
-
-- Per issue #40 item 3: `external_nodes` discovery/commands do **not**
-  currently go through this project's serialized message queue. The BLE
-  Mesh stack has previously been unstable under concurrent message
-  sends — avoid firing Discover and several individual commands back to
-  back until that's fixed, and watch the serial log for stack errors if
-  testing more than one fake node.
-- This is a throwaway network — safe to delete from nRF Mesh and re-flash
-  the spare ESP32 afterward.
+- A device reset and re-provisioned at an address reused with a fresh sequence number gets
+  its messages dropped by the other nodes' replay protection (`Replay:` in their logs).
+  nRF Mesh assigns new addresses, so this mostly happens with the test rig; recover by
+  erase-flashing the other nodes.
+- "Transaction failed" in nRF Mesh doesn't prove nothing happened: check the device's own
+  log/state (acks can be lost over the air).
+- Throwaway network: delete it from nRF Mesh and erase-flash the boards afterwards.

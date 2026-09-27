@@ -18,7 +18,7 @@ Three boards are attached to this devcontainer for live testing, each running it
 
 Use the **`esp32-flash`** and **`esp32-monitor`** skills for build/flash/serial-log workflows — they encode hard-won gotchas (non-interactive `idf.py monitor` doesn't work, `ttyACM0`-style ports reset on every open, Kconfig *choice* options can silently revert on `reconfigure`, etc.) that are easy to rediscover the hard way otherwise.
 
-**`sdkconfig` is not version-controlled and does not survive a devcontainer restart** — it regenerates from `sdkconfig.defaults` (which *is* tracked), silently reverting any role/Kconfig edit made only to the live `sdkconfig`. Persist a role change (e.g. `CONFIG_BLE_MESH_NODE` vs `CONFIG_BLE_MESH_PROVISIONER`) in `sdkconfig.defaults`, not just `sdkconfig`, or it'll come back the next time the container restarts.
+**`sdkconfig` is not version-controlled and does not survive a devcontainer restart** — it regenerates from `sdkconfig.defaults` (which *is* tracked), silently reverting any role/Kconfig edit made only to the live `sdkconfig`. Persist a role change (e.g. `CONFIG_BLE_MESH_NODE` vs `CONFIG_BLE_MESH_PROVISIONER`) in `sdkconfig.defaults`, not just `sdkconfig`, or it'll come back the next time the container restarts — or build the other edition in its own dir with the `sdkconfig.defaults.companion`/`.standalone` overlay (see Architecture), which leaves `sdkconfig` alone.
 
 Quick reference:
 ```bash
@@ -27,7 +27,7 @@ idf.py -p /dev/ttyUSB0 build          # compile only
 idf.py -p /dev/ttyUSB0 flash          # build + flash (always pass -p; both ports can be attached at once)
 idf.py -p /dev/ttyUSB0 erase-flash    # wipe all NVS state (WiFi/MQTT creds, mesh keys, node identity) — full reset
 ```
-No automated test suite exists; validation is manual against real hardware (see `documentation/TEST_PLAN_JOIN_EXISTING_MESH.md`) plus a documented compile check of both editions on every target before release (`documentation/RELEASE_PROCESS.md`): `./build-all-targets.sh`.
+There are no unit tests. Validation is against real hardware: `test/scripts/external_node_regression.py` (automated, on the `test/` rig) and the manual nRF Mesh plan in `documentation/TEST_PLAN_JOIN_EXISTING_MESH.md`, plus a documented compile check of both editions on every target before release (`documentation/RELEASE_PROCESS.md`): `./build-all-targets.sh`.
 
 ## Architecture
 

@@ -196,8 +196,9 @@ AFTER FLASHING:
 1. Device will create WiFi AP: "BleMesh2MQTT-Setup-XX:XX:XX"
 2. Connect to this AP (no password)
 3. Navigate to: http://192.168.4.1
-4. Configure WiFi and MQTT settings
+4. Enter your WiFi settings
 5. Device will reboot and connect to your network
+   Then open its dashboard (its IP address) and set your MQTT broker on the Bridge page
 $([ "${edition}" = "companion" ] && echo "6. Companion edition: add the bridge to your mesh with nRF Mesh, then bind the
    AppKey to its client models (see documentation/EDITIONS.md)")
 

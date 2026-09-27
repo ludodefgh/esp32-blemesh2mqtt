@@ -5,10 +5,12 @@
 [![Version](https://img.shields.io/badge/version-0.1.8-green.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
 [![GitHub issues](https://img.shields.io/github/issues/ludodefgh/esp32-blemesh2mqtt.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues)
 
-| Supported Targets | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 |
-| ----------------- | ----- | -------- | -------- | -------- |
+| Supported Targets | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 | ESP32-C5 (preview) |
+| ----------------- | ----- | -------- | -------- | -------- | ------------------ |
 
 > **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**.
+> On ESP32-C3/C5/C6, firmware updates over WiFi don't work yet — update over USB
+> ([#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)).
 
 An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant and other home-automation platforms.
 
@@ -75,8 +77,8 @@ BLE Mesh network**:
 
 3. **Initial Setup**
    - Device creates WiFi AP: `BleMesh2MQTT-Setup-XX:XX:XX`
-   - Connect and navigate to `192.168.4.1`
-   - Configure WiFi and MQTT settings
+   - Connect and navigate to `192.168.4.1`, enter your WiFi settings
+   - Once the bridge is on your network, open its dashboard and set your MQTT broker
    - Then add your lights: from the bridge's dashboard (Standalone), or by adding the bridge
      to your mesh from your phone app (Companion) — see [EDITIONS.md](documentation/EDITIONS.md)
 
@@ -131,7 +133,7 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ### 5. Initial Setup
 1. **Connect to WiFi**: Device creates `BleMesh2MQTT-Setup` AP on first boot
 2. **Access Web Interface**: Navigate to `192.168.4.1` and configure WiFi
-3. **Configure MQTT**: Set your Home Assistant MQTT broker details
+3. **Configure MQTT**: on the dashboard's Bridge page, set your Home Assistant MQTT broker
 4. **Add your lights**: Standalone: enable device discovery and provision them from the
    dashboard. Companion: add the bridge from your mesh app (see [EDITIONS.md](documentation/EDITIONS.md))
 
@@ -146,9 +148,12 @@ Access the web interface at your device's IP address after WiFi setup:
 - Bridge control functions
 
 ### **Mesh** 📡
-- Provisioned and unprovisioned devices in one view, with counts
-- One-click provisioning and unprovisioning
-- Per-node controls (on/off, brightness, HSL colour, colour temperature) shown
+- Standalone: provisioned and unprovisioned devices in one view, one-click provisioning
+  and unprovisioning
+- Companion: the lights found in your group addresses (External Mesh Nodes), the bridge's
+  own mesh address, and "Leave mesh network"
+- Group address subscriptions and the network keys
+- Per-node controls (on/off, brightness, HSL colour, colour temperature, level) shown
   according to the models each node reports
 
 ### **Firmware** 💾
@@ -159,34 +164,41 @@ Live system logs are available from a collapsible dock at the bottom of every pa
 
 ## ⚙️ Configuration
 
-Everything is configured from the web interface: MQTT broker (host, port, credentials),
-WiFi (WPA2/WPA3, auto-reconnect), and BLE Mesh provisioning. Network keys and device
-addresses are generated and assigned automatically. Credentials are stored encrypted.
+Everything is configured from the web interface: WiFi (setup access point on first boot),
+MQTT broker (host, port, credentials) and group addresses. Standalone generates the mesh
+keys and device addresses itself; Companion receives them from the app that adds it to
+your network. Credentials are stored encrypted.
 
 ## 🏠 Home Assistant Integration
 
-Devices appear automatically via MQTT discovery — lights, switches and sensors as
-native entities, with availability and diagnostics.
+Devices appear automatically via MQTT discovery: lights (on/off, brightness, colour,
+colour temperature), covers for level-only devices, plus the bridge's own switches,
+restart button and diagnostic sensors.
 
 ### MQTT Topics Structure
 ```
 blemesh2mqtt_<MAC>/
 ├── bridge/
-│   ├── state          # Bridge status and info
-│   ├── info           # System information
-│   └── availability   # Online/offline status
-└── device_<addr>/
-    ├── light/set      # Light control commands
-    ├── light/state    # Light status updates
-    └── sensor/        # Sensor readings
+│   ├── state                     # Availability (online/offline)
+│   ├── info                      # System information (IP, memory, uptime, RSSI)
+│   ├── provisioning/{state,set}  # Standalone only: node discovery switch
+│   ├── auto_provisioning/{state,set}  # Standalone only
+│   └── restart/set               # Restart button
+├── node_<MAC>/                   # A light the bridge provisioned (Standalone)
+│   ├── set                       # Commands (HA JSON light schema, or OPEN/CLOSE for covers)
+│   ├── state                     # State
+│   └── set_position              # Covers only: position 0-100
+└── ext_<ADDR>/                   # A light found on a joined mesh (Companion)
+    └── set, state, set_position  # Same as node_<MAC>
 ```
+Discovery configs are published under `homeassistant/{light,cover,switch,button,sensor}/`.
 
 ## 🔧 Development
 
 ### Project Structure
 ```
 ├── main/
-│   ├── ble_mesh/         # BLE Mesh provisioner implementation
+│   ├── ble_mesh/         # BLE Mesh provisioner / node, External Mesh Nodes
 │   ├── mqtt/             # MQTT bridge and Home Assistant integration
 │   ├── web_server/       # HTTP server and REST API
 │   ├── wifi/             # WiFi management and captive portal
@@ -194,6 +206,7 @@ blemesh2mqtt_<MAC>/
 │   ├── security/         # Credential encryption and security
 │   ├── littlefs/         # Web interface static files
 │   └── common/           # Shared utilities and definitions
+├── test/                 # Hardware test rig firmware + regression scripts
 ├── .devcontainer/        # Dev Container config (Docker + VS Code)
 └── documentation/        # User guides and screenshots
 ```
@@ -239,8 +252,13 @@ captive portal; try disabling client isolation and 802.11w on the router.
 **MQTT Not Connecting** — use the broker's IP (not hostname); check credentials,
 firewall, and that the broker accepts the bridge's IP.
 
-**BLE Mesh Provisioning Failed** — put the target device in provisioning mode, move
+**BLE Mesh Provisioning Failed** (Standalone) — put the target device in provisioning mode, move
 it within 1–2 m, reduce nearby BLE interference; the device must support BLE Mesh.
+
+**Companion: no External Mesh Nodes found** — check in your mesh app that the AppKey is
+bound to the bridge's client models and that your lights' models are subscribed to a
+group address, then add that same group on the dashboard's Mesh page and click
+**Discover**.
 
 **Captive Portal Not Appearing** — wait ~30–60 s, then open `192.168.4.1` manually;
 disable mobile data; some Android devices need "Use network as is".
