@@ -1421,3 +1421,10 @@ input[type="range"].hue-slider {
   /* .info-row .info-value sets font-size too — needs the same specificity to win. */
   .mesh-keys-grid .info-row .mesh-key { font-size: 0.68rem; }
 }
+
+/* Role-specific UI (provisioning vs. a joined mesh): hidden until /api/system_info
+   says which SKU this firmware is, so the other role's controls never flash in. */
+body:not([data-mesh-role="provisioner"]) .provisioner-only,
+body:not([data-mesh-role="node"]) .node-only { display: none !important; }
+
+.mesh-leave { margin-top: 0.9rem; }

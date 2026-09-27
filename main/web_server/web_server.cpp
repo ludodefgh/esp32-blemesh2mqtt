@@ -482,6 +482,9 @@ esp_err_t mesh_external_command_handler(httpd_req_t *req);
 esp_err_t mesh_external_light_handler(httpd_req_t *req);
 esp_err_t mesh_external_mqtt_handler(httpd_req_t *req);
 esp_err_t mesh_external_forget_handler(httpd_req_t *req);
+#ifdef CONFIG_BLE_MESH_NODE
+esp_err_t mesh_leave_handler(httpd_req_t *req);
+#endif
 #ifdef CONFIG_BM2MQTT_DEBUG_TOOLS
 esp_err_t mesh_debug_status_handler(httpd_req_t *req);
 esp_err_t mesh_reset_role_handler(httpd_req_t *req);
@@ -508,8 +511,15 @@ esp_err_t system_info_handler(httpd_req_t *req)
 
     char buf[768];
     snprintf(buf, sizeof(buf),
-             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\", \"git_version\": \"%s\", \"project\": \"%s\", \"idf_version\": \"%s\", \"build_date\": \"%s\", \"build_time\": \"%s\" }",
-             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION, app_desc->version, app_desc->project_name, app_desc->idf_ver, BUILD_DATE, BUILD_TIME);
+             "{ \"memory\": { \"free\": %lu, \"minimum\": %lu, \"total\": %lu, \"used\": %lu }, \"uptime\": %lld, \"version\": \"%s\", \"git_version\": \"%s\", \"project\": \"%s\", \"idf_version\": \"%s\", \"build_date\": \"%s\", \"build_time\": \"%s\", \"mesh_role\": \"%s\", \"mesh_node_addr\": %u }",
+             free_heap, min_heap, total_heap, total_heap - free_heap, uptime_us, FIRMWARE_VERSION, app_desc->version, app_desc->project_name, app_desc->idf_ver, BUILD_DATE, BUILD_TIME,
+             // Lets the dashboard hide what this SKU can't do (provisioning vs. leaving a joined mesh).
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+             "provisioner",
+#else
+             "node",
+#endif
+             (unsigned)local_element_addr);
 
     httpd_resp_send(req, buf, -1);
     return ESP_OK;
@@ -713,6 +723,17 @@ esp_err_t api_wildcard_handler(httpd_req_t *req)
     {
         return reset_wifi_handler(req);
     }
+#ifdef CONFIG_BLE_MESH_NODE
+    else if (strstr(req->uri, "/api/mesh/leave"))
+    {
+        if (req->method != HTTP_POST)
+        {
+            httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+            return ESP_FAIL;
+        }
+        return mesh_leave_handler(req);
+    }
+#endif
     else if (strstr(req->uri, "/api/mesh/settings/remove"))
     {
         if (req->method != HTTP_POST)
@@ -1790,6 +1811,26 @@ esp_err_t mesh_external_mqtt_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, "{\"status\":\"published\"}");
     return ESP_OK;
 }
+
+#ifdef CONFIG_BLE_MESH_NODE
+esp_err_t mesh_leave_handler(httpd_req_t *req)
+{
+    esp_err_t err = ble_mesh_leave_network();
+    if (err == ESP_ERR_INVALID_STATE)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Not in a mesh network");
+        return ESP_FAIL;
+    }
+    if (err != ESP_OK)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to leave the mesh network");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"left\"}");
+    return ESP_OK;
+}
+#endif
 
 esp_err_t mesh_external_forget_handler(httpd_req_t *req)
 {

@@ -384,10 +384,10 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     }
     case ESP_BLE_MESH_NODE_PROV_RESET_EVT:
     {
-        // Removed from its mesh (Config Node Reset, e.g. "Reset node" in nRF Mesh). The
-        // stack wipes its own keys; drop our cached identity and advertise again so it
-        // can be re-added without a reboot.
-        LOG_WARN(TAG, "ESP_BLE_MESH_NODE_PROV_RESET_EVT: node reset by its provisioner");
+        // Removed from its mesh — Config Node Reset ("Reset node" in nRF Mesh) or our own
+        // ble_mesh_leave_network(). The stack wipes its keys; drop our cached identity and
+        // external nodes, and advertise again so it can be re-added without a reboot.
+        LOG_WARN(TAG, "ESP_BLE_MESH_NODE_PROV_RESET_EVT: left the mesh network");
         mesh_config_update([](mesh_config_t *cfg, void *) {
             cfg->node_addr = 0;
             cfg->node_net_idx = 0;
@@ -396,6 +396,7 @@ void ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
         local_element_addr = 0;
         store.net_idx = ESP_BLE_MESH_KEY_UNUSED;
         store.app_idx = ESP_BLE_MESH_KEY_UNUSED;
+        ble_mesh_forget_all_external_nodes();
 
         esp_err_t err = esp_ble_mesh_node_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
         if (err != ESP_OK)

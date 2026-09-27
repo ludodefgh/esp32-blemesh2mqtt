@@ -129,6 +129,40 @@ bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed)
     return true;
 }
 
+void ble_mesh_forget_all_external_nodes()
+{
+    std::vector<uint16_t> addrs;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        for (const auto &node : external_nodes)
+        {
+            addrs.push_back(node.unicast);
+        }
+    }
+    for (uint16_t addr : addrs)
+    {
+        external_mesh_node_t removed;
+        if (ble_mesh_forget_external_node(addr, &removed))
+        {
+            mqtt_forget_external_node(removed);
+        }
+    }
+}
+
+#ifdef CONFIG_BLE_MESH_NODE
+esp_err_t ble_mesh_leave_network()
+{
+    if (local_element_addr == 0)
+    {
+        return ESP_ERR_INVALID_STATE; // not in a network
+    }
+    // Same path as a Config Node Reset from the network's provisioner: the stack wipes
+    // its keys and fires ESP_BLE_MESH_NODE_PROV_RESET_EVT, whose handler clears our
+    // identity and external nodes and advertises as unprovisioned again.
+    return esp_ble_mesh_node_local_reset();
+}
+#endif
+
 // External Mesh Nodes are persisted like node_manager()'s provisioned nodes, so their
 // HA entities and MQTT subscriptions come back at boot without waiting for a node to
 // answer a discovery probe. Only structural changes (new node, new feature, ranges)

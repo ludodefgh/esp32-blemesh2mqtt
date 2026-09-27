@@ -83,6 +83,15 @@ bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out);
 // Reset only works with the node's DevKey, which only its provisioner has. If the node
 // is still on the mesh, the next discovery finds it again.
 bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed);
+// Forgets every external node (and its HA entity) — they're unreachable once we've
+// left the network.
+void ble_mesh_forget_all_external_nodes();
+#ifdef CONFIG_BLE_MESH_NODE
+// Leaves the joined mesh from the bridge side (the dashboard's "Leave mesh network").
+// The network's provisioner isn't told, so it still lists this node — removing it
+// there ("Reset node" in nRF Mesh) is the cleaner way and does the same on our side.
+esp_err_t ble_mesh_leave_network();
+#endif
 
 // MQTT republish functions
 void ble_mesh_republish_all_nodes_to_mqtt(void);

@@ -282,11 +282,12 @@ void ws_log_sender_task(void *arg)
 
             for (int fd : clients_copy)
             {
-                // Check if client is still valid before sending
+                // Must still be a WebSocket, not just "valid": a disconnected client's fd
+                // gets reused by the next HTTP connection, and a log frame written there
+                // corrupts that request's response.
                 httpd_ws_client_info_t ws_info = httpd_ws_get_fd_info(ws_server, fd);
-                if (ws_info == HTTPD_WS_CLIENT_INVALID)
+                if (ws_info != HTTPD_WS_CLIENT_WEBSOCKET)
                 {
-                    // Client is invalid, marking for removal
                     failed_clients.push_back(fd);
                     continue;
                 }
@@ -338,7 +339,7 @@ void ws_cleanup_task(void *arg)
         for (int fd : clients_copy)
         {
             httpd_ws_client_info_t ws_info = httpd_ws_get_fd_info(ws_server, fd);
-            if (ws_info == HTTPD_WS_CLIENT_INVALID)
+            if (ws_info != HTTPD_WS_CLIENT_WEBSOCKET) // gone, or fd reused by a plain HTTP client
             {
                 stale_clients.push_back(fd);
             }

@@ -1314,6 +1314,7 @@ function loadSystemInfo() {
 
       // Update version information in Bridge section
       updateVersionInfo(data);
+      applyMeshRole(data);
     })
     .catch(err => {
       console.error('Failed to load system info:', err);
@@ -1329,6 +1330,48 @@ function loadSystemInfo() {
 }
 
 let meshKeysLoaded = false;
+
+// Shows only what this SKU can do: provisioning (Provisioner) or the joined mesh's
+// membership and "Leave" (Node) — see .provisioner-only / .node-only.
+function applyMeshRole(info) {
+  if (!info.mesh_role) return;
+  document.body.dataset.meshRole = info.mesh_role;
+  if (info.mesh_role !== 'node') return;
+
+  const inNetwork = info.mesh_node_addr > 0;
+  const addrEl = document.getElementById('mesh-node-addr');
+  if (addrEl) {
+    addrEl.textContent = inNetwork
+      ? '0x' + info.mesh_node_addr.toString(16).toUpperCase().padStart(4, '0')
+      : 'Not in a network — add the bridge from your mesh app (e.g. nRF Mesh)';
+  }
+  const leaveBtn = document.getElementById('mesh-leave-btn');
+  if (leaveBtn) leaveBtn.disabled = !inNetwork;
+  if (!inNetwork && meshKeysLoaded) {
+    meshKeysLoaded = false; // keys are gone with the network; show them again once re-added
+    ['mesh-net-key', 'mesh-app-key'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+  }
+}
+
+function leaveMeshNetwork() {
+  if (!confirm('Leave the mesh network?\n\n' +
+               'The bridge forgets the network keys and its External Mesh Nodes (their Home Assistant ' +
+               'entities are removed), then waits to be added again from your mesh app.\n\n' +
+               'Your mesh app (e.g. nRF Mesh) is not told and still lists the bridge — remove it there too. ' +
+               'Using "Reset node" in that app instead does both at once.')) {
+    return;
+  }
+  fetch('/api/mesh/leave', { method: 'POST' })
+    .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
+    .then(() => {
+      showToast('Left the mesh network — waiting to be added again', 'success');
+      setTimeout(() => { loadSystemInfo(); loadExternalNodes(); }, 1500);
+    })
+    .catch(err => showToast('Failed to leave the mesh network: ' + err.message, 'error'));
+}
 
 function loadMeshKeys() {
   fetch("/api/mesh/keys")
