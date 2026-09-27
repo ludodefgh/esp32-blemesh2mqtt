@@ -76,34 +76,19 @@ jobs:
           # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
           python3 tools/make_update_bundle.py build/BleMesh2Mqtt.bin build/storage.bin ${PACKAGE_NAME}/update_bundle.bin
 
-          # Detect storage offset from build log (differs by architecture)
-          # ESP32/ESP32-S3 (dual-ota): 0x3b0000, ESP32-C3/C6 (single-ota): 0x2c0000
-          STORAGE_OFFSET=$(grep -r "storage.bin" build/ 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=.*storage\.bin)' | head -1)
-          if [ -z "$STORAGE_OFFSET" ]; then
-            # Fallback: detect from target
-            if [ "${{ matrix.target }}" = "esp32" ] || [ "${{ matrix.target }}" = "esp32s3" ]; then
-              STORAGE_OFFSET="0x3b0000"
-            else
-              STORAGE_OFFSET="0x2c0000"
-            fi
-          fi
-          echo "Detected storage offset: $STORAGE_OFFSET"
+          # Flash offsets come from the build itself: bootloader differs per chip, storage per
+          # partition table (0x3b0000 dual-ota on esp32/esp32s3, 0x2c0000 single-ota on C3/C5/C6)
+          flash_offset() {
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(o for o, f in d["flash_files"].items() if f == sys.argv[2]))' \
+              build/flasher_args.json "$1"
+          }
+          BOOTLOADER_OFFSET=$(flash_offset bootloader/bootloader.bin)
+          STORAGE_OFFSET=$(flash_offset storage.bin)
+          echo "Bootloader offset: $BOOTLOADER_OFFSET, storage offset: $STORAGE_OFFSET"
+          echo "BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET}" >> $GITHUB_ENV
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
           echo "EDITION=${EDITION}" >> $GITHUB_ENV
-
-          # Bootloader offset by chip family:
-          #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
-          #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
-          #   ESP32-C5 (RISC-V, special case)    → 0x2000
-          if [ "${{ matrix.target }}" = "esp32c5" ]; then
-            BOOTLOADER_OFFSET="0x2000"
-          elif [ "${{ matrix.target }}" = "esp32c3" ] || [ "${{ matrix.target }}" = "esp32c6" ] || [ "${{ matrix.target }}" = "esp32h2" ]; then
-            BOOTLOADER_OFFSET="0x0"
-          else
-            BOOTLOADER_OFFSET="0x1000"
-          fi
-          echo "BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET}" >> $GITHUB_ENV
 
           # When flashing via the native USB-Serial/JTAG port, ESP32-C3 and
           # ESP32-C6 need --after watchdog-reset instead of hard_reset: a

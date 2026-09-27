@@ -112,22 +112,17 @@ for target in $TARGETS; do
     # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
     python3 tools/make_update_bundle.py "$BUILD_DIR/BleMesh2Mqtt.bin" "$BUILD_DIR/storage.bin" "$PACKAGE_DIR/update_bundle.bin" || true
 
-    # Get partition addresses
-    # Bootloader offset by chip family:
-    #   Xtensa (esp32, esp32s2, esp32s3)  → 0x1000
-    #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
-    #   ESP32-C5 (RISC-V, special case)    → 0x2000
-    if [ "$target" = "esp32c5" ]; then
-        BOOTLOADER_OFFSET="0x2000"
-    elif [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ] || [ "$target" = "esp32h2" ]; then
-        BOOTLOADER_OFFSET="0x0"
-    else
-        BOOTLOADER_OFFSET="0x1000"
-    fi
-    PARTITION_OFFSET="0x8000"
-    OTA_DATA_OFFSET="0xd000"
-    APP_OFFSET="0x10000"
-    STORAGE_OFFSET="0x3B0000"
+    # Flash offsets come from the build itself: they differ per chip (bootloader) and per
+    # partition table (storage: 0x3B0000 dual-ota on esp32/esp32s3, 0x2C0000 single-ota on C3/C5/C6)
+    flash_offset() {
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(o for o, f in d["flash_files"].items() if f == sys.argv[2]))' \
+            "$BUILD_DIR/flasher_args.json" "$1"
+    }
+    BOOTLOADER_OFFSET=$(flash_offset bootloader/bootloader.bin)
+    PARTITION_OFFSET=$(flash_offset partition_table/partition-table.bin)
+    OTA_DATA_OFFSET=$(flash_offset ota_data_initial.bin)
+    APP_OFFSET=$(flash_offset BleMesh2Mqtt.bin)
+    STORAGE_OFFSET=$(flash_offset storage.bin)
 
     # When flashing via the native USB-Serial/JTAG port (not an external UART
     # adapter), ESP32-C3 and ESP32-C6 need --after watchdog-reset instead of

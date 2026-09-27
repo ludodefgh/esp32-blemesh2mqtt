@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - OTA upload rejected every non-ESP32 image (chip ID check hardcoded to ESP32).
+- `build-all-targets.sh` wrote the ESP32-C3/C5/C6 storage offset as `0x3B0000` in its
+  flash instructions (their single-OTA table puts it at `0x2C0000`). Both it and CI now read
+  every offset from the build's `flasher_args.json`. Release binaries were not affected.
 
 ### Changed
 - `CONFIG_BLE_MESH_SEQ_STORE_RATE=8` to avoid sequence-number reuse after an abrupt reset.
