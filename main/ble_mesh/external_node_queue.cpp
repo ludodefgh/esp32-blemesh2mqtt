@@ -69,6 +69,11 @@ void external_node_queue_t::drop_pending_for(uint16_t addr)
     {
         retry_.reset();
     }
+    if (inflight_ && inflight_->ack_addr == addr)
+    {
+        inflight_->orphaned = true;
+        inflight_->retries_left = 0;
+    }
 }
 
 void external_node_queue_t::dispatch(std::unique_lock<std::mutex> &lock)
@@ -171,12 +176,12 @@ void external_node_queue_t::start_gap(std::unique_lock<std::mutex> &lock)
     }
 }
 
-void external_node_queue_t::on_send_complete(uint16_t addr, uint32_t opcode, bool acked)
+bool external_node_queue_t::on_send_complete(uint16_t addr, uint32_t opcode, bool acked)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!inflight_ || inflight_->ack_addr != addr || inflight_->ack_opcode != opcode)
     {
-        return;
+        return false;
     }
     if (guard_timer_)
     {
@@ -184,7 +189,9 @@ void external_node_queue_t::on_send_complete(uint16_t addr, uint32_t opcode, boo
     }
     external_send_t item = std::move(*inflight_);
     inflight_.reset();
+    const bool orphaned = item.orphaned;
     finish(lock, std::move(item), acked);
+    return orphaned;
 }
 
 void external_node_queue_t::gap_timer_cb(void *arg)

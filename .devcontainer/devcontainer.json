@@ -25,8 +25,6 @@
 		}
 	},
 	"runArgs": ["--privileged",
-				"--device=/dev/ttyUSB0",
-				"--device=/dev/ttyACM0",
 				"--group-add","dialout",
 				"--network=host"]
 }

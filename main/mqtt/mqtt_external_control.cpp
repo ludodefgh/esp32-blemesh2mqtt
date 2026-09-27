@@ -14,6 +14,7 @@
 // Project includes
 #include "ble_mesh/ble_mesh_control.h"
 #include "common/log_common.h"
+#include "common/version.h"
 #include "mqtt_bridge.h"
 #include "mqtt_control.h"
 #include "mqtt_credentials.h"
@@ -74,7 +75,7 @@ static CJsonPtr make_external_discovery_message(const external_mesh_node_t &node
     if (origin)
     {
         cJSON_AddItemToObject(origin, "name", cJSON_CreateString("blemesh2mqtt"));
-        cJSON_AddItemToObject(origin, "sw", cJSON_CreateString("0.0.1"));
+        cJSON_AddItemToObject(origin, "sw", cJSON_CreateString(FIRMWARE_VERSION));
     }
 
     const std::string root_topic = external_node_base_topic(node.unicast);

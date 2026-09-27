@@ -217,8 +217,10 @@ static void save_external_nodes()
 
 static void mark_external_nodes_dirty()
 {
-    if (!s_ext_nodes_save_timer)
-    {
+    // Called from the BLE, HTTP and MQTT tasks — create the timer only once.
+    static std::once_flag s_timer_once;
+    std::call_once(s_timer_once, []
+                   {
         const esp_timer_create_args_t args = {
             .callback = [](void *) { save_external_nodes(); },
             .arg = nullptr,
@@ -229,13 +231,16 @@ static void mark_external_nodes_dirty()
         if (esp_timer_create(&args, &s_ext_nodes_save_timer) != ESP_OK)
         {
             LOG_ERROR(TAG, "Failed to create external nodes save timer");
-            return;
-        }
+        } });
+    if (!s_ext_nodes_save_timer)
+    {
+        return;
     }
     esp_timer_stop(s_ext_nodes_save_timer); // debounce: restart the countdown
     esp_timer_start_once(s_ext_nodes_save_timer, 10 * 1000 * 1000);
 }
 
+#ifdef CONFIG_BLE_MESH_NODE // external nodes only exist on a joined mesh
 static void load_external_nodes()
 {
     nvs_handle_t handle;
@@ -261,12 +266,14 @@ static void load_external_nodes()
     {
         node.last_seen_us = 0; // not seen since this boot
     }
+    const size_t restored = nodes.size();
     {
         std::lock_guard<std::mutex> lock(external_nodes_mutex);
         external_nodes = std::move(nodes);
     }
-    LOG_INFO(TAG, "Restored %u external node(s) from NVS", (unsigned)external_nodes.size());
+    LOG_INFO(TAG, "Restored %u external node(s) from NVS", (unsigned)restored);
 }
+#endif
 
 static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
 {
@@ -308,7 +315,9 @@ static constexpr uint64_t EXT_DISCOVERY_BOOT_DELAY_US = 15ULL * 1000 * 1000;
 static constexpr uint64_t EXT_DISCOVERY_AFTER_BIND_US = 5ULL * 1000 * 1000;
 static constexpr uint64_t EXT_DISCOVERY_PERIOD_US = 10ULL * 60 * 1000 * 1000;
 static void schedule_external_discovery(uint64_t delay_us);
+#ifdef CONFIG_BLE_MESH_NODE
 static void start_external_discovery_timers();
+#endif
 static void send_external_hsl_range_get(uint16_t addr);
 static void send_external_ctl_temperature_range_get(uint16_t addr);
 
@@ -1051,7 +1060,10 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
     if (event == ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT)
     {
-        external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT);
+        if (external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT))
+        {
+            return; // reply for a node forgotten meanwhile — don't bring it back
+        }
     }
 
     auto node = node_manager().get_node(addr);
@@ -1203,7 +1215,10 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
     if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT)
     {
-        external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT);
+        if (external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT))
+        {
+            return; // reply for a node forgotten meanwhile — don't bring it back
+        }
     }
 
     auto node = node_manager().get_node(addr);
@@ -1746,10 +1761,11 @@ esp_err_t ble_mesh_discover_external_nodes()
     return ESP_OK;
 }
 
-// External Mesh Nodes live only in RAM, so re-discover them on our own (after boot,
-// after an AppKey gets bound, then periodically) — otherwise their HA entities stay
-// dead after any reboot until someone clicks Discover in the dashboard.
+// Re-discover External Mesh Nodes on our own (after boot, after an AppKey gets bound,
+// then periodically) to refresh their live state and find new ones.
 static esp_timer_handle_t s_ext_discovery_once = nullptr;
+
+#ifdef CONFIG_BLE_MESH_NODE
 static esp_timer_handle_t s_ext_discovery_periodic = nullptr;
 
 static void external_discovery_timer_cb(void *)
@@ -1766,6 +1782,7 @@ static void external_discovery_timer_cb(void *)
         ble_mesh_discover_external_nodes();
     }
 }
+#endif
 
 static void schedule_external_discovery(uint64_t delay_us)
 {
@@ -1777,6 +1794,7 @@ static void schedule_external_discovery(uint64_t delay_us)
     esp_timer_start_once(s_ext_discovery_once, delay_us);
 }
 
+#ifdef CONFIG_BLE_MESH_NODE
 static void start_external_discovery_timers()
 {
     if (s_ext_discovery_once)
@@ -1802,6 +1820,7 @@ static void start_external_discovery_timers()
     }
     schedule_external_discovery(EXT_DISCOVERY_BOOT_DELAY_US);
 }
+#endif
 
 esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
 {

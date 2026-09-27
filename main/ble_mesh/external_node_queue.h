@@ -23,6 +23,7 @@ struct external_send_t
     uint16_t ack_addr = 0;           // unicast destination if acknowledged, else 0
     uint32_t ack_opcode = 0;         // opcode the client callback reports for this send
     uint8_t retries_left = 3;
+    bool orphaned = false;           // its node was forgotten while in flight: ignore the reply
 };
 
 class external_node_queue_t
@@ -32,12 +33,14 @@ public:
     // this one, queued at the back (latest value wins — e.g. an HA slider).
     void enqueue(external_send_t item);
 
-    // Drops every queued (not yet sent) send to `addr` — e.g. a node being forgotten.
+    // Drops every queued send to `addr` — e.g. a node being forgotten — and orphans the
+    // one in flight, so its late reply doesn't bring the node back.
     void drop_pending_for(uint16_t addr);
 
     // From the client model callbacks, for every response, timeout or send error.
-    // Ignored unless it matches the send currently awaiting its ack.
-    void on_send_complete(uint16_t addr, uint32_t opcode, bool acked);
+    // Ignored unless it matches the send currently awaiting its ack. Returns true if
+    // that send was orphaned (its reply should be dropped).
+    bool on_send_complete(uint16_t addr, uint32_t opcode, bool acked);
 
 private:
     // All take the caller's lock; dispatch() releases it while calling send().
