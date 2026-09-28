@@ -416,7 +416,7 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             if (origin)
             {
                 cJSON_AddItemToObject(origin, "name", cJSON_CreateString("blemesh2mqtt"));
-                cJSON_AddItemToObject(origin, "sw", cJSON_CreateString("0.0.1"));
+                cJSON_AddItemToObject(origin, "sw", cJSON_CreateString(FIRMWARE_VERSION));
             }
         }
 
