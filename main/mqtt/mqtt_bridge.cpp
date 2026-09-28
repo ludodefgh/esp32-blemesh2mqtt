@@ -80,7 +80,15 @@ static cJSON *create_bridge_device_object()
     std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
     cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);
-    
+    cJSON_AddStringToObject(device, "hw_version", CONFIG_IDF_TARGET);
+    // Dashboard link ("Visit" in HA)
+    const char *ip = get_ip_address();
+    if (ip && ip[0] != '\0')
+    {
+        std::string url = std::string("http://") + ip;
+        cJSON_AddStringToObject(device, "configuration_url", url.c_str());
+    }
+
     return device;
 }
 
