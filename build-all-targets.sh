@@ -202,6 +202,17 @@ AFTER FLASHING:
 $([ "${edition}" = "companion" ] && echo "6. Companion edition: add the bridge to your mesh with nRF Mesh, then bind the
    AppKey to its client models (see documentation/EDITIONS.md)")
 
+UPDATING AN EXISTING BRIDGE:
+----------------------------
+$(if [ "$target" = "esp32c3" ] || [ "$target" = "esp32c5" ] || [ "$target" = "esp32c6" ]; then
+echo "This chip has a single firmware slot, so the firmware can't be updated from the
+dashboard. Run the METHOD 1 command again, WITHOUT erase_flash: WiFi/MQTT settings and
+your mesh (lights, keys) are kept."
+else
+echo "From the dashboard: Firmware page, 'Firmware + Web', upload update_bundle.bin.
+Only the same edition is accepted (${EDITION_NAME})."
+fi)
+
 TROUBLESHOOTING:
 ----------------
 

@@ -37,6 +37,12 @@ esp_err_t ota_manager::begin_ota_update(size_t firmware_size)
 
     LOG_INFO(TAG, "Starting OTA update, firmware size: %zu bytes", firmware_size);
 
+    if (!firmware_update_supported())
+    {
+        set_error(FIRMWARE_OTA_UNSUPPORTED_MSG);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     // Find next available OTA partition
     update_partition_ = esp_ota_get_next_update_partition(nullptr);
     if (update_partition_ == nullptr)
@@ -72,6 +78,13 @@ esp_err_t ota_manager::begin_ota_update(size_t firmware_size)
     update_progress("OTA update started");
 
     return ESP_OK;
+}
+
+bool ota_manager::firmware_update_supported() const
+{
+    // With a single OTA slot, IDF falls back to that slot — the one we're running from.
+    const esp_partition_t *next = esp_ota_get_next_update_partition(nullptr);
+    return next != nullptr && next != esp_ota_get_running_partition();
 }
 
 esp_err_t ota_manager::begin_storage_update(size_t storage_size)

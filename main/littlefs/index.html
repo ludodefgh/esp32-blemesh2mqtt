@@ -417,6 +417,10 @@
                 </label>
               </div>
               <p class="seg-hint" id="update-type-hint"></p>
+              <p class="hint fw-ota-unsupported" id="fw-ota-unsupported" hidden>
+                This chip has a single firmware slot: update the firmware over USB (see
+                <code>FLASH_INSTRUCTIONS.txt</code> in the release). The web interface can still be updated here.
+              </p>
 
               <div class="upload-area" id="upload-area">
                 <input type="file" id="firmware-file" accept=".bin" hidden>

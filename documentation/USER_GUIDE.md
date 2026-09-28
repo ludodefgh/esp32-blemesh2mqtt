@@ -159,9 +159,10 @@ Good to know:
 - A firmware update only accepts **the same edition**: a Standalone bridge refuses a
   Companion firmware and vice versa. Switching editions requires a USB flash
   (see [EDITIONS.md](EDITIONS.md)).
-- On **ESP32-C3, C5 and C6**, firmware updates over WiFi don't work yet
-  ([#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)): update those over USB.
-  The **Web interface** update works.
+- On **ESP32-C3, C5 and C6**, the firmware can't be updated over WiFi (single firmware
+  slot, [#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)): the page only
+  offers **Web interface** there. Update the firmware over USB with the release's
+  `FLASH_INSTRUCTIONS.txt`; without an erase, your settings and lights are kept.
 
 > **Warning:** don't unplug the bridge during an update.
 

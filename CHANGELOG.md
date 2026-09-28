@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- [ ] Additional BLE Mesh device types support
+- [ ] Performance optimizations
+- [ ] SSL/TLS support for MQTT
+
+## [0.1.9] - 2026-09-28
+
 ### Added
 - Two editions, built and released separately: **Standalone** (the bridge runs its own mesh,
   the existing firmware) and **Companion** (it joins an existing mesh, provisioned by an app
@@ -46,14 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flash instructions (their single-OTA table puts it at `0x2C0000`). Both it and CI now read
   every offset from the build's `flasher_args.json`. Release binaries were not affected.
 
-### Known issues
-- ESP32-C3/C5/C6: firmware updates over WiFi can't work with the single-OTA partition table;
-  update over USB (#44).
-
-### Planned
-- [ ] Additional BLE Mesh device types support
-- [ ] Performance optimizations
-- [ ] SSL/TLS support for MQTT
+- ESP32-C3/C5/C6: firmware updates over WiFi could never work with their single-slot
+  partition table and failed with an obscure error. The Firmware page now only offers the
+  web-interface update there and says to update the firmware over USB (#44).
+- ESP32-C3/C5/C6: the web-interface update was refused too (256 KB upload cap, while their
+  storage image is 1.2 MB); the limit now follows the actual partition size.
 
 ## [0.1.8] - 2026-09-03
 

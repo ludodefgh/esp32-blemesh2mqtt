@@ -1215,6 +1215,9 @@ input[type="range"].hue-slider {
 .seg + .seg { border-left: 1px solid var(--border-strong); }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg:hover { color: var(--text); }
+.seg:has(input:disabled) { opacity: 0.4; cursor: not-allowed; }
+.seg:has(input:disabled):hover { color: inherit; }
+.fw-ota-unsupported { color: var(--warning); }
 .seg:has(input:checked) {
   background: var(--accent);
   color: var(--on-accent);

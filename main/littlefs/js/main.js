@@ -1764,7 +1764,7 @@ const UPDATE_TYPES = {
   storage: {
     url: '/api/storage/upload',
     file: 'storage.bin',
-    min: 512, max: 256 * 1024,
+    min: 512, max: 1280 * 1024, // storage partition: 224K dual-slot, 1216K on single-slot chips
     btn: 'Update web interface',
     hint: 'Dashboard assets only (LittleFS image). Takes effect on next page load, no reboot.'
   }
@@ -1975,11 +1975,22 @@ function loadFirmwareInfo() {
         otaApiKey = data.api_key; // Store the key globally
         document.getElementById('ota-api-key').textContent = data.api_key;
       }
+      if (data.firmware_ota === false) disableFirmwareOta();
     })
     .catch(err => {
       console.error('Failed to load OTA API key:', err);
       document.getElementById('ota-api-key').textContent = 'Error loading key';
     });
+}
+
+// Single-firmware-slot chips (ESP32-C3/C5/C6, issue #44): only the web interface updates over WiFi.
+function disableFirmwareOta() {
+  document.querySelectorAll('input[name="update-type"]').forEach(radio => {
+    radio.disabled = radio.value !== 'storage';
+    radio.checked = radio.value === 'storage';
+  });
+  document.getElementById('fw-ota-unsupported').hidden = false;
+  updateUploadUI();
 }
 
 function copyOtaKey() {
