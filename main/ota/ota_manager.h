@@ -46,6 +46,12 @@ public:
     bool is_ota_in_progress() const;
     const ota_progress_info_t &get_progress_info() const;
 
+    // False on a single-app-slot partition table (ESP32-C3/C5/C6 today): the only slot
+    // is the running one, so firmware can only be updated over USB (issue #44).
+    bool firmware_update_supported() const;
+    static constexpr const char *FIRMWARE_OTA_UNSUPPORTED_MSG =
+        "This chip has a single firmware slot: update the firmware over USB. The web interface can still be updated here.";
+
     esp_err_t mark_app_valid();
     esp_err_t rollback_if_possible();
 

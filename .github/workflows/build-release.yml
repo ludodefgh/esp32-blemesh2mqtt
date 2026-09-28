@@ -120,6 +120,13 @@ jobs:
             ${STORAGE_OFFSET} storage.bin
           cd ..
 
+          # How an installed bridge gets this release (single-slot chips can't OTA the firmware, #44)
+          if [ "${{ matrix.target }}" = "esp32c3" ] || [ "${{ matrix.target }}" = "esp32c5" ] || [ "${{ matrix.target }}" = "esp32c6" ]; then
+            UPDATE_NOTE="Single firmware slot: re-run METHOD 1 WITHOUT erase_flash (settings and mesh are kept)."
+          else
+            UPDATE_NOTE="Dashboard > Firmware > 'Firmware + Web' > update_bundle.bin (same edition only)."
+          fi
+
           # Create flash instructions
           cat > ${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << EOF
           ==========================================
@@ -240,6 +247,10 @@ jobs:
           6. Companion edition only: add the bridge to your mesh with nRF Mesh
              (it advertises as an unprovisioned device), then bind the AppKey
              to its client models — see documentation/EDITIONS.md
+
+          UPDATING AN EXISTING BRIDGE:
+          ----------------------------
+          ${UPDATE_NOTE}
 
           TROUBLESHOOTING:
           ----------------

@@ -2069,7 +2069,7 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 // Constants for OTA security
 #define OTA_MIN_FIRMWARE_SIZE (32 * 1024)       // 32KB minimum
 #define OTA_MAX_FIRMWARE_SIZE (2 * 1024 * 1024) // 2MB maximum
-#define OTA_MAX_STORAGE_SIZE (256 * 1024)       // 256KB maximum (matches storage_upload_handler)
+#define OTA_MAX_STORAGE_SIZE (256 * 1024)       // bundle only (dual-slot chips: 224K storage)
 // firmware + storage + 16-byte bundle header
 #define OTA_MAX_BUNDLE_SIZE (OTA_MAX_FIRMWARE_SIZE + OTA_MAX_STORAGE_SIZE + 64)
 #define OTA_BUFFER_SIZE 1024
@@ -2248,6 +2248,13 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Refuse before the body is streamed in (issue #44).
+    if (!ota_manager::instance().firmware_update_supported())
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_manager::FIRMWARE_OTA_UNSUPPORTED_MSG);
+        return ESP_FAIL;
+    }
+
     // Validate request
     esp_err_t validation_err = validate_ota_request(req);
     if (validation_err != ESP_OK)
@@ -2400,19 +2407,12 @@ esp_err_t storage_upload_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (content_length > 256 * 1024) // 256KB max for storage
-    {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Storage file too large (maximum 256KB)");
-        return ESP_FAIL;
-    }
-
-    // Begin storage update
+    // Upper bound is the storage partition itself (224K dual-slot, 1216K single-slot),
+    // checked by ota_manager_begin_storage.
     esp_err_t err = ota_manager_begin_storage(content_length);
     if (err != ESP_OK)
     {
-        char error_msg[128];
-        snprintf(error_msg, sizeof(error_msg), "Failed to begin storage update: %s", esp_err_to_name(err));
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_manager::instance().get_last_error());
         return ESP_FAIL;
     }
 
@@ -2582,6 +2582,13 @@ esp_err_t ota_bundle_upload_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Refuse before the body is streamed in (issue #44).
+    if (!ota_manager::instance().firmware_update_supported())
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_manager::FIRMWARE_OTA_UNSUPPORTED_MSG);
+        return ESP_FAIL;
+    }
+
     size_t content_length = req->content_len;
     if (content_length < sizeof(ota_bundle_header_t) + OTA_MIN_FIRMWARE_SIZE ||
         content_length > OTA_MAX_BUNDLE_SIZE)
@@ -2698,13 +2705,14 @@ esp_err_t ota_status_handler(httpd_req_t *req)
 
     char response[384];
     snprintf(response, sizeof(response),
-             "{ \"in_progress\": %s, \"progress_percent\": %d, \"written_size\": %zu, \"total_size\": %zu, \"status_message\": \"%s\", \"api_key\": \"%s\" }",
+             "{ \"in_progress\": %s, \"progress_percent\": %d, \"written_size\": %zu, \"total_size\": %zu, \"status_message\": \"%s\", \"api_key\": \"%s\", \"firmware_ota\": %s }",
              in_progress ? "true" : "false",
              progress->progress_percent,
              progress->written_size,
              progress->total_size,
              progress->status_message ? progress->status_message : "",
-             api_key);
+             api_key,
+             ota_manager::instance().firmware_update_supported() ? "true" : "false");
 
     httpd_resp_send(req, response, -1);
     return ESP_OK;

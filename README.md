@@ -2,15 +2,16 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5-blue.svg)](https://github.com/espressif/esp-idf)
-[![Version](https://img.shields.io/badge/version-0.1.8-green.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
+[![Version](https://img.shields.io/badge/version-0.1.9-green.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
 [![GitHub issues](https://img.shields.io/github/issues/ludodefgh/esp32-blemesh2mqtt.svg)](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues)
 
 | Supported Targets | ESP32 | ESP32-S3 | ESP32-C3 | ESP32-C6 | ESP32-C5 (preview) |
 | ----------------- | ----- | -------- | -------- | -------- | ------------------ |
 
 > **Note**: All supported targets require at least **4MB of flash memory** and **WiFi connectivity**.
-> On ESP32-C3/C5/C6, firmware updates over WiFi don't work yet — update over USB
-> ([#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)).
+> On ESP32-C3/C5/C6, the firmware is updated over USB (single firmware slot, no room for
+> WiFi updates — [#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)); the web
+> interface still updates over WiFi.
 
 An ESP32 bridge between BLE Mesh devices and MQTT, for use with Home Assistant and other home-automation platforms.
 
@@ -67,7 +68,7 @@ BLE Mesh network**:
 1. **Download Pre-built Firmware**
    - Go to [Releases](https://github.com/ludodefgh/esp32-blemesh2mqtt/releases)
    - Download the `.zip` file for your [edition](documentation/EDITIONS.md) and board
-     (e.g., `BleMesh2Mqtt-Standalone-v0.2.0-esp32.zip`)
+     (e.g., `BleMesh2Mqtt-Standalone-v0.1.9-esp32.zip`)
    - Extract the archive
 
 2. **Flash to Device**
