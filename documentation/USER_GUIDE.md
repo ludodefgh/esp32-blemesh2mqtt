@@ -2,140 +2,183 @@
 
 This guide explains how to use the bridge's web interface and how to find it in Home Assistant.
 
+> **Two editions.** The bridge exists as **Standalone** (it creates its own BLE Mesh network
+> and adds your lights) and **Companion** (it joins a network you already manage with a phone
+> app such as nRF Mesh). The dashboard header shows which one you have
+> (**BleMesh2MQTT Standalone** or **BleMesh2MQTT Companion**). Most of this guide applies to
+> both; parts marked *Standalone only* or *Companion only* don't.
+> Unsure which one you need? See **[Standalone or Companion?](EDITIONS.md)**
+
 ---
 
 ## Table of Contents
 
 1. [Bridge Web Interface](#1-bridge-web-interface)
-   - [Bridge Page — Main Dashboard](#11-bridge-page--main-dashboard)
-   - [BLE Mesh Page — Device Management](#12-ble-mesh-page--device-management)
-   - [Firmware Page — Updates](#13-firmware-page--updates)
+   - [Bridge Page](#11-bridge-page)
+   - [Mesh Page](#12-mesh-page)
+   - [Firmware Page](#13-firmware-page)
+   - [System Logs](#14-system-logs)
 2. [Home Assistant Integration](#2-home-assistant-integration)
    - [MQTT Integration View](#21-mqtt-integration-view)
    - [Bridge Device Detail](#22-bridge-device-detail)
+   - [Lights and Covers](#23-lights-and-covers)
 
 ---
 
 ## 1. Bridge Web Interface
 
-Once the bridge is connected to your WiFi network, access its web interface by entering its IP address in a browser (e.g. `http://192.168.2.98`).
+Once the bridge is connected to your WiFi network, open its IP address in a browser
+(e.g. `http://192.168.2.98`).
 
-The interface is divided into 4 sections accessible from the left menu: **Bridge**, **BLE Mesh**, **Firmware**.
+The left menu has three pages: **Bridge**, **Mesh** and **Firmware**. The system logs are
+in a panel at the bottom of every page. The header shows the edition and version, uptime
+and free memory, and a button to switch between dark and light themes.
 
 ---
 
-### 1.1 Bridge Page — Main Dashboard
+### 1.1 Bridge Page
 
-![Bridge Page](Brige-1.png)
-
-This page is the bridge's control center. It is divided into three panels:
-
-#### System Logs
-At the top of the page is a real-time log console. It displays important events (MQTT connections, device discovery, errors, etc.).
-- **Clear**: clears the displayed logs.
-- **Auto-scroll**: keeps the view scrolled to the latest messages (enabled by default).
+![Bridge Page](images/dashboard-bridge.png)
 
 #### Bridge Controls
-This panel shows the microcontroller's memory status and provides several actions:
 
 | Indicator / Button | Description |
 |---|---|
-| **FREE MEMORY** | Available memory on the ESP32 (here 46 KB). Monitor this if the bridge becomes unstable. |
-| **TOTAL MEMORY** | Total allocated memory (here 224 KB). |
-| **Auto-provisioning** | When enabled, the bridge automatically provisions any newly detected BLE Mesh bulb without manual intervention. Disabled by default. |
-| **Send MQTT Discovery** | Resends MQTT discovery messages to Home Assistant (useful if HA cannot see the devices). |
+| **Free Memory** | Available memory on the ESP32. Keep an eye on it if the bridge becomes unstable. |
+| **Total Memory** | Total memory of the chip. |
+| **Auto-provisioning** *(Standalone only)* | When on, the bridge adds every new BLE Mesh device it detects without you clicking **Provision**. Off by default. |
+| **Send MQTT Discovery** | Re-announces the bridge and all devices to Home Assistant (useful if HA doesn't show them). |
 | **Send MQTT Status** | Publishes the current state of all devices to MQTT. |
-| **Restart Bridge** | Restarts the bridge (equivalent to a reboot). |
+| **Restart Bridge** | Reboots the bridge. |
 
 #### WiFi Status
-Displays the bridge's network connection information:
-- **SSID**: name of the WiFi network the bridge is connected to.
-- **IP ADDRESS**: the bridge's IP address on your local network.
-- **SUBNET MASK / GATEWAY**: standard network parameters.
-- **MAC ADDRESS**: unique identifier of the bridge (also used as its identifier in HA).
-- **RSSI**: received signal strength from the WiFi access point (in dBm — the closer to 0, the stronger the signal). Useful for diagnosing connectivity issues.
-- **TX POWER**: current WiFi transmit power (in dBm). Can be adjusted via the interface to reduce interference or improve range.
-- **Reset WiFi**: clears saved WiFi credentials and restarts in captive portal mode to reconfigure the network.
+- **SSID**, **IP address**, **subnet mask / gateway**: the network the bridge is connected to.
+- **MAC address**: the bridge's unique identifier, also used for its MQTT topics and in HA.
+- **RSSI**: WiFi signal strength in dBm (closer to 0 is stronger).
+- **TX power**: WiFi transmit power, adjustable with the slider and **Apply**.
+- **Reset WiFi**: forgets the WiFi credentials and restarts into the setup access point
+  (`BleMesh2MQTT-Setup-…`) to configure it again.
 
 #### MQTT Configuration
-Used to configure the connection to the MQTT broker:
 
-| Field | Description |
+| Field / Button | Description |
 |---|---|
-| **Broker Host** | IP address or hostname of the MQTT broker (e.g. your Home Assistant server running Mosquitto). |
-| **Port** | MQTT port, typically `1883`. |
-| **Username / Password** | Credentials for connecting to the broker. |
-| **Save Configuration** | Saves the settings and reconnects the bridge to the broker. |
-| **Test Connection** | Tests the connection to the broker without saving. |
-| **Clear** | Clears the form fields. |
+| **Broker Host** | IP address or hostname of the MQTT broker (e.g. the Mosquitto add-on of Home Assistant). |
+| **Port** | Usually `1883`. |
+| **Username / Password** | Broker credentials. |
+| **Save Configuration** | Saves and reconnects to the broker. |
+| **Test Connection** | Tries the settings without saving them. |
+| **Clear** | Clears the saved MQTT configuration. |
 
-> The **STATUS: connected** badge in the top-right corner of this panel indicates the bridge is successfully connected to the MQTT broker.
+The status badge in the panel's corner shows whether the bridge is connected to the broker.
+
+#### Version Information
+Firmware version, git version, ESP-IDF version and build date of what's running.
 
 ---
 
-### 1.2 BLE Mesh Page — Device Management
+### 1.2 Mesh Page
 
-![BLE Mesh Page](Bridge-2.png)
+![Mesh Page (Standalone)](images/dashboard-mesh-standalone.png)
 
-This page is used to manage BLE Mesh bulbs. It is divided into two columns:
+![Mesh Page (Companion)](images/dashboard-mesh-companion.png)
 
-#### Provisioned Nodes (left column)
-Lists all bulbs already provisioned (joined) into the bridge's BLE Mesh network. The badge in the top-right shows the total number of nodes (here: **3 nodes**).
+#### Group Address Subscriptions *(Companion only)*
+The group addresses your lights are subscribed to in your mesh app (up to 3, e.g.
+`0xC000`). That's where the bridge looks for lights. Add one with **Add**, remove one with
+its ×. Changes apply immediately, no restart needed.
 
-For each provisioned bulb, you can see:
-- **Name** of the bulb (e.g. `LampeCouloir`) — assigned at provisioning time.
-- **UUID**: unique BLE identifier of the bulb.
-- **ADDRESS**: BLE Mesh address within the network (e.g. `011E`).
-- **MANUFACTURER**: bulb manufacturer (e.g. `Sengled Co., Ltd.`).
-- **Brightness slider**: directly controls the bulb's brightness from the interface.
-- **MQTT Status**: publishes the current state of this bulb to MQTT.
-- **MQTT Discovery**: resends the discovery message for this bulb to Home Assistant.
-- **Unprovision**: removes the bulb from the BLE Mesh network (it will reappear in "Unprovisioned Devices").
+#### Mesh Network
+- **Address** *(Companion only)*: the bridge's own address in your network, given by your
+  mesh app when it added the bridge.
+- **NetKey / AppKey**: the network's keys (click one to copy it). *Standalone:* generated by
+  the bridge. *Companion:* received from your mesh app.
+- **Leave mesh network** *(Companion only)*: removes the bridge from the network, forgets
+  all its lights (and their Home Assistant entities), and makes the bridge available to be
+  added again. Removing the bridge from your phone app ("Reset node" in nRF Mesh) is
+  cleaner, because the app then knows it's gone.
 
-The **Online** badge indicates the bulb is responding to BLE Mesh commands.
+#### Mesh
+The devices, as cards. The counters in the corner show how many are provisioned and how
+many are waiting *(Standalone only)*.
 
-#### Unprovisioned Devices (right column)
-Lists BLE Mesh bulbs detected within range but not yet joined to the network.
+**Provisioned nodes** *(Standalone only)*: the lights the bridge added to its network.
 
-- **UUID**: identifier of the detected bulb.
-- **RSSI**: radio signal strength (in dBm — the closer to 0, the stronger the signal).
-- **Provision**: click this button to add the bulb to the bridge's BLE Mesh network.
-- **Refresh**: triggers a new BLE scan to detect nearby devices.
+**Unprovisioned devices** *(Standalone only)*: BLE Mesh devices in range that aren't in a
+network yet, with their UUID and signal strength (RSSI). **Provision** adds one to the
+bridge's network; **Refresh** updates the list.
 
-> **Tip:** if a bulb does not appear in "Unprovisioned Devices", make sure it is powered on and within range of the bridge, then click **Refresh**.
+> **Tip:** if a light doesn't show up, make sure it's powered on, factory-reset (pairing
+> mode) and within a few metres of the bridge, then click **Refresh**.
+
+**External mesh nodes** *(Companion only)*: the lights the bridge found in its group
+addresses. **Discover** searches again (the bridge also does it by itself after starting
+and every 10 minutes). **Group ON / Group OFF** switch every light of the first group.
+
+#### Node cards
+Every light has a card with two tabs:
+
+- **Controls**: only what the light supports — **Power** switch, 💡 brightness,
+  **H**ue and **S**aturation for colour lights, 🌡 colour temperature for tunable-white
+  lights, 🎚️ level for devices that only support a level (shutters, blinds…).
+- **Advanced**: address, UUID, manufacturer (provisioned nodes) or detected features and
+  "last seen" (external nodes), plus:
+  - **MQTT Status**: publishes this light's state to Home Assistant.
+  - **MQTT Discovery**: announces this light to Home Assistant again.
+  - **Unprovision** *(Standalone)*: removes the light from the network; it shows up again
+    under unprovisioned devices.
+  - **Forget** *(Companion)*: removes the light from the bridge and Home Assistant only.
+    It stays in your network, since only your phone app can remove it, and the next
+    discovery finds it again.
+
+The badge shows **Online** or **Offline**. On an external node, Offline means it hasn't
+answered for about 25 minutes. Provisioned nodes can be renamed by clicking their name.
 
 ---
 
-### 1.3 Firmware Page — Updates
+### 1.3 Firmware Page
 
-![Firmware Page](brige-3.png)
+![Firmware Page](images/dashboard-firmware.png)
 
-This page allows you to update the bridge without a USB cable (OTA — Over The Air).
+Updates the bridge over WiFi (OTA). **Running** shows the installed version.
 
-The currently installed version is shown in the top-right corner (**CURRENT VERSION: v0.1.0**).
+| Update type | File to upload | What it updates |
+|---|---|---|
+| **Firmware + Web** *(recommended)* | `update_bundle.bin` | Both, with a single restart. |
+| **Firmware** | `BleMesh2Mqtt.bin` | The bridge's program only. It restarts when done. |
+| **Web interface** | `storage.bin` | The dashboard files only. |
 
-#### Update Types
+1. Download the release `.zip` for **your edition and chip** from the releases page and
+   extract it.
+2. Choose the update type, then drop the file on the upload area (or **Choose file**).
+3. Click the **Update** button and wait for it to finish.
 
-| Type | Description |
-|---|---|
-| **Firmware Update** | Updates the ESP32 application code. The bridge restarts automatically when done. |
-| **Web Interface Update** | Updates only the web interface files. No restart required. |
+Good to know:
+- The **OTA API key** shown on this page is generated by the bridge and authenticates
+  every upload. The dashboard uses it for you; you only need it for scripted uploads.
+- A firmware update only accepts **the same edition**: a Standalone bridge refuses a
+  Companion firmware and vice versa. Switching editions requires a USB flash
+  (see [EDITIONS.md](EDITIONS.md)).
+- On **ESP32-C3, C5 and C6**, firmware updates over WiFi don't work yet
+  ([#44](https://github.com/ludodefgh/esp32-blemesh2mqtt/issues/44)): update those over USB.
+  The **Web interface** update works.
 
-#### Update Procedure
+> **Warning:** don't unplug the bridge during an update.
 
-1. Download the appropriate `.bin` file from the project's releases page.
-2. Select the correct update type.
-3. Drag and drop the `.bin` file into the drop zone, or click **Choose File** to select it.
-4. Click **Upload Firmware**.
-5. Wait for the process to complete. For a firmware update, the bridge will restart automatically.
+---
 
-> **Warning:** do not cut power to the bridge during a firmware update. This could brick the device.
+### 1.4 System Logs
+
+The **System Logs** bar at the bottom of every page opens a live log console (drag its top
+edge to resize it). **Auto-scroll** follows new lines; **Clear** empties the view. It only
+shows what happens while the page is open.
 
 ---
 
 ## 2. Home Assistant Integration
 
-The bridge registers itself automatically in Home Assistant via the **MQTT Discovery** protocol. No manual Home Assistant configuration is needed, as long as the MQTT integration is already set up with the same broker.
+The bridge and its lights appear in Home Assistant by themselves, via **MQTT Discovery**,
+as long as Home Assistant's MQTT integration uses the same broker.
 
 ---
 
@@ -145,9 +188,10 @@ The bridge registers itself automatically in Home Assistant via the **MQTT Disco
 
 In Home Assistant, go to **Settings → Devices & Services → MQTT**.
 
-One or more **BleMesh2MQTT Bridge** devices will appear, identified by their MAC address (e.g. `0123456789123`). Each physical bridge corresponds to a separate device.
+Each bridge appears as a **BleMesh2MQTT Bridge (MAC address)** device. Its model shows the
+edition: **Bridge (Standalone edition)** or **Bridge (Companion edition)**.
 
-> If the bridge does not appear, go to the bridge's web interface and click **Send MQTT Discovery** (Bridge page).
+> If the bridge doesn't appear, click **Send MQTT Discovery** on the dashboard's Bridge page.
 
 ---
 
@@ -155,27 +199,30 @@ One or more **BleMesh2MQTT Bridge** devices will appear, identified by their MAC
 
 ![Bridge Detail in HA](HA-2.png)
 
-Clicking on a bridge in the list opens its detail page.
-
-#### Device Information
-- **Firmware**: currently installed firmware version.
-- **MQTT / MQTT Info**: links to the associated MQTT entities.
-
-#### Controls
-- **Enable node discovery**: enables or disables discovery of new BLE Mesh nodes from Home Assistant.
-
-#### Configuration
-- **Auto-provisioning**: enables automatic provisioning of newly detected bulbs.
-- **Restart**: remotely restarts the bridge from Home Assistant.
+#### Controls and configuration
+- **Enable node discovery** *(Standalone only)*: turns the detection of new BLE Mesh devices
+  on or off.
+- **Auto-provisioning** *(Standalone only)*: same as the dashboard switch.
+- **Restart**: reboots the bridge.
 
 #### Diagnostic
-Useful information for troubleshooting:
 
 | Entity | Description |
 |---|---|
-| **Bridge IP Address** | The bridge's IP address on your network. |
-| **Bridge Memory** | Free memory available on the ESP32. |
-| **Bridge Uptime** | Time elapsed since the bridge last started. |
+| **Bridge IP Address** | The bridge's IP address. |
+| **Bridge Memory** | Free memory on the ESP32. |
+| **Bridge Uptime** | Time since the bridge last started. |
+| **Bridge WiFi RSSI** | WiFi signal strength. |
 
-#### Connected Devices
-Lists the BLE Mesh bulbs provisioned on this bridge (e.g. `Lampe du salon 3`, `Lampe du salon 4`). Click on a bulb to access its controls (on/off, brightness, etc.).
+#### Connected devices
+The lights handled by the bridge, each as its own device: named as you set them
+*(Standalone)*, or **External Node XXXX** after their mesh address *(Companion)*.
+
+---
+
+### 2.3 Lights and Covers
+
+- A light shows the controls it supports: on/off, brightness, colour (hue/saturation)
+  and/or colour temperature.
+- A device that only supports a level (Generic Level, e.g. a shutter motor) appears as a
+  **cover** (blind) with open, close and a position from 0 to 100 %.

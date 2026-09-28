@@ -1,5 +1,7 @@
 # ESP-IDF Build Artifacts
 build/
+build_release/
+build_*/
 sdkconfig
 sdkconfig.old
 dependencies.lock.old
@@ -165,3 +167,6 @@ yarn.lock
 # Partition tables (keep them)
 !partitions/
 !partitions/*.csv
+
+# Test-rig firmware: component lock holds machine-specific absolute IDF paths
+test/firmware/*/dependencies.lock

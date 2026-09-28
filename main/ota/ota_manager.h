@@ -70,6 +70,10 @@ private:
     bool ota_in_progress_ = false;
     bool storage_update_ = false;
     char last_error_[256] = {};
+    void scan_for_edition(const uint8_t *data, size_t size);
+    char edition_window_[96] = {}; // tail of the previous chunk, so a marker split across chunks is still found
+    size_t edition_window_len_ = 0;
+    char image_edition_[16] = {};  // edition marker found in the image being written, "" if none yet
 };
 
 // C-style API for HTTP handlers

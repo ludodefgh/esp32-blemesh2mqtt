@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 600" width="980" height="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>Standalone vs Companion edition</title>
+  <defs>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#059669"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0284c7"/>
+    </marker>
+    <g id="bulb">
+      <circle cx="0" cy="0" r="24" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+      <rect x="-10" y="22" width="20" height="12" rx="3" fill="#94a3b8"/>
+      <path d="M-8,4 L0,-8 L8,4" fill="none" stroke="#d97706" stroke-width="2"/>
+    </g>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="600" rx="18" fill="#ffffff"/>
+
+  <!-- ============ STANDALONE ============ -->
+  <g transform="translate(20,20)">
+    <rect x="0" y="0" width="460" height="560" rx="16" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="24" y="42" font-size="24" font-weight="700" fill="#0f172a">Standalone</text>
+    <text x="24" y="68" font-size="14" fill="#475569">The bridge creates the network and adds your lights.</text>
+    <rect x="20" y="176" width="420" height="364" rx="18" fill="#ffffff" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="36" y="526" font-size="13" fill="#64748b">BLE Mesh network, created by the bridge</text>
+    <text x="24" y="88" font-size="14" fill="#475569">No other app needed.</text>
+
+    <rect x="150" y="108" width="160" height="46" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+    <text x="230" y="137" font-size="15" font-weight="600" fill="#0c4a6e" text-anchor="middle">Home Assistant</text>
+    <line x1="230" y1="160" x2="230" y2="222" stroke="#0284c7" stroke-width="2.5" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text x="240" y="196" font-size="13" fill="#0284c7">MQTT</text>
+
+
+    <rect x="140" y="228" width="180" height="58" rx="10" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+    <text x="230" y="253" font-size="15" font-weight="700" fill="#064e3b" text-anchor="middle">BleMesh2MQTT</text>
+    <text x="230" y="273" font-size="13" fill="#065f46" text-anchor="middle">bridge (ESP32)</text>
+    <rect x="326" y="244" width="112" height="26" rx="13" fill="#f59e0b"/>
+    <text x="382" y="262" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">network owner</text>
+
+    <line x1="210" y1="290" x2="116" y2="400" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <line x1="230" y1="290" x2="230" y2="396" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <line x1="250" y1="290" x2="344" y2="400" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <text x="36" y="326" font-size="13" font-weight="600" fill="#047857">1. adds</text>
+    <text x="36" y="342" font-size="13" font-weight="600" fill="#047857">(provisions)</text>
+    <text x="36" y="362" font-size="13" font-weight="600" fill="#047857">2. controls</text>
+
+    <use href="#bulb" x="110" y="430"/>
+    <use href="#bulb" x="230" y="430"/>
+    <use href="#bulb" x="350" y="430"/>
+    <text x="110" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+    <text x="230" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+    <text x="350" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+  </g>
+
+  <!-- ============ COMPANION ============ -->
+  <g transform="translate(500,20)">
+    <rect x="0" y="0" width="460" height="560" rx="16" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="24" y="42" font-size="24" font-weight="700" fill="#0f172a">Companion</text>
+    <text x="24" y="68" font-size="14" fill="#475569">Your phone app (e.g. nRF Mesh) already runs the network.</text>
+    <rect x="20" y="176" width="420" height="364" rx="18" fill="#ffffff" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="36" y="526" font-size="13" fill="#64748b">BLE Mesh network, created by the phone app</text>
+    <text x="24" y="88" font-size="14" fill="#475569">The bridge joins it, like one more device.</text>
+
+    <rect x="250" y="108" width="170" height="46" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"/>
+    <text x="335" y="137" font-size="15" font-weight="600" fill="#0c4a6e" text-anchor="middle">Home Assistant</text>
+    <line x1="335" y1="160" x2="335" y2="222" stroke="#0284c7" stroke-width="2.5" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+    <text x="345" y="196" font-size="13" fill="#0284c7">MQTT</text>
+
+
+    <!-- phone -->
+    <rect x="44" y="196" width="118" height="92" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2"/>
+    <rect x="92" y="204" width="22" height="4" rx="2" fill="#d97706"/>
+    <text x="103" y="236" font-size="14" font-weight="700" fill="#7c2d12" text-anchor="middle">nRF Mesh</text>
+    <text x="103" y="254" font-size="12" fill="#9a3412" text-anchor="middle">app on phone</text>
+    <rect x="47" y="264" width="112" height="18" rx="9" fill="#f59e0b"/>
+    <text x="103" y="277" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">network owner</text>
+
+    <!-- bridge -->
+    <rect x="250" y="228" width="170" height="58" rx="10" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+    <text x="335" y="253" font-size="15" font-weight="700" fill="#064e3b" text-anchor="middle">BleMesh2MQTT</text>
+    <text x="335" y="273" font-size="13" fill="#065f46" text-anchor="middle">bridge (ESP32)</text>
+
+    <!-- phone adds bridge + lights -->
+    <line x1="166" y1="248" x2="244" y2="248" stroke="#d97706" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow-amber)"/>
+    <line x1="92" y1="292" x2="92" y2="398" stroke="#d97706" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow-amber)"/>
+    <text x="36" y="330" font-size="13" font-weight="600" fill="#b45309">1. adds</text>
+    <text x="36" y="346" font-size="13" font-weight="600" fill="#b45309">everything</text>
+
+    <!-- bridge controls lights -->
+    <line x1="300" y1="290" x2="130" y2="410" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <line x1="320" y1="290" x2="236" y2="396" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <line x1="345" y1="290" x2="350" y2="396" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <text x="362" y="348" font-size="13" font-weight="600" fill="#047857">2. controls</text>
+
+    <use href="#bulb" x="92" y="430"/>
+    <use href="#bulb" x="230" y="430"/>
+    <use href="#bulb" x="350" y="430"/>
+    <text x="92" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+    <text x="230" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+    <text x="350" y="488" font-size="13" fill="#334155" text-anchor="middle">light</text>
+  </g>
+</svg>

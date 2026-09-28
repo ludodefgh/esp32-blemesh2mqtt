@@ -8,11 +8,8 @@ This document describes how to create a new release with pre-compiled binaries.
 
 1. **Ensure code is ready**
    ```bash
-   # Test build locally for all targets
-   for target in esp32 esp32c3 esp32c6 esp32h2; do
-     idf.py set-target $target
-     idf.py build
-   done
+   # Builds and packages both editions (Standalone + Companion) for every target
+   ./build-all-targets.sh
    ```
 
 2. **Create and push a tag**
@@ -29,7 +26,8 @@ This document describes how to create a new release with pre-compiled binaries.
    - Click "Publish release"
 
 4. **Automatic Build**
-   - GitHub Actions will automatically build binaries for all supported targets
+   - GitHub Actions will automatically build binaries for both editions (Standalone and
+     Companion, see [EDITIONS.md](EDITIONS.md)) on all supported targets
    - Binaries will be attached to the release (~5-10 minutes)
 
 ### Option 2: Manual Workflow Trigger
@@ -47,90 +45,15 @@ If you want to build binaries without creating a release:
 ### Build Binaries Locally
 
 ```bash
-#!/bin/bash
-# build-release.sh - Build binaries for all targets
-
-VERSION="v1.0.0"
-TARGETS="esp32 esp32c3 esp32c6 esp32h2"
-
-# Setup ESP-IDF environment
-source esp-idf/export.sh
-
-mkdir -p releases
-
-for target in $TARGETS; do
-  echo "Building for $target..."
-
-  # Set target and build
-  idf.py set-target $target
-  idf.py build
-
-  # Create release package
-  PACKAGE_NAME="BleMesh2Mqtt-${VERSION}-${target}"
-  mkdir -p releases/${PACKAGE_NAME}
-
-  # Copy binaries
-  cp build/BleMesh2Mqtt.bin releases/${PACKAGE_NAME}/
-  cp build/bootloader/bootloader.bin releases/${PACKAGE_NAME}/
-  cp build/partition_table/partition-table.bin releases/${PACKAGE_NAME}/
-  cp build/ota_data_initial.bin releases/${PACKAGE_NAME}/
-  cp build/storage.bin releases/${PACKAGE_NAME}/
-
-  # Bootloader offset by chip family:
-  #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
-  #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
-  #   ESP32-C5 (RISC-V, special case)    → 0x2000
-  if [ "$target" = "esp32c5" ]; then
-    BOOTLOADER_OFFSET="0x2000"
-  elif [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ] || [ "$target" = "esp32h2" ]; then
-    BOOTLOADER_OFFSET="0x0"
-  else
-    BOOTLOADER_OFFSET="0x1000"
-  fi
-
-  # Create flash instructions
-  cat > releases/${PACKAGE_NAME}/FLASH_INSTRUCTIONS.txt << EOF
-==========================================
-BleMesh2MQTT Flash Instructions
-==========================================
-
-Target: ${target}
-Version: ${VERSION}
-
-QUICK START - Using esptool.py:
--------------------------------
-
-esptool.py -p /dev/ttyUSB0 -b 460800 --chip ${target} write_flash \\
-  ${BOOTLOADER_OFFSET} bootloader.bin \\
-  0x8000 partition-table.bin \\
-  0xd000 ota_data_initial.bin \\
-  0x10000 BleMesh2Mqtt.bin \\
-  0x3B0000 storage.bin
-
-Replace /dev/ttyUSB0 with your port (COM3 on Windows, /dev/cu.* on Mac)
-
-For detailed instructions and troubleshooting:
-See README.md or https://github.com/ludodefgh/esp32-blemesh2mqtt
-EOF
-
-  # Create archive
-  cd releases
-  zip -r ${PACKAGE_NAME}.zip ${PACKAGE_NAME}/
-  cd ..
-
-  echo "✓ Created releases/${PACKAGE_NAME}.zip"
-done
-
-echo ""
-echo "All binaries built successfully!"
-echo "Upload files from releases/ folder to GitHub release"
+./build-all-targets.sh                        # both editions, default targets
+./build-all-targets.sh "esp32 esp32c3" companion   # a subset
 ```
 
-Make the script executable and run:
-```bash
-chmod +x build-release.sh
-./build-release.sh
-```
+Each edition/target pair builds in its own `build_release/<edition>-<target>/` directory
+with its own `sdkconfig`, from `sdkconfig.defaults` plus the edition overlay
+(`sdkconfig.defaults.standalone` / `.companion`), so local `sdkconfig` edits (debug tools,
+a switched role) never leak into release packages. Packages land in `releases/` as
+`BleMesh2Mqtt-<Edition>-v<version>-<target>.zip`.
 
 ### Upload to GitHub Release
 
@@ -153,27 +76,22 @@ chmod +x build-release.sh
 
 ### 🎯 Supported Targets
 
-- ESP32 (4MB flash minimum)
-- ESP32-C3 (4MB flash minimum)
-- ESP32-C6 (4MB flash minimum)
-- ESP32-H2 (4MB flash minimum)
+- ESP32, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-C5 (preview) — 4MB flash minimum
+- ESP32-C3/C5/C6: firmware updates over WiFi don't work yet, update over USB (#44)
 
 ### 📦 Installation
 
+**Two editions**: **Standalone** (the bridge creates its own mesh network) or
+**Companion** (it joins a network you manage with nRF Mesh). Not sure? See
+[Which edition do I need?](https://github.com/ludodefgh/esp32-blemesh2mqtt/blob/main/documentation/EDITIONS.md)
+
 **Quick Flash (No ESP-IDF Required)**
 
-1. Download the appropriate `.zip` file for your board
+1. Download the `.zip` for your edition and board (`BleMesh2Mqtt-<Edition>-<version>-<chip>.zip`)
 2. Extract the archive
 3. Follow `FLASH_INSTRUCTIONS.txt` inside
 
-**From Source**
-
-```bash
-git clone --recursive https://github.com/ludodefgh/esp32-blemesh2mqtt.git
-cd esp32-blemesh2mqtt
-./setup.sh
-idf.py build flash monitor
-```
+**From Source**: see the README's Dev Container instructions.
 
 ### 📝 Full Changelog
 
@@ -208,12 +126,14 @@ Follow Semantic Versioning (semver):
 
 Before creating a release:
 
-- [ ] All targets build successfully (esp32, esp32c3, esp32c6, esp32h2)
+- [ ] Both editions build on all targets (`./build-all-targets.sh`)
 - [ ] Test flash on at least one device per target family
 - [ ] WiFi captive portal works
 - [ ] MQTT connection works
 - [ ] Home Assistant auto-discovery works
-- [ ] BLE Mesh provisioning works
+- [ ] BLE Mesh provisioning works (Standalone)
+- [ ] Joining an existing mesh + External Mesh Nodes work (Companion)
+- [ ] OTA refuses the other edition's firmware
 - [ ] OTA update works (both firmware and storage)
 - [ ] Web interface loads and is functional
 - [ ] Documentation is up to date

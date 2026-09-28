@@ -52,10 +52,12 @@ fi
 echo -e "${GREEN}✓ ESP-IDF detected: $IDF_PATH${NC}"
 echo ""
 
-# Targets to build
+# Targets and editions to build, e.g. ./build-all-targets.sh "esp32 esp32c3" "companion"
 TARGETS="${1:-esp32 esp32s3 esp32c3 esp32c6}"
+EDITIONS="${2:-standalone companion}"
 
 echo -e "${BLUE}Targets to build: ${TARGETS}${NC}"
+echo -e "${BLUE}Editions to build: ${EDITIONS}${NC}"
 echo ""
 
 # Create releases directory
@@ -65,63 +67,62 @@ mkdir -p releases
 BUILT=0
 FAILED=0
 
+for edition in $EDITIONS; do
+if [ ! -f "sdkconfig.defaults.${edition}" ]; then
+    echo -e "${RED}✗ Unknown edition '${edition}' (no sdkconfig.defaults.${edition})${NC}"
+    FAILED=$((FAILED + 1))
+    continue
+fi
+# Display name: standalone -> Standalone
+EDITION_NAME="$(tr '[:lower:]' '[:upper:]' <<< "${edition:0:1}")${edition:1}"
+
 for target in $TARGETS; do
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Building for target: ${target}${NC}"
+    echo -e "${BLUE}Building ${EDITION_NAME} edition for target: ${target}${NC}"
     echo -e "${BLUE}========================================${NC}"
 
-    # Set target
-    echo -e "${YELLOW}Setting target to ${target}...${NC}"
-    if ! idf.py set-target "$target"; then
-        echo -e "${RED}✗ Failed to set target ${target}${NC}"
-        FAILED=$((FAILED + 1))
-        continue
-    fi
-
-    # Build
+    # Own build dir + sdkconfig per edition/target, so the local sdkconfig(.defaults) edits never leak in
+    BUILD_DIR="build_release/${edition}-${target}"
+    rm -rf "$BUILD_DIR"
     echo -e "${YELLOW}Building firmware...${NC}"
-    if ! idf.py build; then
-        echo -e "${RED}✗ Build failed for ${target}${NC}"
+    if ! idf.py -B "$BUILD_DIR" -D IDF_TARGET="$target" -D SDKCONFIG="$BUILD_DIR/sdkconfig" \
+            -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${edition}" build; then
+        echo -e "${RED}✗ Build failed for ${EDITION_NAME} / ${target}${NC}"
         FAILED=$((FAILED + 1))
         continue
     fi
 
-    echo -e "${GREEN}✓ Build successful for ${target}${NC}"
+    echo -e "${GREEN}✓ Build successful for ${EDITION_NAME} / ${target}${NC}"
 
     # Create release package
-    PACKAGE_NAME="BleMesh2Mqtt-v${VERSION}-${target}"
+    PACKAGE_NAME="BleMesh2Mqtt-${EDITION_NAME}-v${VERSION}-${target}"
     PACKAGE_DIR="releases/${PACKAGE_NAME}"
 
     echo -e "${YELLOW}Creating release package...${NC}"
+    rm -rf "$PACKAGE_DIR"
     mkdir -p "$PACKAGE_DIR"
 
     # Copy binaries
-    cp build/BleMesh2Mqtt.bin "$PACKAGE_DIR/" 2>/dev/null || \
-       cp build/*.bin "$PACKAGE_DIR/" 2>/dev/null || true
-    cp build/bootloader/bootloader.bin "$PACKAGE_DIR/"
-    cp build/partition_table/partition-table.bin "$PACKAGE_DIR/"
-    cp build/ota_data_initial.bin "$PACKAGE_DIR/"
-    cp build/storage.bin "$PACKAGE_DIR/"
+    cp "$BUILD_DIR/BleMesh2Mqtt.bin" "$PACKAGE_DIR/"
+    cp "$BUILD_DIR/bootloader/bootloader.bin" "$PACKAGE_DIR/"
+    cp "$BUILD_DIR/partition_table/partition-table.bin" "$PACKAGE_DIR/"
+    cp "$BUILD_DIR/ota_data_initial.bin" "$PACKAGE_DIR/"
+    cp "$BUILD_DIR/storage.bin" "$PACKAGE_DIR/"
 
     # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
-    python3 tools/make_update_bundle.py build/BleMesh2Mqtt.bin build/storage.bin "$PACKAGE_DIR/update_bundle.bin" || true
+    python3 tools/make_update_bundle.py "$BUILD_DIR/BleMesh2Mqtt.bin" "$BUILD_DIR/storage.bin" "$PACKAGE_DIR/update_bundle.bin" || true
 
-    # Get partition addresses
-    # Bootloader offset by chip family:
-    #   Xtensa (esp32, esp32s2, esp32s3)  → 0x1000
-    #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
-    #   ESP32-C5 (RISC-V, special case)    → 0x2000
-    if [ "$target" = "esp32c5" ]; then
-        BOOTLOADER_OFFSET="0x2000"
-    elif [ "$target" = "esp32c3" ] || [ "$target" = "esp32c6" ] || [ "$target" = "esp32h2" ]; then
-        BOOTLOADER_OFFSET="0x0"
-    else
-        BOOTLOADER_OFFSET="0x1000"
-    fi
-    PARTITION_OFFSET="0x8000"
-    OTA_DATA_OFFSET="0xd000"
-    APP_OFFSET="0x10000"
-    STORAGE_OFFSET="0x3B0000"
+    # Flash offsets come from the build itself: they differ per chip (bootloader) and per
+    # partition table (storage: 0x3B0000 dual-ota on esp32/esp32s3, 0x2C0000 single-ota on C3/C5/C6)
+    flash_offset() {
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(o for o, f in d["flash_files"].items() if f == sys.argv[2]))' \
+            "$BUILD_DIR/flasher_args.json" "$1"
+    }
+    BOOTLOADER_OFFSET=$(flash_offset bootloader/bootloader.bin)
+    PARTITION_OFFSET=$(flash_offset partition_table/partition-table.bin)
+    OTA_DATA_OFFSET=$(flash_offset ota_data_initial.bin)
+    APP_OFFSET=$(flash_offset BleMesh2Mqtt.bin)
+    STORAGE_OFFSET=$(flash_offset storage.bin)
 
     # When flashing via the native USB-Serial/JTAG port (not an external UART
     # adapter), ESP32-C3 and ESP32-C6 need --after watchdog-reset instead of
@@ -142,6 +143,7 @@ for target in $TARGETS; do
 BleMesh2MQTT Flash Instructions
 ==========================================
 
+Edition: ${EDITION_NAME} (see documentation/EDITIONS.md)
 Target: ${target}
 Version: v${VERSION}
 Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -185,8 +187,8 @@ METHOD 3: Using idf.py (if ESP-IDF installed)
 ----------------------------------------------
 
 cd /path/to/esp32-blemesh2mqtt
-idf.py set-target ${target}
-idf.py -p /dev/ttyUSB0 flash
+idf.py -B build_${edition} -D IDF_TARGET=${target} -D SDKCONFIG=build_${edition}/sdkconfig \\
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${edition}" -p /dev/ttyUSB0 flash
 
 AFTER FLASHING:
 ---------------
@@ -194,8 +196,11 @@ AFTER FLASHING:
 1. Device will create WiFi AP: "BleMesh2MQTT-Setup-XX:XX:XX"
 2. Connect to this AP (no password)
 3. Navigate to: http://192.168.4.1
-4. Configure WiFi and MQTT settings
+4. Enter your WiFi settings
 5. Device will reboot and connect to your network
+   Then open its dashboard (its IP address) and set your MQTT broker on the Bridge page
+$([ "${edition}" = "companion" ] && echo "6. Companion edition: add the bridge to your mesh with nRF Mesh, then bind the
+   AppKey to its client models (see documentation/EDITIONS.md)")
 
 TROUBLESHOOTING:
 ----------------
@@ -261,13 +266,14 @@ EOF
     BUILT=$((BUILT + 1))
     echo ""
 done
+done
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Build Summary${NC}"
 echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}Successfully built: ${BUILT} target(s)${NC}"
+echo -e "${GREEN}Successfully built: ${BUILT} package(s)${NC}"
 if [ $FAILED -gt 0 ]; then
-    echo -e "${RED}Failed builds: ${FAILED} target(s)${NC}"
+    echo -e "${RED}Failed builds: ${FAILED}${NC}"
 fi
 echo ""
 

@@ -67,7 +67,10 @@ CONFIG_BLE_MESH_MEM_ALLOC_MODE_INTERNAL=y
 CONFIG_BLE_MESH_DEINIT=y
 
 #
-# BLE Mesh Mode (Provisioner only, NOT node)
+# BLE Mesh Mode — Provisioner SKU ("Standalone" edition) by default.
+# Both roles can't be compiled in together (see CLAUDE.md "Two SKUs"). The Node SKU
+# ("Companion" edition) builds with the sdkconfig.defaults.companion overlay; releases
+# build both editions that way (build-all-targets.sh, documentation/EDITIONS.md).
 #
 # CONFIG_BLE_MESH_NODE is not set
 
@@ -98,7 +101,12 @@ CONFIG_BLE_MESH_CFG_CLI=y
 #
 CONFIG_BLE_MESH_SETTINGS=y
 CONFIG_BLE_MESH_STORE_TIMEOUT=0
-CONFIG_BLE_MESH_SEQ_STORE_RATE=0
+# A margin > 0 makes the stack round the restored sequence number up on boot,
+# guaranteeing it never reuses one already sent — protects against an abrupt
+# reset (flashing, crash, power loss) interrupting the deferred seq-number
+# write before it lands, which otherwise causes receivers to reject the
+# bridge's next messages as replays until the counter catches back up.
+CONFIG_BLE_MESH_SEQ_STORE_RATE=8
 CONFIG_BLE_MESH_RPL_STORE_TIMEOUT=0
 
 #

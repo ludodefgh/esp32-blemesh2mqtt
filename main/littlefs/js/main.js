@@ -405,11 +405,36 @@ function rangeMap(v, lo, hi, olo, ohi) {
   return hi > lo ? Math.round((v - lo) * (ohi - olo) / (hi - lo) + olo) : olo;
 }
 
+// Light controls shared by provisioned-node cards (kind 'node', id = UUID) and External
+// Mesh Node cards (kind 'ext', id = unicast address) — only the request sent differs.
+// External nodes use Home Assistant's command shape, handled exactly like HA's MQTT ones.
+function sendExternalLight(addr, command) {
+  return fetch("/api/mesh/external/light", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ addr }, command))
+  })
+    .then(r => { if (!r.ok) showToast('Failed to send command', 'error'); })
+    .catch(() => showToast('Network error sending command', 'error'));
+}
+
+function onPowerToggle(kind, id, on) {
+  if (kind === 'ext') {
+    sendExternalLight(id, { state: on ? 'ON' : 'OFF' });
+    return;
+  }
+  postNode('/node/set_onoff', `uuid=${encodeURIComponent(id)}&onoff=${on ? 1 : 0}`)
+    .then(r => { if (!r.ok) showToast('Failed to set power', 'error'); })
+    .catch(() => showToast('Network error setting power', 'error'));
+}
+
 // Lightness / brightness
-function onSliderInput(uuid, el) {
+function onSliderInput(kind, id, el) {
   const output = el.parentElement.querySelector('output');
   if (output) output.value = el.value;
-  throttlePost('lightness-' + uuid, () => sendLightness(uuid, el.value));
+  throttlePost(`lightness-${kind}-${id}`, () => kind === 'ext'
+    ? sendExternalLight(id, { brightness: +el.value })
+    : sendLightness(id, el.value));
 }
 
 function sendLightness(uuid, value) {
@@ -420,18 +445,9 @@ function sendLightness(uuid, value) {
     .catch(() => showToast('Network error setting lightness', 'error'));
 }
 
-// Power (Generic OnOff)
-function setNodeOnoff(uuid, on) {
-  postNode('/node/set_onoff', `uuid=${encodeURIComponent(uuid)}&onoff=${on ? 1 : 0}`)
-    .then(r => {
-      if (!r.ok) showToast('Failed to set power', 'error');
-    })
-    .catch(() => showToast('Network error setting power', 'error'));
-}
-
-// Colour (Light HSL) — the card carries H (0-360) and S (0-100) sliders; the
-// lightness sent is whatever the card's brightness slider currently shows.
-function onHslInput(uuid, el) {
+// Colour (Light HSL) — the card carries H (0-360) and S (0-100) sliders. A provisioned
+// node gets the brightness slider's value as lightness; an external node keeps its own.
+function onHslInput(kind, id, el) {
   const nodeEl = el.closest('.node');
   const h = +nodeEl.querySelector('.hsl-h').value;
   const s = +nodeEl.querySelector('.hsl-s').value;
@@ -443,20 +459,36 @@ function onHslInput(uuid, el) {
   const out = el.parentElement.querySelector('output');
   if (out) out.value = el.classList.contains('hsl-h') ? `${h}°` : `${s}%`;
 
-  throttlePost('hsl-' + uuid, () =>
-    postNode('/node/set_hsl', `uuid=${encodeURIComponent(uuid)}&h=${h}&s=${s}&l=${l}`)
-      .then(r => { if (!r.ok) showToast('Failed to set colour', 'error'); })
-      .catch(() => showToast('Network error setting colour', 'error')));
+  throttlePost(`hsl-${kind}-${id}`, () => kind === 'ext'
+    ? sendExternalLight(id, { color: { h, s } })
+    : postNode('/node/set_hsl', `uuid=${encodeURIComponent(id)}&h=${h}&s=${s}&l=${l}`)
+        .then(r => { if (!r.ok) showToast('Failed to set colour', 'error'); })
+        .catch(() => showToast('Network error setting colour', 'error')));
 }
 
 // Colour temperature (Light CTL)
-function onTempInput(uuid, el) {
+function onTempInput(kind, id, el) {
   const out = el.parentElement.querySelector('output');
   if (out) out.value = el.value + ' K';
-  throttlePost('temp-' + uuid, () =>
-    postNode('/node/set_temperature', `uuid=${encodeURIComponent(uuid)}&kelvin=${el.value}`)
-      .then(r => { if (!r.ok) showToast('Failed to set temperature', 'error'); })
-      .catch(() => showToast('Network error setting temperature', 'error')));
+  throttlePost(`temp-${kind}-${id}`, () => kind === 'ext'
+    ? sendExternalLight(id, { color_temp: +el.value })
+    : postNode('/node/set_temperature', `uuid=${encodeURIComponent(id)}&kelvin=${el.value}`)
+        .then(r => { if (!r.ok) showToast('Failed to set temperature', 'error'); })
+        .catch(() => showToast('Network error setting temperature', 'error')));
+}
+
+// Generic Level (covers) — only External Mesh Nodes report it on their own.
+function onLevelInput(kind, id, el) {
+  const out = el.parentElement.querySelector('output');
+  if (out) out.value = el.value;
+  throttlePost(`level-${kind}-${id}`, () =>
+    fetch("/api/mesh/external/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addr: id, level: parseInt(el.value, 10) })
+    })
+      .then(r => { if (!r.ok) showToast('Failed to set level', 'error'); })
+      .catch(() => showToast('Network error setting level', 'error')));
 }
 
 // Node management functions
@@ -721,7 +753,7 @@ function refreshDevices() {
   button.disabled = true;
   button.innerHTML = '<span class="icon">⏳</span> Refreshing...';
 
-  loadNodes().finally(() => {
+  Promise.all([loadNodes(), loadExternalNodes()]).finally(() => {
     button.disabled = false;
     button.innerHTML = originalHtml;
     showToast('Device list refreshed', 'info');
@@ -750,90 +782,96 @@ function switchNodeTab(btn) {
   card.querySelectorAll('.node-tab-panel').forEach(p => { p.hidden = p.dataset.tab !== tab; });
 }
 
-// Node rendering functions
-function createNodeElement(node) {
+// Colour-temperature slider bounds, shared by both card kinds.
+function tempRange(minTemp, maxTemp, current) {
+  const tMin = (minTemp && minTemp < maxTemp) ? minTemp : 2000;
+  const tMax = (maxTemp && maxTemp > tMin && maxTemp < 20000) ? maxTemp : 6500;
+  return { tMin, tMax, tCur: current || tMin };
+}
+
+// One card layout for provisioned and External Mesh Nodes; `m` is a kind-neutral model
+// built by createNodeElement / createExternalNodeElement.
+function renderNodeCard(m) {
   const el = document.createElement("div");
   el.className = "node";
-  el.dataset.uuid = node.uuid;
-
-  // Feature bitmask (mirrors node_supported_features_t in ble_mesh_control.h).
-  const F_ONOFF = 1, F_LIGHTNESS = 2, F_HSL = 4, F_CTL = 8;
-  const f = node.features || 0;
-  const hasLightness = f === 0 || (f & (F_LIGHTNESS | F_CTL));
-  const hasOnoff = f === 0 || (f & F_ONOFF);
-  const hasHsl = !!(f & F_HSL);
-  const hasCtl = !!(f & F_CTL);
-
-  const maxL = node.max_lightness || 65535;
-  el.dataset.maxLightness = maxL;
-
-  const hue360 = rangeMap(node.hsl_h || 0, node.min_hue || 0, node.max_hue || 65535, 0, 360);
-  const sat100 = rangeMap(node.hsl_s || 0, node.min_saturation || 0, node.max_saturation || 65535, 0, 100);
-  const tMin = (node.min_temp && node.min_temp < node.max_temp) ? node.min_temp : 2000;
-  const tMax = (node.max_temp && node.max_temp > tMin && node.max_temp < 20000) ? node.max_temp : 6500;
-  const tCur = node.curr_temp || tMin;
-  const u = node.uuid;
+  el.dataset[m.kind === 'ext' ? 'addr' : 'uuid'] = m.id;
+  el.dataset.maxLightness = m.maxLightness;
+  const a = `'${m.kind}', '${esc(m.id)}'`;
 
   let controls = '';
-  if (hasOnoff) {
+  if (m.has.onoff) {
     controls += `
       <div class="control-row">
         <span class="control-label">Power</span>
         <label class="toggle-switch">
-          <input type="checkbox" ${node.onoff ? 'checked' : ''} onchange="setNodeOnoff('${u}', this.checked)">
+          <input type="checkbox" ${m.onoff ? 'checked' : ''} onchange="onPowerToggle(${a}, this.checked)">
           <span class="toggle-track"></span>
         </label>
       </div>`;
   }
-  if (hasLightness) {
+  if (m.has.lightness) {
     controls += `
       <div class="slider-row">
         <span class="slider-tag">💡</span>
-        <input type="range" class="brightness-slider" min="0" max="${maxL}" step="500" value="${node.hsl_l || 0}"
-          oninput="onSliderInput('${u}', this)">
-        <output>${node.hsl_l || 0}</output>
+        <input type="range" class="brightness-slider" min="0" max="${m.maxLightness}" step="500" value="${m.lightness || 0}"
+          oninput="onSliderInput(${a}, this)">
+        <output>${m.lightness || 0}</output>
       </div>`;
   }
-  if (hasHsl) {
+  if (m.has.hsl) {
     controls += `
       <div class="control-row">
         <span class="control-label">Color</span>
-        <span class="hsl-swatch" style="background: hsl(${hue360}, ${sat100}%, 50%)"></span>
+        <span class="hsl-swatch" style="background: hsl(${m.hue360}, ${m.sat100}%, 50%)"></span>
       </div>
       <div class="slider-row">
         <span class="slider-tag">H</span>
-        <input type="range" class="hsl-h hue-slider" min="0" max="360" value="${hue360}" oninput="onHslInput('${u}', this)">
-        <output>${hue360}°</output>
+        <input type="range" class="hsl-h hue-slider" min="0" max="360" value="${m.hue360}" oninput="onHslInput(${a}, this)">
+        <output>${m.hue360}°</output>
       </div>
       <div class="slider-row">
         <span class="slider-tag">S</span>
-        <input type="range" class="hsl-s" min="0" max="100" value="${sat100}" oninput="onHslInput('${u}', this)">
-        <output>${sat100}%</output>
+        <input type="range" class="hsl-s" min="0" max="100" value="${m.sat100}" oninput="onHslInput(${a}, this)">
+        <output>${m.sat100}%</output>
       </div>`;
   }
-  if (hasCtl) {
+  if (m.has.ctl) {
     controls += `
       <div class="slider-row">
         <span class="slider-tag">🌡</span>
-        <input type="range" class="temp-slider" min="${tMin}" max="${tMax}" step="50" value="${tCur}" oninput="onTempInput('${u}', this)">
-        <output>${tCur} K</output>
+        <input type="range" class="temp-slider" min="${m.temp.tMin}" max="${m.temp.tMax}" step="50" value="${m.temp.tCur}" oninput="onTempInput(${a}, this)">
+        <output>${m.temp.tCur} K</output>
+      </div>`;
+  }
+  if (m.has.level) {
+    controls += `
+      <div class="slider-row">
+        <span class="slider-tag">🎚️</span>
+        <input type="range" min="-32768" max="32767" step="256" value="${m.level || 0}" oninput="onLevelInput(${a}, this)">
+        <output>${m.level || 0}</output>
       </div>`;
   }
   if (!controls) {
-    controls = `<p class="control-none">No controllable models reported for this node.</p>`;
+    controls = `<p class="control-none">${m.noControlsText}</p>`;
   }
 
-  el.innerHTML = `
-    <div class="node-header">
-      <div class="node-name-container">
-        <span class="node-name editable" data-original-name="${esc(node.name)}">${esc(node.name)}</span>
-        <input type="text" class="node-name-input" value="${esc(node.name)}" hidden>
+  const name = m.editableName
+    ? `<span class="node-name editable" data-original-name="${esc(m.name)}">${esc(m.name)}</span>
+        <input type="text" class="node-name-input" value="${esc(m.name)}" hidden>
         <div class="edit-buttons" hidden>
           <button class="btn btn-primary btn-small accept-btn" title="Accept">✓</button>
           <button class="btn btn-secondary btn-small discard-btn" title="Discard">✕</button>
-        </div>
-      </div>
-      <span class="node-status ${node.unicast ? 'online' : 'offline'}">${node.unicast ? 'Online' : 'Offline'}</span>
+        </div>`
+    : `<span class="node-name">${esc(m.name)}</span>`;
+
+  const info = m.info
+    .map(([label, value]) => `<div class="info-row"><span class="info-label">${esc(label)}</span><span class="info-value">${esc(value)}</span></div>`)
+    .join('');
+
+  el.innerHTML = `
+    <div class="node-header">
+      <div class="node-name-container">${name}</div>
+      <span class="node-status ${m.online ? 'online' : 'offline'}">${m.online ? 'Online' : 'Offline'}</span>
     </div>
 
     <div class="node-tabs">
@@ -846,20 +884,48 @@ function createNodeElement(node) {
     </div>
 
     <div class="node-tab-panel" data-tab="advanced" hidden>
-      <div class="node-info-grid">
-        <div class="info-row"><span class="info-label">UUID</span><span class="info-value">${esc(node.uuid)}</span></div>
-        <div class="info-row"><span class="info-label">Address</span><span class="info-value">${node.unicast || '—'}</span></div>
-        ${node.company ? `<div class="info-row"><span class="info-label">Manufacturer</span><span class="info-value">${esc(node.company)}</span></div>` : ''}
-      </div>
-      <div class="node-actions">
-        <button class="btn btn-secondary btn-small" onclick="sendMqttStatus('${u}')"><span class="icon">📊</span> MQTT Status</button>
-        <button class="btn btn-secondary btn-small" onclick="sendMqttDiscovery('${u}')"><span class="icon">📡</span> MQTT Discovery</button>
-        <button class="btn btn-danger btn-small" onclick="unprovision('${u}')"><span class="icon">🗑️</span> Unprovision</button>
-      </div>
+      <div class="node-info-grid">${info}</div>
+      <div class="node-actions">${m.actions}</div>
     </div>
   `;
 
   return el;
+}
+
+function createNodeElement(node) {
+  // Feature bitmask (mirrors node_supported_features_t in ble_mesh_control.h).
+  const F_ONOFF = 1, F_LIGHTNESS = 2, F_HSL = 4, F_CTL = 8;
+  const f = node.features || 0;
+  const u = node.uuid;
+  const info = [['UUID', node.uuid], ['Address', node.unicast || '—']];
+  if (node.company) info.push(['Manufacturer', node.company]);
+
+  return renderNodeCard({
+    kind: 'node',
+    id: u,
+    name: node.name,
+    editableName: true,
+    online: !!node.unicast,
+    has: {
+      onoff: f === 0 || !!(f & F_ONOFF),
+      lightness: f === 0 || !!(f & (F_LIGHTNESS | F_CTL)),
+      hsl: !!(f & F_HSL),
+      ctl: !!(f & F_CTL),
+      level: false,
+    },
+    onoff: node.onoff,
+    lightness: node.hsl_l,
+    maxLightness: node.max_lightness || 65535,
+    hue360: rangeMap(node.hsl_h || 0, node.min_hue || 0, node.max_hue || 65535, 0, 360),
+    sat100: rangeMap(node.hsl_s || 0, node.min_saturation || 0, node.max_saturation || 65535, 0, 100),
+    temp: tempRange(node.min_temp, node.max_temp, node.curr_temp),
+    noControlsText: 'No controllable models reported for this node.',
+    info,
+    actions: `
+      <button class="btn btn-secondary btn-small" onclick="sendMqttStatus('${u}')"><span class="icon">📊</span> MQTT Status</button>
+      <button class="btn btn-secondary btn-small" onclick="sendMqttDiscovery('${u}')"><span class="icon">📡</span> MQTT Discovery</button>
+      <button class="btn btn-danger btn-small" onclick="unprovision('${u}')"><span class="icon">🗑️</span> Unprovision</button>`,
+  });
 }
 
 function createDeviceElement(device) {
@@ -887,6 +953,148 @@ function createDeviceElement(device) {
   `;
   
   return el;
+}
+
+function loadExternalNodes() {
+  return fetch("/api/mesh/external/nodes")
+    .then(res => res.json())
+    .then(data => {
+      const container = document.getElementById("external-nodes");
+      container.innerHTML = '';
+
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach(node => {
+          container.appendChild(createExternalNodeElement(node));
+        });
+        toggleEmptyState('external-nodes', 'no-external-nodes', true);
+      } else {
+        toggleEmptyState('external-nodes', 'no-external-nodes', false);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load external nodes:', err);
+    });
+}
+
+function createExternalNodeElement(node) {
+  // Same card as a provisioned node, minus what needs a DevKey (rename, unprovision).
+  const seen = node.last_seen_ms_ago != null; // null: restored at boot, not heard from yet
+  const ageSec = seen ? Math.round(node.last_seen_ms_ago / 1000) : null;
+  const features = node.features || [];
+
+  return renderNodeCard({
+    kind: 'ext',
+    id: node.addr,
+    name: `Node ${node.addr}`,
+    editableName: false,
+    // The bridge re-probes every 10 min (and on every command): Offline = missed two rounds.
+    online: seen && ageSec < 25 * 60,
+    has: {
+      onoff: features.includes('onoff'),
+      lightness: node.lightness !== undefined,
+      hsl: features.includes('hsl'),
+      ctl: features.includes('ctl'),
+      level: features.includes('level'),
+    },
+    onoff: node.onoff,
+    lightness: node.lightness,
+    maxLightness: node.max_lightness || 65535,
+    hue360: rangeMap(node.hue || 0, node.min_hue || 0, node.max_hue || 65535, 0, 360),
+    sat100: rangeMap(node.saturation || 0, node.min_saturation || 0, node.max_saturation || 65535, 0, 100),
+    temp: tempRange(node.min_temp, node.max_temp, node.temperature),
+    level: node.level,
+    noControlsText: 'No known model responded yet.',
+    info: [
+      ['Address', node.addr],
+      ['Features', features.length ? features.join(', ') : 'unknown'],
+      ['Last seen', seen ? `${ageSec}s ago` : 'not seen since boot'],
+    ],
+    actions: `
+      <button class="btn btn-secondary btn-small" onclick="republishExternalNodeMqtt('${esc(node.addr)}', true)"><span class="icon">📊</span> MQTT Status</button>
+      <button class="btn btn-secondary btn-small" onclick="republishExternalNodeMqtt('${esc(node.addr)}', false)"><span class="icon">📡</span> MQTT Discovery</button>
+      <button class="btn btn-danger btn-small" onclick="forgetExternalNode('${esc(node.addr)}')"><span class="icon">🗑️</span> Forget</button>`,
+  });
+}
+
+function discoverExternalNodes() {
+  const button = event.target.closest('button');
+  button.disabled = true;
+  button.innerHTML = '<span class="icon">⏳</span> Discovering...';
+
+  fetch("/api/mesh/external/discover", { method: "POST" })
+    .then(res => {
+      if (!res.ok) throw new Error('Discovery request failed');
+      showToast('Discovery sent — refreshing in a moment', 'info');
+      setTimeout(loadExternalNodes, 1500);
+    })
+    .catch(err => {
+      console.error('Failed to discover external nodes:', err);
+      showToast('Failed to send discovery request', 'error');
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = '<span class="icon">📡</span> Discover';
+    });
+}
+
+function republishExternalNodeMqtt(addr, statusOnly) {
+  fetch("/api/mesh/external/mqtt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr, status_only: statusOnly })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Republish failed');
+      showToast(statusOnly ? 'MQTT status published' : 'MQTT discovery and status published', 'success');
+    })
+    .catch(err => {
+      console.error('Failed to republish external node to MQTT:', err);
+      showToast('Failed to publish to MQTT', 'error');
+    });
+}
+
+// Not an unprovision: that needs the node's DevKey, which only its own provisioner has.
+function forgetExternalNode(addr) {
+  if (!confirm(`Forget node ${addr}?\n\nThis removes it from the bridge and from Home Assistant. It stays on the mesh ` +
+               `(only its own provisioner, e.g. nRF Mesh, can unprovision it) and will reappear at the next discovery if it still answers.`)) {
+    return;
+  }
+  fetch("/api/mesh/external/forget", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addr: addr })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Forget failed');
+      showToast(`Node ${addr} forgotten`, 'success');
+      loadExternalNodes();
+    })
+    .catch(err => {
+      console.error('Failed to forget external node:', err);
+      showToast('Failed to forget node', 'error');
+    });
+}
+
+function sendExternalGroupCommand(onoff) {
+  fetch("/api/mesh/external/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ onoff: onoff })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Command failed');
+      showToast('Sent to group', 'success');
+      // Group Set is unacknowledged (BLE Mesh spec), so there's no per-node ack to
+      // update the cache with — re-discover to see each node's new state.
+      setTimeout(() => {
+        fetch("/api/mesh/external/discover", { method: "POST" })
+          .then(() => setTimeout(loadExternalNodes, 1500));
+      }, 300);
+    })
+    .catch(err => {
+      console.error('Failed to send group command:', err);
+      showToast('Failed to send group command', 'error');
+    });
 }
 
 function createCommandElement(command) {
@@ -1106,6 +1314,7 @@ function loadSystemInfo() {
 
       // Update version information in Bridge section
       updateVersionInfo(data);
+      applyMeshRole(data);
     })
     .catch(err => {
       console.error('Failed to load system info:', err);
@@ -1115,6 +1324,88 @@ function loadSystemInfo() {
         connectionStatus.style.color = 'var(--danger)';
       }
     });
+
+  // Keys only change on (re)provisioning — stop re-fetching them once loaded.
+  if (!meshKeysLoaded) loadMeshKeys();
+}
+
+let meshKeysLoaded = false;
+
+// Shows only what this SKU can do: provisioning (Provisioner) or the joined mesh's
+// membership and "Leave" (Node) — see .provisioner-only / .node-only.
+function applyMeshRole(info) {
+  if (!info.mesh_role) return;
+  document.body.dataset.meshRole = info.mesh_role;
+  if (info.mesh_role !== 'node') return;
+
+  const inNetwork = info.mesh_node_addr > 0;
+  const addrEl = document.getElementById('mesh-node-addr');
+  if (addrEl) {
+    addrEl.textContent = inNetwork
+      ? '0x' + info.mesh_node_addr.toString(16).toUpperCase().padStart(4, '0')
+      : 'Not in a network — add the bridge from your mesh app (e.g. nRF Mesh)';
+  }
+  const leaveBtn = document.getElementById('mesh-leave-btn');
+  if (leaveBtn) leaveBtn.disabled = !inNetwork;
+  if (!inNetwork && meshKeysLoaded) {
+    meshKeysLoaded = false; // keys are gone with the network; show them again once re-added
+    ['mesh-net-key', 'mesh-app-key'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+  }
+}
+
+function leaveMeshNetwork() {
+  if (!confirm('Leave the mesh network?\n\n' +
+               'The bridge forgets the network keys and its External Mesh Nodes (their Home Assistant ' +
+               'entities are removed), then waits to be added again from your mesh app.\n\n' +
+               'Your mesh app (e.g. nRF Mesh) is not told and still lists the bridge — remove it there too. ' +
+               'Using "Reset node" in that app instead does both at once.')) {
+    return;
+  }
+  fetch('/api/mesh/leave', { method: 'POST' })
+    .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
+    .then(() => {
+      showToast('Left the mesh network — waiting to be added again', 'success');
+      setTimeout(() => { loadSystemInfo(); loadExternalNodes(); }, 1500);
+    })
+    .catch(err => showToast('Failed to leave the mesh network: ' + err.message, 'error'));
+}
+
+function loadMeshKeys() {
+  fetch("/api/mesh/keys")
+    .then(res => res.json())
+    .then(data => {
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl && data.net_key) netKeyEl.textContent = data.net_key;
+      if (appKeyEl && data.app_key) appKeyEl.textContent = data.app_key;
+      meshKeysLoaded = Boolean(data.net_key && data.app_key);
+    })
+    .catch(err => {
+      console.error('Failed to load mesh keys:', err);
+      const netKeyEl = document.getElementById("mesh-net-key");
+      const appKeyEl = document.getElementById("mesh-app-key");
+      if (netKeyEl) netKeyEl.textContent = 'Unavailable';
+      if (appKeyEl) appKeyEl.textContent = 'Unavailable';
+    });
+}
+
+function copyMeshKey(elementId) {
+  const el = document.getElementById(elementId);
+  const key = el.textContent;
+  if (!key || key === 'Loading...' || key === 'Unavailable') return;
+  navigator.clipboard.writeText(key).then(() => {
+    const originalText = el.textContent;
+    el.textContent = '✓ Copied!';
+    setTimeout(() => {
+      el.textContent = originalText;
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+    showToast('Failed to copy key — select it and copy manually', 'error');
+  });
 }
 
 function updateVersionInfo(data) {
@@ -1122,6 +1413,13 @@ function updateVersionInfo(data) {
   const firmwareVersionEl = document.getElementById("firmware-version");
   if (firmwareVersionEl && data.version) {
     firmwareVersionEl.textContent = data.version;
+  }
+
+  // Edition (Standalone / Companion) next to the product name — see documentation/EDITIONS.md
+  const editionEl = document.getElementById("app-edition");
+  if (editionEl && data.edition) {
+    editionEl.textContent = data.edition;
+    document.title = `BleMesh2MQTT ${data.edition}`;
   }
 
   // Show version next to the header title
@@ -1187,9 +1485,12 @@ function loadMqttStatus() {
         // Don't populate password for security
       }
       
-      // Show error if any
-      if (data.last_error) {
+      // Only show last_error when not currently connected — errors are stale once connected
+      if (data.last_error && data.state !== 'connected') {
         showMqttError(data.last_error);
+      } else {
+        const errorEl = document.getElementById("mqtt-error");
+        if (errorEl) errorEl.style.display = 'none';
       }
     })
     .catch(err => {
@@ -1336,6 +1637,9 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Load auto-provisioning state
   loadAutoProvisioningState();
+
+  // Load mesh group address
+  loadMeshGroupAddr();
   
   // Refresh system info every 5 seconds for real-time uptime display
   setInterval(loadSystemInfo, 5000);
@@ -1348,6 +1652,7 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Load nodes data
   loadNodes();
+  loadExternalNodes();
 
   // Load console commands
   fetch("/api/console_commands")
@@ -1825,4 +2130,77 @@ function toggleAutoProvisioning(enabled) {
   .finally(() => {
     toggle.disabled = false;
   });
+}
+
+function loadMeshGroupAddr() {
+  fetch('/api/mesh/settings')
+    .then(r => r.json())
+    .then(data => renderGroupAddrList(data.group_addrs || []))
+    .catch(err => console.error('Error loading mesh settings:', err));
+}
+
+function renderGroupAddrList(addrs) {
+  const list = document.getElementById('group-addr-list');
+  if (!list) return;
+  list.innerHTML = '';
+  addrs.forEach(addr => {
+    const chip = document.createElement('span');
+    chip.className = 'group-addr-chip';
+    chip.textContent = addr;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '\u00d7';
+    removeBtn.title = 'Remove';
+    removeBtn.onclick = () => removeMeshGroupAddr(addr);
+    chip.appendChild(removeBtn);
+    list.appendChild(chip);
+  });
+}
+
+function addMeshGroupAddr() {
+  const input = document.getElementById('group-addr-input');
+  const raw = input ? input.value.trim() : '';
+  if (!raw) {
+    showToast('Enter a group address first', 'error');
+    return;
+  }
+  const parsed = parseInt(raw, 16);
+  if (isNaN(parsed) || parsed < 0 || parsed > 0xFFFF) {
+    showToast('Invalid group address — use hex format like 0xC000', 'error');
+    return;
+  }
+  fetch('/api/mesh/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: parsed })
+  })
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
+  .then(data => {
+    if (data.success) {
+      input.value = '';
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address added', 'success');
+    } else {
+      showToast('Failed to add group address', 'error');
+    }
+  })
+  .catch(err => showToast('Failed to add group address: ' + err.message, 'error'));
+}
+
+function removeMeshGroupAddr(addr) {
+  fetch('/api/mesh/settings/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_addr: addr })
+  })
+  .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || `HTTP ${r.status}`); }))
+  .then(data => {
+    if (data.success) {
+      renderGroupAddrList(data.group_addrs || []);
+      showToast('Group address removed', 'success');
+    } else {
+      showToast('Failed to remove group address', 'error');
+    }
+  })
+  .catch(err => showToast('Failed to remove group address: ' + err.message, 'error'));
 }

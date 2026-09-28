@@ -17,7 +17,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
+        # Two editions of the same firmware — see documentation/EDITIONS.md
+        edition: [Standalone, Companion]
         target: [esp32, esp32s3, esp32c3, esp32c5, esp32c6]
 
     steps:
@@ -51,13 +54,15 @@ jobs:
           . ./export.sh
           cd $GITHUB_WORKSPACE
           PREVIEW_FLAG=$([ "${{ matrix.target }}" = "esp32c5" ] && echo "--preview" || echo "")
-          idf.py $PREVIEW_FLAG set-target ${{ matrix.target }}
-          idf.py $PREVIEW_FLAG build
+          EDITION_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.$(echo '${{ matrix.edition }}' | tr '[:upper:]' '[:lower:]')"
+          idf.py $PREVIEW_FLAG -D SDKCONFIG_DEFAULTS="$EDITION_DEFAULTS" set-target ${{ matrix.target }}
+          idf.py $PREVIEW_FLAG -D SDKCONFIG_DEFAULTS="$EDITION_DEFAULTS" build
 
       - name: Prepare release package
         run: |
           VERSION="${{ github.event.release.tag_name || github.event.inputs.version }}"
-          PACKAGE_NAME="BleMesh2Mqtt-${VERSION}-${{ matrix.target }}"
+          EDITION="${{ matrix.edition }}"
+          PACKAGE_NAME="BleMesh2Mqtt-${EDITION}-${VERSION}-${{ matrix.target }}"
 
           mkdir -p ${PACKAGE_NAME}
 
@@ -71,33 +76,19 @@ jobs:
           # Combined firmware + web-interface OTA bundle (dashboard "Firmware + Web" option)
           python3 tools/make_update_bundle.py build/BleMesh2Mqtt.bin build/storage.bin ${PACKAGE_NAME}/update_bundle.bin
 
-          # Detect storage offset from build log (differs by architecture)
-          # ESP32/ESP32-S3 (dual-ota): 0x3b0000, ESP32-C3/C6 (single-ota): 0x2c0000
-          STORAGE_OFFSET=$(grep -r "storage.bin" build/ 2>/dev/null | grep -oP '0x[0-9a-fA-F]+(?=.*storage\.bin)' | head -1)
-          if [ -z "$STORAGE_OFFSET" ]; then
-            # Fallback: detect from target
-            if [ "${{ matrix.target }}" = "esp32" ] || [ "${{ matrix.target }}" = "esp32s3" ]; then
-              STORAGE_OFFSET="0x3b0000"
-            else
-              STORAGE_OFFSET="0x2c0000"
-            fi
-          fi
-          echo "Detected storage offset: $STORAGE_OFFSET"
+          # Flash offsets come from the build itself: bootloader differs per chip, storage per
+          # partition table (0x3b0000 dual-ota on esp32/esp32s3, 0x2c0000 single-ota on C3/C5/C6)
+          flash_offset() {
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(o for o, f in d["flash_files"].items() if f == sys.argv[2]))' \
+              build/flasher_args.json "$1"
+          }
+          BOOTLOADER_OFFSET=$(flash_offset bootloader/bootloader.bin)
+          STORAGE_OFFSET=$(flash_offset storage.bin)
+          echo "Bootloader offset: $BOOTLOADER_OFFSET, storage offset: $STORAGE_OFFSET"
+          echo "BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET}" >> $GITHUB_ENV
           echo "STORAGE_OFFSET=${STORAGE_OFFSET}" >> $GITHUB_ENV
           echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
-
-          # Bootloader offset by chip family:
-          #   Xtensa (esp32, esp32s2, esp32s3)   → 0x1000
-          #   RISC-V (esp32c3, esp32c6, esp32h2) → 0x0
-          #   ESP32-C5 (RISC-V, special case)    → 0x2000
-          if [ "${{ matrix.target }}" = "esp32c5" ]; then
-            BOOTLOADER_OFFSET="0x2000"
-          elif [ "${{ matrix.target }}" = "esp32c3" ] || [ "${{ matrix.target }}" = "esp32c6" ] || [ "${{ matrix.target }}" = "esp32h2" ]; then
-            BOOTLOADER_OFFSET="0x0"
-          else
-            BOOTLOADER_OFFSET="0x1000"
-          fi
-          echo "BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET}" >> $GITHUB_ENV
+          echo "EDITION=${EDITION}" >> $GITHUB_ENV
 
           # When flashing via the native USB-Serial/JTAG port, ESP32-C3 and
           # ESP32-C6 need --after watchdog-reset instead of hard_reset: a
@@ -118,7 +109,7 @@ jobs:
 
           cd ${PACKAGE_NAME}
           esptool.py --chip ${{ matrix.target }} merge_bin \
-            -o BleMesh2Mqtt-${VERSION}-${{ matrix.target }}-merged.bin \
+            -o BleMesh2Mqtt-${EDITION}-${VERSION}-${{ matrix.target }}-merged.bin \
             --flash_mode dio \
             --flash_freq 40m \
             --flash_size 4MB \
@@ -135,10 +126,17 @@ jobs:
           BleMesh2MQTT Flash Instructions
           ==========================================
 
+          Edition: ${EDITION}
           Target: ${TARGET}
           Version: ${VERSION}
           Bootloader Offset: ${BOOTLOADER_OFFSET}
           Storage Offset: ${STORAGE_OFFSET}
+
+          EDITION: Standalone = the bridge creates its own BLE Mesh network and adds
+          your lights itself. Companion = the bridge joins a network you already
+          manage with nRF Mesh (or another app). Pick the one matching your setup:
+          https://github.com/ludodefgh/esp32-blemesh2mqtt/blob/main/documentation/EDITIONS.md
+          Updating over the air only accepts the same edition.
 
           IMPORTANT: This firmware uses a custom ESP-IDF fork with BLE Mesh fixes.
           Source: https://github.com/ludodefgh/esp-idf (branch: ble-mesh-fixes)
@@ -195,7 +193,7 @@ jobs:
           3. Select your device
           4. Click "Install" and choose "Manual Installation"
           5. Upload the merged binary:
-             - 0x0: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin
+             - 0x0: BleMesh2Mqtt-${EDITION}-${VERSION}-${TARGET}-merged.bin
 
           This single file contains all partitions at the correct offsets.
 
@@ -215,7 +213,7 @@ jobs:
           Option A - Single merged file (recommended):
           1. Download tool from: https://www.espressif.com/en/support/download/other-tools
           2. Select chip type: ${TARGET}
-          3. Add file: BleMesh2Mqtt-${VERSION}-${TARGET}-merged.bin @ 0x0
+          3. Add file: BleMesh2Mqtt-${EDITION}-${VERSION}-${TARGET}-merged.bin @ 0x0
           4. Set COM port and click START
 
           Option B - Multiple files:
@@ -235,8 +233,13 @@ jobs:
           1. Device will create WiFi AP: "BleMesh2MQTT-Setup-XX:XX:XX"
           2. Connect to this AP (no password)
           3. Navigate to: http://192.168.4.1
-          4. Configure WiFi and MQTT settings
+          4. Enter your WiFi settings
           5. Device will reboot and connect to your network
+             Then open its dashboard (its IP address) and set your MQTT broker
+             on the Bridge page
+          6. Companion edition only: add the bridge to your mesh with nRF Mesh
+             (it advertises as an unprovisioned device), then bind the AppKey
+             to its client models — see documentation/EDITIONS.md
 
           TROUBLESHOOTING:
           ----------------

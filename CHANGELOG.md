@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Two editions, built and released separately: **Standalone** (the bridge runs its own mesh,
+  the existing firmware) and **Companion** (it joins an existing mesh, provisioned by an app
+  such as nRF Mesh). Shown in the dashboard header and HA device model; OTA refuses the other
+  edition's firmware. See `documentation/EDITIONS.md`. Release files are now
+  `BleMesh2Mqtt-<Edition>-<version>-<chip>.zip`.
+- Companion: External Mesh Nodes — lights on the joined mesh are found through the group
+  addresses (on/off, level, lightness, HSL, CTL, with their ranges) and controlled from the
+  dashboard and Home Assistant. Remembered across reboots; re-discovered after boot, when an
+  AppKey gets bound, and every 10 minutes. **Forget** drops one from the bridge and HA.
+- Companion: **Leave mesh network**, and "Reset node" from the provisioning app, return the
+  bridge to unprovisioned without a reboot.
+- Companion: up to 3 group address subscriptions (where the bridge looks for lights),
+  managed live from the dashboard's Mesh page.
+- The Mesh page shows the mesh keys (and, in Companion, the bridge's address).
+- Level-only devices (Generic Level Server, e.g. shutter motors) appear in Home Assistant as
+  covers with a position.
+- Standalone: devices advertising over PB-GATT can be provisioned too.
+- Hardware test rig (`test/`): test provisioner and bulb firmwares, and an MQTT regression
+  script.
+
+### Changed
+- The dashboard only shows what the running edition can do (provisioning in Standalone;
+  External Mesh Nodes and Leave in Companion).
+- Setup wizard: a second step picks the mesh mode (only the edition's own mode can be chosen).
+- Developer tools (`/api/mesh/debug`, `/api/logs`, `log_history`, `/api/mesh/reset_role`,
+  `wifi_set`) are only built with `CONFIG_BM2MQTT_DEBUG_TOOLS`, off in release builds.
+- `CONFIG_BLE_MESH_SEQ_STORE_RATE=8` to avoid sequence-number reuse after an abrupt reset.
+
+### Fixed
+- HSL lights lost brightness on every colour change.
+- Dashboard log lines could leak into other HTTP responses (reused socket).
+- Setup wizard: use-after-free on the WiFi form; the bridge now restarts on its own if the
+  wizard is left unfinished after saving WiFi.
+- OTA upload rejected every non-ESP32 image (chip ID check hardcoded to ESP32).
+- `build-all-targets.sh` wrote the ESP32-C3/C5/C6 storage offset as `0x3B0000` in its
+  flash instructions (their single-OTA table puts it at `0x2C0000`). Both it and CI now read
+  every offset from the build's `flasher_args.json`. Release binaries were not affected.
+
+### Known issues
+- ESP32-C3/C5/C6: firmware updates over WiFi can't work with the single-OTA partition table;
+  update over USB (#44).
+
 ### Planned
 - [ ] Additional BLE Mesh device types support
 - [ ] Performance optimizations

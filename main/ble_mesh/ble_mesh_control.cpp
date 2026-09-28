@@ -1,10 +1,14 @@
 #include "ble_mesh_control.h"
 
 // Standard C/C++ libraries
+#include <algorithm>
 #include <inttypes.h>
 #include <memory>
+#include <mutex>
 #include <stdio.h>
 #include <string.h>
+#include <type_traits>
+#include <vector>
 
 // ESP-IDF includes
 #include "argtable3/argtable3.h"
@@ -13,22 +17,30 @@
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_lighting_model_api.h"
+#include "esp_ble_mesh_local_data_operation_api.h"
 #include "esp_ble_mesh_networking_api.h"
 #include "esp_ble_mesh_provisioning_api.h"
 #include "esp_console.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 
 // Project includes
 #include "ble_mesh_commands.h"
 #include "ble_mesh_node.h"
 #include "ble_mesh_provisioning.h"
+#include "external_node_queue.h"
 #include "common/log_common.h"
+#include "wifi/mesh_config.h"
 #include "debug/console_cmd.h"
 #include "debug/debug_commands_registry.h"
 #include "debug_console_common.h"
 #include "message_queue.h"
 #include "mqtt/mqtt_bridge.h"
 #include "mqtt/mqtt_control.h"
+#include "mqtt/mqtt_external_control.h"
 #include "sig_companies/company_map.h"
 #include "sig_models/model_map.h"
 
@@ -39,13 +51,474 @@
 #define MSG_ROLE ROLE_PROVISIONER
 
 #define APP_KEY_IDX 0x0000
-#define APP_KEY_OCTET 0x12
 
 #define APP_USE_ONOFF_CLIENT
 
 static uint8_t dev_uuid[16];
 
 extern struct mesh_network_info_store store;
+
+// PROV_OWN_ADDR when standalone; the real provisioner-assigned address once joined
+// as a node (see ble_mesh_init / ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT).
+uint16_t local_element_addr = PROV_OWN_ADDR;
+
+static std::mutex external_nodes_mutex;
+static std::vector<external_mesh_node_t> external_nodes;
+static void mark_external_nodes_dirty(); // NVS persistence, defined below
+
+// Caller must hold external_nodes_mutex.
+static external_mesh_node_t *find_external_node_locked(uint16_t addr)
+{
+    for (auto &n : external_nodes)
+    {
+        if (n.unicast == addr)
+        {
+            return &n;
+        }
+    }
+    return nullptr;
+}
+
+// Caller must hold external_nodes_mutex.
+static external_mesh_node_t &get_or_create_external_node_locked(uint16_t addr, bool *was_new = nullptr)
+{
+    if (external_mesh_node_t *n = find_external_node_locked(addr))
+    {
+        if (was_new) *was_new = false;
+        return *n;
+    }
+    external_mesh_node_t node{};
+    node.unicast = addr;
+    node.color_mode = color_mode_t::brightness;
+    external_nodes.push_back(node);
+    if (was_new) *was_new = true;
+    return external_nodes.back();
+}
+
+bool ble_mesh_find_external_node(uint16_t addr, external_mesh_node_t &out)
+{
+    std::lock_guard<std::mutex> lock(external_nodes_mutex);
+    if (const external_mesh_node_t *n = find_external_node_locked(addr))
+    {
+        out = *n;
+        return true;
+    }
+    return false;
+}
+
+bool ble_mesh_forget_external_node(uint16_t addr, external_mesh_node_t *removed)
+{
+    // A queued/retrying command's reply would otherwise recreate the node right away.
+    external_node_queue().drop_pending_for(addr);
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto it = std::find_if(external_nodes.begin(), external_nodes.end(),
+                               [addr](const external_mesh_node_t &n) { return n.unicast == addr; });
+        if (it == external_nodes.end())
+        {
+            return false;
+        }
+        if (removed)
+        {
+            *removed = *it;
+        }
+        external_nodes.erase(it);
+    }
+    mark_external_nodes_dirty();
+    LOG_INFO(TAG, "Forgot external node 0x%04X", addr);
+    return true;
+}
+
+void ble_mesh_forget_all_external_nodes()
+{
+    std::vector<uint16_t> addrs;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        for (const auto &node : external_nodes)
+        {
+            addrs.push_back(node.unicast);
+        }
+    }
+    for (uint16_t addr : addrs)
+    {
+        external_mesh_node_t removed;
+        if (ble_mesh_forget_external_node(addr, &removed))
+        {
+            mqtt_forget_external_node(removed);
+        }
+    }
+}
+
+#ifdef CONFIG_BLE_MESH_NODE
+esp_err_t ble_mesh_leave_network()
+{
+    if (local_element_addr == 0)
+    {
+        return ESP_ERR_INVALID_STATE; // not in a network
+    }
+    // Same path as a Config Node Reset from the network's provisioner: the stack wipes
+    // its keys and fires ESP_BLE_MESH_NODE_PROV_RESET_EVT, whose handler clears our
+    // identity and external nodes and advertises as unprovisioned again.
+    return esp_ble_mesh_node_local_reset();
+}
+#endif
+
+// External Mesh Nodes are persisted like node_manager()'s provisioned nodes, so their
+// HA entities and MQTT subscriptions come back at boot without waiting for a node to
+// answer a discovery probe. Only structural changes (new node, new feature, ranges)
+// mark it dirty — not every state change — and saves are debounced, to spare flash.
+static constexpr const char *EXT_NODES_NVS_NAMESPACE = "ble_mesh";
+static constexpr const char *EXT_NODES_NVS_KEY = "ext_nodes";
+static constexpr const char *EXT_NODES_NVS_VERSION_KEY = "ext_ver";
+static constexpr uint32_t EXT_NODES_SCHEMA_VERSION = 1; // bump on external_mesh_node_t layout change
+static_assert(std::is_trivially_copyable_v<external_mesh_node_t>, "persisted as a raw blob");
+static esp_timer_handle_t s_ext_nodes_save_timer = nullptr;
+
+static void save_external_nodes()
+{
+    std::vector<external_mesh_node_t> nodes;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        nodes = external_nodes;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(EXT_NODES_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR(TAG, "External nodes NOT saved (nvs_open failed): %s", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_set_u32(handle, EXT_NODES_NVS_VERSION_KEY, EXT_NODES_SCHEMA_VERSION);
+    if (err == ESP_OK)
+    {
+        err = nodes.empty() ? nvs_erase_key(handle, EXT_NODES_NVS_KEY)
+                            : nvs_set_blob(handle, EXT_NODES_NVS_KEY, nodes.data(), nodes.size() * sizeof(external_mesh_node_t));
+        if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (err == ESP_OK)
+    {
+        LOG_INFO(TAG, "Saved %u external node(s)", (unsigned)nodes.size());
+    }
+    else
+    {
+        LOG_ERROR(TAG, "External nodes NOT saved: %s", esp_err_to_name(err));
+    }
+}
+
+static void mark_external_nodes_dirty()
+{
+    // Called from the BLE, HTTP and MQTT tasks — create the timer only once.
+    static std::once_flag s_timer_once;
+    std::call_once(s_timer_once, []
+                   {
+        const esp_timer_create_args_t args = {
+            .callback = [](void *) { save_external_nodes(); },
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "ext_nodes_save",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &s_ext_nodes_save_timer) != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to create external nodes save timer");
+        } });
+    if (!s_ext_nodes_save_timer)
+    {
+        return;
+    }
+    esp_timer_stop(s_ext_nodes_save_timer); // debounce: restart the countdown
+    esp_timer_start_once(s_ext_nodes_save_timer, 10 * 1000 * 1000);
+}
+
+#ifdef CONFIG_BLE_MESH_NODE // external nodes only exist on a joined mesh
+static void load_external_nodes()
+{
+    nvs_handle_t handle;
+    if (nvs_open(EXT_NODES_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK)
+    {
+        return;
+    }
+    uint32_t version = 0;
+    size_t size = 0;
+    std::vector<external_mesh_node_t> nodes;
+    if (nvs_get_u32(handle, EXT_NODES_NVS_VERSION_KEY, &version) == ESP_OK && version == EXT_NODES_SCHEMA_VERSION &&
+        nvs_get_blob(handle, EXT_NODES_NVS_KEY, nullptr, &size) == ESP_OK && size % sizeof(external_mesh_node_t) == 0)
+    {
+        nodes.resize(size / sizeof(external_mesh_node_t));
+        if (nvs_get_blob(handle, EXT_NODES_NVS_KEY, nodes.data(), &size) != ESP_OK)
+        {
+            nodes.clear();
+        }
+    }
+    nvs_close(handle);
+
+    for (auto &node : nodes)
+    {
+        node.last_seen_us = 0; // not seen since this boot
+    }
+    const size_t restored = nodes.size();
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        external_nodes = std::move(nodes);
+    }
+    LOG_INFO(TAG, "Restored %u external node(s) from NVS", (unsigned)restored);
+}
+#endif
+
+static void upsert_external_node_onoff(uint16_t addr, uint8_t onoff)
+{
+    bool was_new = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        was_new |= !(node.features & FEATURE_GENERIC_ONOFF);
+        node.onoff = onoff;
+        // Switched on from off: it comes back at its last level (OnOff is bound to
+        // Lightness), not at the 0 its last Lightness status reported while off.
+        if (onoff && node.lightness == 0 && node.last_lightness > 0)
+        {
+            node.lightness = node.last_lightness;
+        }
+        node.features |= FEATURE_GENERIC_ONOFF;
+        node.last_seen_us = esp_timer_get_time();
+    }
+    if (was_new)
+    {
+        mark_external_nodes_dirty();
+    }
+    mqtt_notify_external_node_changed(addr, was_new);
+}
+
+// Lightness/HSL/CTL Server models extend Generic Level Server (Mesh Model spec), so a
+// dimmer would otherwise get a spurious standalone "Level" flag too.
+static constexpr uint16_t GENERIC_LEVEL_EXTENDING_FEATURES =
+    FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+
+// Unicast Range Get, same as the provisioned-node path (ble_mesh_commands.cpp) — an
+// AppKey-bound op, not DevKey-bound, so it works for a node we never provisioned too.
+// Defined near the other external send functions further down; forward-declared here
+// since the upsert_* functions below fire them on first sighting of each feature.
+static void send_external_lightness_range_get(uint16_t addr);
+
+// External node auto-discovery scheduling (defined next to ble_mesh_discover_external_nodes).
+static constexpr uint64_t EXT_DISCOVERY_BOOT_DELAY_US = 15ULL * 1000 * 1000;
+static constexpr uint64_t EXT_DISCOVERY_AFTER_BIND_US = 5ULL * 1000 * 1000;
+static constexpr uint64_t EXT_DISCOVERY_PERIOD_US = 10ULL * 60 * 1000 * 1000;
+static void schedule_external_discovery(uint64_t delay_us);
+#ifdef CONFIG_BLE_MESH_NODE
+static void start_external_discovery_timers();
+#endif
+static void send_external_hsl_range_get(uint16_t addr);
+static void send_external_ctl_temperature_range_get(uint16_t addr);
+
+static void upsert_external_node_level(uint16_t addr, int16_t level)
+{
+    bool was_new = false;
+    bool excluded = false;
+    bool structural_change = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        if (node.features & GENERIC_LEVEL_EXTENDING_FEATURES)
+        {
+            excluded = true;
+        }
+        else
+        {
+            structural_change = was_new || !(node.features & FEATURE_GENERIC_LEVEL);
+            node.level = level;
+            node.features |= FEATURE_GENERIC_LEVEL;
+            node.last_seen_us = esp_timer_get_time();
+        }
+    }
+    if (structural_change)
+    {
+        mark_external_nodes_dirty();
+    }
+    if (!excluded)
+    {
+        mqtt_notify_external_node_changed(addr, was_new || structural_change);
+    }
+}
+
+// HSL sends map HA brightness 0..max onto HSL lightness 0..max/2 (L=0.5 is the pure
+// colour, see ble_mesh_light_hsl_set). This is the inverse, rounded so a
+// send/status round-trip doesn't lose brightness each time.
+static uint16_t hsl_lightness_to_brightness(uint16_t hsl_lightness, uint16_t max_lightness)
+{
+    const uint32_t half = max_lightness / 2;
+    if (half == 0)
+    {
+        return hsl_lightness;
+    }
+    const uint32_t brightness = ((uint32_t)hsl_lightness * max_lightness + half / 2) / half;
+    return (uint16_t)std::min<uint32_t>(brightness, max_lightness);
+}
+
+// Lightness 0 means off (Generic OnOff is bound to Light Lightness Actual).
+static void set_external_node_brightness_locked(external_mesh_node_t &node, uint16_t brightness)
+{
+    node.lightness = brightness;
+    node.onoff = brightness > 0;
+    if (brightness > 0)
+    {
+        node.last_lightness = brightness;
+    }
+}
+
+// Lightness, HSL and CTL statuses all report the node's Light Lightness Actual (the
+// three are bound); in hs mode that's the halved HSL lightness, so the conversion to HA
+// brightness depends on the node's current mode, not on which status arrived.
+static uint16_t lightness_actual_to_brightness(const external_mesh_node_t &node, uint16_t lightness)
+{
+    return node.color_mode == color_mode_t::hs ? hsl_lightness_to_brightness(lightness, node.max_lightness)
+                                               : lightness;
+}
+
+// A node with both HSL and CTL answers both discovery Gets (CTL's always last), so only
+// a Set we sent may switch its mode; a single-colour-model node's mode is unambiguous.
+static void update_external_color_mode_locked(external_mesh_node_t &node, color_mode_t mode, bool from_set)
+{
+    const uint16_t both = FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+    if (from_set || (node.features & both) != both)
+    {
+        node.color_mode = mode;
+    }
+}
+
+static void finish_external_light_upsert(uint16_t addr, bool was_new, bool feature_newly_set,
+                                         void (*range_get)(uint16_t))
+{
+    if (feature_newly_set)
+    {
+        range_get(addr);
+    }
+    if (feature_newly_set || was_new)
+    {
+        mark_external_nodes_dirty();
+    }
+    // A new feature changes what HA should offer — re-announce, don't just publish state.
+    mqtt_notify_external_node_changed(addr, was_new || feature_newly_set);
+}
+
+static void upsert_external_node_lightness(uint16_t addr, uint16_t lightness)
+{
+    bool was_new = false;
+    bool feature_newly_set = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_LIGHTNESS);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
+        node.features |= FEATURE_LIGHT_LIGHTNESS;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.last_seen_us = esp_timer_get_time();
+    }
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_lightness_range_get);
+}
+
+static void upsert_external_node_hsl(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness, bool from_set)
+{
+    bool was_new = false;
+    bool feature_newly_set = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_HSL);
+        node.features |= FEATURE_LIGHT_HSL;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.hue = hue;
+        node.saturation = saturation;
+        update_external_color_mode_locked(node, color_mode_t::hs, from_set);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
+        node.last_seen_us = esp_timer_get_time();
+    }
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_hsl_range_get);
+}
+
+static void upsert_external_node_ctl(uint16_t addr, uint16_t temperature, uint16_t lightness, bool from_set)
+{
+    bool was_new = false;
+    bool feature_newly_set = false;
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        auto &node = get_or_create_external_node_locked(addr, &was_new);
+        feature_newly_set = !(node.features & FEATURE_LIGHT_CTL);
+        node.features |= FEATURE_LIGHT_CTL;
+        node.features &= ~FEATURE_GENERIC_LEVEL; // retroactive: probe order isn't guaranteed
+        node.temperature = temperature;
+        update_external_color_mode_locked(node, color_mode_t::color_temp, from_set);
+        set_external_node_brightness_locked(node, lightness_actual_to_brightness(node, lightness));
+        node.last_seen_us = esp_timer_get_time();
+    }
+    finish_external_light_upsert(addr, was_new, feature_newly_set, &send_external_ctl_temperature_range_get);
+}
+
+// Range replies only ever answer our own unicast Range Get to an already-known node;
+// one for an unknown address (e.g. a late reply) is dropped rather than creating a
+// featureless node.
+static void upsert_external_node_lightness_range(uint16_t addr, uint16_t min_lightness, uint16_t max_lightness)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_lightness = min_lightness;
+        node->max_lightness = max_lightness;
+    }
+    // Re-announce discovery so HA picks up the real brightness_scale.
+    mark_external_nodes_dirty();
+    mqtt_notify_external_node_changed(addr, true);
+}
+
+static void upsert_external_node_hsl_range(uint16_t addr, uint16_t min_hue, uint16_t max_hue,
+                                            uint16_t min_saturation, uint16_t max_saturation)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_hue = min_hue;
+        node->max_hue = max_hue;
+        node->min_saturation = min_saturation;
+        node->max_saturation = max_saturation;
+    }
+    mark_external_nodes_dirty();
+    mqtt_notify_external_node_changed(addr, true);
+}
+
+static void upsert_external_node_ctl_range(uint16_t addr, uint16_t min_temp, uint16_t max_temp)
+{
+    {
+        std::lock_guard<std::mutex> lock(external_nodes_mutex);
+        external_mesh_node_t *node = find_external_node_locked(addr);
+        if (!node)
+        {
+            return;
+        }
+        node->min_temp = min_temp;
+        node->max_temp = max_temp;
+    }
+    // Re-announce discovery so HA picks up the real min/max_kelvin.
+    mark_external_nodes_dirty();
+    mqtt_notify_external_node_changed(addr, true);
+}
 
 static struct esp_ble_mesh_key
 {
@@ -100,7 +573,12 @@ static esp_ble_mesh_comp_t composition = {
 uint8_t MyKey[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
 static esp_ble_mesh_prov_t provision = {
-
+#if CONFIG_BLE_MESH_NODE
+    // Node-role field, available regardless of CONFIG_BLE_MESH_PROVISIONER.
+    .uuid = dev_uuid,
+#endif
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    // Provisioner-role fields — standalone SKU only.
     .prov_uuid = dev_uuid,
     .prov_unicast_addr = PROV_OWN_ADDR,
     .prov_start_address = 0x0005,
@@ -111,6 +589,7 @@ static esp_ble_mesh_prov_t provision = {
     .prov_static_oob_len = 0,
     .flags = 0x00,
     .iv_index = 0x00,
+#endif
 };
 
 ////////////////////////////////////////////////////////
@@ -187,6 +666,10 @@ parsed_node_info_t parse_composition_data(const uint8_t *data, size_t length, ui
             {
                 info.features |= FEATURE_GENERIC_ONOFF;
             }
+            else if (model_id == ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV)
+            {
+                info.features |= FEATURE_GENERIC_LEVEL;
+            }
             else if (model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV)
             {
                 info.features |= FEATURE_LIGHT_LIGHTNESS;
@@ -241,6 +724,31 @@ void Bind_App_Key_queue(std::shared_ptr<bm2mqtt_node_info>& node)
                                               set_state.model_app_bind.element_addr = node->unicast;
                                               set_state.model_app_bind.model_app_idx = store.app_idx;
                                               set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_SRV;
+                                              set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
+                                              esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
+                                              if (err)
+                                              {
+                                                  LOG_ERROR(TAG, "call to esp_ble_mesh_config_client_set_state failed");
+                                              }
+                                          },
+                                          .opcode = ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND,
+                                          .retries_left = 3,
+                                      });
+    }
+
+    if ((node->features_to_bind & FEATURE_GENERIC_LEVEL) != 0)
+    {
+        node->features_to_bind &= ~FEATURE_GENERIC_LEVEL;
+        message_queue().enqueue(node, message_payload{
+                                          .send = [](std::shared_ptr<bm2mqtt_node_info> &node)
+                                          {
+                                              LOG_INFO(TAG, "Generic Level model for node 0x%04X", node->unicast);
+                                              esp_ble_mesh_client_common_param_t common = {0};
+                                              esp_ble_mesh_cfg_client_set_state_t set_state = {0};
+                                              node_manager().ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
+                                              set_state.model_app_bind.element_addr = node->unicast;
+                                              set_state.model_app_bind.model_app_idx = store.app_idx;
+                                              set_state.model_app_bind.model_id = ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_SRV;
                                               set_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
                                               esp_err_t err = esp_ble_mesh_config_client_set_state(&common, &set_state);
                                               if (err)
@@ -545,13 +1053,56 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
     if (param->error_code)
     {
         LOG_ERROR(TAG, "Send generic client message failed, opcode 0x%04" PRIx32, opcode);
+        external_node_queue().on_send_complete(addr, opcode, false);
         return;
+    }
+    // Lets the external node queue move on (ack) or retry (timeout); no-op for sends it
+    // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
+    if (event == ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT)
+    {
+        if (external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT))
+        {
+            return; // reply for a node forgotten meanwhile — don't bring it back
+        }
     }
 
     auto node = node_manager().get_node(addr);
     if (!node)
     {
-        LOG_ERROR(TAG, "Get node info failed");
+        // Not a node we provisioned — maybe a reply to a group-addressed discovery Get
+        // (ble_mesh_discover_external_nodes). Group replies can't correlate to "the"
+        // request, so they arrive as PUBLISH_EVT with opcode = the STATUS opcode, not
+        // GET_STATE_EVT/SET_STATE_EVT with opcode = what we sent — handle both.
+        if (event == ESP_BLE_MESH_GENERIC_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT)
+        {
+            switch (opcode)
+            {
+            case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET:
+            case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET:
+                upsert_external_node_onoff(addr, param->status_cb.onoff_status.present_onoff);
+                break;
+            case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_GET:
+            case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET:
+                upsert_external_node_level(addr, param->status_cb.level_status.present_level);
+                break;
+            default:
+                break;
+            }
+        }
+        else if (event == ESP_BLE_MESH_GENERIC_CLIENT_PUBLISH_EVT)
+        {
+            switch (opcode)
+            {
+            case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS:
+                upsert_external_node_onoff(addr, param->status_cb.onoff_status.present_onoff);
+                break;
+            case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_STATUS:
+                upsert_external_node_level(addr, param->status_cb.level_status.present_level);
+                break;
+            default:
+                break;
+            }
+        }
         return;
     }
 
@@ -573,7 +1124,8 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
 
         case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_GET:
         {
-            LOG_INFO(TAG, "Level Status (Get): %d", param->status_cb.level_status.present_level);
+            node->level = param->status_cb.level_status.present_level;
+            LOG_INFO(TAG, "Level Status (Get): %d", node->level);
         }
         break;
 
@@ -656,13 +1208,66 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
     if (param->error_code)
     {
         LOG_ERROR(TAG, "Send light client message failed, opcode 0x%04" PRIx32, opcode);
+        external_node_queue().on_send_complete(addr, opcode, false);
         return;
+    }
+    // Lets the external node queue move on (ack) or retry (timeout); no-op for sends it
+    // isn't waiting on, e.g. provisioned nodes' (message_queue) or group Gets.
+    if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT || event == ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT)
+    {
+        if (external_node_queue().on_send_complete(addr, opcode, event != ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT))
+        {
+            return; // reply for a node forgotten meanwhile — don't bring it back
+        }
     }
 
     auto node = node_manager().get_node(addr);
     if (!node)
     {
-        LOG_ERROR(TAG, "Get node info failed");
+        // Not a node we provisioned — maybe a discovery reply (see matching comment
+        // in ble_mesh_generic_client_cb re: PUBLISH_EVT vs GET/SET_STATE_EVT).
+        if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET) ||
+            (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET) ||
+            (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS))
+        {
+            upsert_external_node_lightness(addr, param->status_cb.lightness_status.present_lightness);
+        }
+        else if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET) ||
+                 (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET) ||
+                 (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS))
+        {
+            upsert_external_node_hsl(addr, param->status_cb.hsl_status.hsl_hue,
+                                      param->status_cb.hsl_status.hsl_saturation,
+                                      param->status_cb.hsl_status.hsl_lightness,
+                                      event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT);
+        }
+        else if ((event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET) ||
+                 (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET) ||
+                 (event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_STATUS))
+        {
+            upsert_external_node_ctl(addr, param->status_cb.ctl_status.present_ctl_temperature,
+                                      param->status_cb.ctl_status.present_ctl_lightness,
+                                      event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT);
+        }
+        // Range Get replies: always unicast (see send_external_*_range_get), so only
+        // ever arrive as a GET_STATE_EVT ack, never PUBLISH_EVT.
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET)
+        {
+            upsert_external_node_lightness_range(addr, param->status_cb.lightness_range_status.range_min,
+                                                  param->status_cb.lightness_range_status.range_max);
+        }
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET)
+        {
+            upsert_external_node_hsl_range(addr, param->status_cb.hsl_range_status.hue_range_min,
+                                            param->status_cb.hsl_range_status.hue_range_max,
+                                            param->status_cb.hsl_range_status.saturation_range_min,
+                                            param->status_cb.hsl_range_status.saturation_range_max);
+        }
+        else if (event == ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT && opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET)
+        {
+            upsert_external_node_ctl_range(addr, param->status_cb.ctl_temperature_range_status.range_min,
+                                            param->status_cb.ctl_temperature_range_status.range_max);
+        }
         return;
     }
 
@@ -674,7 +1279,7 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
         case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET:
         {
             node->hsl_h = param->status_cb.hsl_status.hsl_hue;
-            node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
+            node->hsl_l = hsl_lightness_to_brightness(param->status_cb.hsl_status.hsl_lightness, node->max_lightness);
             node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
             LOG_INFO(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s, node->hsl_l);
         }
@@ -700,7 +1305,11 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
                      param->status_cb.lightness_status.present_lightness,
                      param->status_cb.lightness_status.target_lightness,
                      param->status_cb.lightness_status.remain_time);
-            node->hsl_l = param->status_cb.lightness_status.present_lightness;
+            // Bound to the halved HSL lightness in hs mode — same inverse as the HSL Get
+            // above, or a refresh's Lightness Get (sent after it) undoes that one.
+            node->hsl_l = node->color_mode == color_mode_t::hs
+                              ? hsl_lightness_to_brightness(param->status_cb.lightness_status.present_lightness, node->max_lightness)
+                              : param->status_cb.lightness_status.present_lightness;
         }
         break;
 
@@ -790,18 +1399,165 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
 bool enable_provisioning = true;
 bool enable_auto_provisioning = false;
 
+static const uint16_t GROUP_SUBSCRIBABLE_MODELS[] = {
+    ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI,
+    ESP_BLE_MESH_MODEL_ID_GEN_LEVEL_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_HSL_CLI,
+    ESP_BLE_MESH_MODEL_ID_LIGHT_CTL_CLI,
+};
+
+void ble_mesh_subscribe_group_addr(uint16_t group_addr)
+{
+    if (group_addr == 0) return;
+
+    for (size_t i = 0; i < sizeof(GROUP_SUBSCRIBABLE_MODELS) / sizeof(GROUP_SUBSCRIBABLE_MODELS[0]); i++) {
+        esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
+            local_element_addr, ESP_BLE_MESH_CID_NVAL, GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        if (err != ESP_OK) {
+            LOG_WARN(TAG, "Failed to subscribe model 0x%04X to group 0x%04X: %s",
+                     GROUP_SUBSCRIBABLE_MODELS[i], group_addr, esp_err_to_name(err));
+        } else {
+            LOG_INFO(TAG, "Subscribed model 0x%04X to group 0x%04X", GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        }
+    }
+}
+
+void ble_mesh_unsubscribe_group_addr(uint16_t group_addr)
+{
+    if (group_addr == 0) return;
+
+    for (size_t i = 0; i < sizeof(GROUP_SUBSCRIBABLE_MODELS) / sizeof(GROUP_SUBSCRIBABLE_MODELS[0]); i++) {
+        esp_err_t err = esp_ble_mesh_model_unsubscribe_group_addr(
+            local_element_addr, ESP_BLE_MESH_CID_NVAL, GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        if (err != ESP_OK) {
+            LOG_WARN(TAG, "Failed to unsubscribe model 0x%04X from group 0x%04X: %s",
+                     GROUP_SUBSCRIBABLE_MODELS[i], group_addr, esp_err_to_name(err));
+        } else {
+            LOG_INFO(TAG, "Unsubscribed model 0x%04X from group 0x%04X", GROUP_SUBSCRIBABLE_MODELS[i], group_addr);
+        }
+    }
+}
+
+#ifdef CONFIG_BLE_MESH_NODE // Standalone puts none of its nodes in a group
+static void ble_mesh_subscribe_all_configured_groups(void)
+{
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    for (uint8_t i = 0; i < count; i++) {
+        ble_mesh_subscribe_group_addr(group_addrs[i]);
+    }
+}
+#endif
+
+static void ble_mesh_config_server_cb(esp_ble_mesh_cfg_server_cb_event_t event,
+                                       esp_ble_mesh_cfg_server_cb_param_t *param)
+{
+    if (event != ESP_BLE_MESH_CFG_SERVER_STATE_CHANGE_EVT)
+    {
+        return;
+    }
+
+    // Join-existing-as-node: the app_idx to send with is the one our Client models are
+    // bound to (Model App Bind), not just the last AppKey added — a provisioner can add
+    // several AppKeys. AppKey Add only seeds it when nothing is bound yet.
+    const uint16_t op = param->ctx.recv_op;
+    if (op == ESP_BLE_MESH_MODEL_OP_APP_KEY_ADD)
+    {
+        uint16_t app_idx = param->value.state_change.appkey_add.app_idx;
+        LOG_INFO(TAG, "Config AppKey Add received: net_idx 0x%04x, app_idx 0x%04x",
+                 param->value.state_change.appkey_add.net_idx, app_idx);
+        if (store.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+        {
+            store.app_idx = app_idx;
+            mesh_config_save_node_app_idx(app_idx);
+        }
+    }
+    else if (op == ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND)
+    {
+        const auto &bind = param->value.state_change.mod_app_bind;
+        LOG_INFO(TAG, "Config Model App Bind received: element 0x%04x, app_idx 0x%04x, company 0x%04x, model 0x%04x",
+                 bind.element_addr, bind.app_idx, bind.company_id, bind.model_id);
+        bool is_our_client_model = false;
+        for (uint16_t model_id : GROUP_SUBSCRIBABLE_MODELS)
+        {
+            is_our_client_model |= (bind.model_id == model_id);
+        }
+        if (is_our_client_model && bind.company_id == ESP_BLE_MESH_CID_NVAL)
+        {
+            if (store.app_idx != bind.app_idx)
+            {
+                store.app_idx = bind.app_idx;
+                mesh_config_save_node_app_idx(bind.app_idx);
+            }
+            schedule_external_discovery(EXT_DISCOVERY_AFTER_BIND_US);
+        }
+    }
+    else if (op == ESP_BLE_MESH_MODEL_OP_APP_KEY_DELETE)
+    {
+        uint16_t app_idx = param->value.state_change.appkey_delete.app_idx;
+        LOG_INFO(TAG, "Config AppKey Delete received: app_idx 0x%04x", app_idx);
+        if (store.app_idx == app_idx)
+        {
+            store.app_idx = ESP_BLE_MESH_KEY_UNUSED;
+            mesh_config_save_node_app_idx(ESP_BLE_MESH_KEY_UNUSED);
+        }
+    }
+}
+
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+esp_err_t ble_mesh_apply_local_app_key(const uint8_t app_key[16])
+{
+    // add_local_app_key()/update_local_app_key() both go through the async BTC queue and
+    // return ESP_OK as soon as the request is queued, regardless of whether the stack
+    // actually accepts it — so a failed add (AppKeyIndex already in use, from any earlier
+    // boot) can never be detected from its return value to fall back to update. Check
+    // whether the index already holds a key first (a synchronous local lookup) instead.
+    bool app_key_exists = esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx) != NULL;
+    return app_key_exists
+               ? esp_ble_mesh_provisioner_update_local_app_key(app_key, store.net_idx, store.app_idx)
+               : esp_ble_mesh_provisioner_add_local_app_key(app_key, store.net_idx, store.app_idx);
+}
+#endif // CONFIG_BLE_MESH_PROVISIONER
+
 esp_err_t ble_mesh_init(void)
 {
     ble_mesh_get_dev_uuid(dev_uuid);
 
-    // uint8_t match[2] = {0xdd, 0xdd};
     esp_err_t err = ESP_OK;
+
+    mesh_config_t mesh_cfg = {};
+    mesh_config_load(&mesh_cfg);
+
+    // A saved mode this SKU can't run (e.g. a device that ran the Node build, then got
+    // the Provisioner release over OTA) would leave BLE Mesh down on every boot, with no
+    // way to change it outside the captive portal. Fall back to the compiled role —
+    // before esp_ble_mesh_init(), which is what loads the persisted stack role.
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    mesh_mode_t supported_mode = MESH_MODE_STANDALONE;
+#else
+    mesh_mode_t supported_mode = MESH_MODE_JOIN_EXISTING;
+#endif
+    if (mesh_cfg.mode != supported_mode)
+    {
+        LOG_WARN(TAG, "Saved mesh mode %d isn't supported by this firmware, switching to %d", mesh_cfg.mode, supported_mode);
+        mesh_config_reset_stack_state(); // the other role's keys/seq/role are useless here
+        mesh_config_update([](mesh_config_t *cfg, void *ctx) {
+            cfg->mode = *static_cast<mesh_mode_t *>(ctx);
+            cfg->node_addr = 0;
+            cfg->node_net_idx = 0;
+            cfg->node_app_idx = 0xFFFF; // ESP_BLE_MESH_KEY_UNUSED
+        }, &supported_mode);
+        mesh_config_load(&mesh_cfg);
+    }
 
     store.net_idx = ESP_BLE_MESH_KEY_PRIMARY;
     store.app_idx = APP_KEY_IDX;
-    memset(prov_key.app_key, APP_KEY_OCTET, sizeof(prov_key.app_key));
+    memcpy(prov_key.app_key, mesh_cfg.app_key, sizeof(prov_key.app_key));
 
     esp_ble_mesh_register_prov_callback(ble_mesh_provisioning_cb);
+    esp_ble_mesh_register_config_server_callback(ble_mesh_config_server_cb);
     esp_ble_mesh_register_config_client_callback(ble_mesh_config_client_cb);
     esp_ble_mesh_register_generic_client_callback(ble_mesh_generic_client_cb);
     esp_ble_mesh_register_light_client_callback(ble_mesh_light_client_cb);
@@ -813,29 +1569,552 @@ esp_err_t ble_mesh_init(void)
         return err;
     }
 
-    // err = esp_ble_mesh_provisioner_set_dev_uuid_match(match, sizeof(match), 0x0, false);
-    // if (err != ESP_OK) {
-    //     LOG_ERROR(TAG, "Failed to set matching device uuid (err %d)", err);
-    //     return err;
-    // }
+    if (mesh_cfg.mode == MESH_MODE_JOIN_EXISTING)
+    {
+#ifdef CONFIG_BLE_MESH_NODE
+        // Join as a real node (provisioned by nRF Mesh etc.) rather than self-assigning
+        // an address — avoids the address collisions from issue #40. AppKey arrives
+        // later via Config AppKey Add.
+        local_element_addr = mesh_cfg.node_addr;
+        store.net_idx = mesh_cfg.node_net_idx;
+        store.app_idx = mesh_cfg.node_app_idx;
 
-    err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+        err = esp_ble_mesh_node_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to enable node provisioning (err %d)", err);
+            return err;
+        }
+
+        ble_mesh_subscribe_all_configured_groups();
+        load_external_nodes();
+        start_external_discovery_timers();
+
+        LOG_INFO(TAG, "BLE Mesh Node ready (mode=join_existing, addr=0x%04X)%s",
+                 local_element_addr, local_element_addr == 0 ? " — not yet provisioned" : "");
+        return ESP_OK;
+#else
+        // Mirror of the Node-only guard below: Node role isn't compiled into this SKU.
+        LOG_ERROR(TAG, "Join-existing mode requested but this firmware is a Provisioner-only build (CONFIG_BLE_MESH_NODE disabled)");
+        return ESP_ERR_NOT_SUPPORTED;
+#endif // CONFIG_BLE_MESH_NODE
+    }
+
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    local_element_addr = PROV_OWN_ADDR;
+    err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
     if (err != ESP_OK)
     {
         LOG_ERROR(TAG, "Failed to enable mesh provisioner (err %d)", err);
         return err;
     }
 
-    err = esp_ble_mesh_provisioner_add_local_app_key(prov_key.app_key, store.net_idx, store.app_idx);
+    err = ble_mesh_apply_local_app_key(prov_key.app_key);
     if (err != ESP_OK)
     {
-        LOG_ERROR(TAG, "Failed to add local AppKey (err %d)", err);
+        LOG_ERROR(TAG, "Failed to set AppKey (err %d)", err);
         return err;
     }
 
-    LOG_INFO(TAG, "BLE Mesh Provisioner initialized");
+    LOG_INFO(TAG, "BLE Mesh Provisioner initialized (mode=standalone)");
 
     return err;
+#else
+    // Last-resort guard: this Node-only build can't do standalone mode at all.
+    LOG_ERROR(TAG, "Standalone provisioner mode requested but this firmware is a Node-only build (CONFIG_BLE_MESH_PROVISIONER disabled)");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif // CONFIG_BLE_MESH_PROVISIONER
+}
+
+bool ble_mesh_get_local_keys_hex(char *net_key_hex, size_t net_key_hex_len,
+                                  char *app_key_hex, size_t app_key_hex_len)
+{
+    net_key_hex[0] = '\0';
+    app_key_hex[0] = '\0';
+
+    // Node role (join-existing) and Provisioner role (standalone) each keep their own
+    // local key tables — pick the getter matching current mode.
+    mesh_config_t mesh_cfg = {};
+    mesh_config_load(&mesh_cfg);
+    bool is_node = mesh_cfg.mode == MESH_MODE_JOIN_EXISTING;
+
+    // Each getter only exists in a build with its role compiled in.
+    const uint8_t *net_key = NULL;
+    const uint8_t *app_key = NULL;
+#ifdef CONFIG_BLE_MESH_NODE
+    if (is_node)
+    {
+        net_key = esp_ble_mesh_node_get_local_net_key(store.net_idx);
+        app_key = esp_ble_mesh_node_get_local_app_key(store.app_idx);
+    }
+#endif
+#ifdef CONFIG_BLE_MESH_PROVISIONER
+    if (!is_node)
+    {
+        net_key = esp_ble_mesh_provisioner_get_local_net_key(store.net_idx);
+        app_key = esp_ble_mesh_provisioner_get_local_app_key(store.net_idx, store.app_idx);
+    }
+#endif
+    if (net_key == NULL || app_key == NULL)
+    {
+        return false;
+    }
+    strlcpy(net_key_hex, bt_hex(net_key, 16), net_key_hex_len);
+    strlcpy(app_key_hex, bt_hex(app_key, 16), app_key_hex_len);
+    return true;
+}
+
+void for_each_external_node(std::function<void(const external_mesh_node_t &)> func)
+{
+    std::lock_guard<std::mutex> lock(external_nodes_mutex);
+    for (const auto &n : external_nodes)
+    {
+        func(n);
+    }
+}
+
+// Composition Data Get needs a DevKey we don't have for external nodes, so probe each
+// model type instead and see who answers (see the client callbacks' unknown-node paths).
+static esp_err_t send_group_get(esp_ble_mesh_model_t *model, uint32_t opcode, uint16_t group_addr, bool is_light)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    common.opcode = opcode;
+    common.model = model;
+    common.ctx.net_idx = store.net_idx;
+    common.ctx.app_idx = store.app_idx;
+    common.ctx.addr = group_addr;
+    common.ctx.send_ttl = MSG_SEND_TTL;
+    common.msg_timeout = MSG_TIMEOUT;
+
+    if (is_light)
+    {
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        return esp_ble_mesh_light_client_get_state(&common, &get_state);
+    }
+    esp_ble_mesh_generic_client_get_state_t get_state = {0};
+    return esp_ble_mesh_generic_client_get_state(&common, &get_state);
+}
+
+// Serialized via external_node_queue (see external_node_queue.h). Lightness/HSL/CTL
+// are queued before Level so upsert_external_node_level already knows to exclude them.
+static void queue_discovery_burst_for_group(uint16_t group_addr)
+{
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
+                                   {
+        esp_err_t err = send_group_get(onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET, group_addr, false);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Failed to send OnOff discovery Get to group 0x%04X (err %d)", group_addr, err);
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
+                                   {
+        esp_err_t err = send_group_get(lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET, group_addr, true);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Failed to send Lightness discovery Get to group 0x%04X (err %d)", group_addr, err);
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
+                                   {
+        esp_err_t err = send_group_get(hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_GET, group_addr, true);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Failed to send HSL discovery Get to group 0x%04X (err %d)", group_addr, err);
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
+                                   {
+        esp_err_t err = send_group_get(ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_GET, group_addr, true);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Failed to send CTL discovery Get to group 0x%04X (err %d)", group_addr, err);
+        }
+        return err; }});
+    external_node_queue().enqueue({.send = [group_addr]() -> esp_err_t
+                                   {
+        esp_err_t err = send_group_get(level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_GET, group_addr, false);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Failed to send Level discovery Get to group 0x%04X (err %d)", group_addr, err);
+        }
+        return err; }});
+
+    LOG_INFO(TAG, "Queued external node discovery Gets to group 0x%04X", group_addr);
+}
+
+esp_err_t ble_mesh_discover_external_nodes()
+{
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    if (count == 0)
+    {
+        LOG_WARN(TAG, "Cannot discover external nodes: no group address configured");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    for (uint8_t i = 0; i < count; i++)
+    {
+        queue_discovery_burst_for_group(group_addrs[i]);
+    }
+    return ESP_OK;
+}
+
+// Re-discover External Mesh Nodes on our own (after boot, after an AppKey gets bound,
+// then periodically) to refresh their live state and find new ones.
+static esp_timer_handle_t s_ext_discovery_once = nullptr;
+
+#ifdef CONFIG_BLE_MESH_NODE
+static esp_timer_handle_t s_ext_discovery_periodic = nullptr;
+
+static void external_discovery_timer_cb(void *)
+{
+    if (local_element_addr == 0 || store.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+    {
+        return; // not provisioned / no AppKey yet — nothing we could send with
+    }
+    uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
+    uint8_t count = 0;
+    mesh_config_load_group_addrs(group_addrs, MESH_MAX_GROUP_ADDRS, &count);
+    if (count > 0)
+    {
+        ble_mesh_discover_external_nodes();
+    }
+}
+#endif
+
+static void schedule_external_discovery(uint64_t delay_us)
+{
+    if (!s_ext_discovery_once)
+    {
+        return;
+    }
+    esp_timer_stop(s_ext_discovery_once); // re-arm if already pending
+    esp_timer_start_once(s_ext_discovery_once, delay_us);
+}
+
+#ifdef CONFIG_BLE_MESH_NODE
+static void start_external_discovery_timers()
+{
+    if (s_ext_discovery_once)
+    {
+        return;
+    }
+    esp_timer_create_args_t args = {
+        .callback = &external_discovery_timer_cb,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "ext_disc_once",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&args, &s_ext_discovery_once) != ESP_OK)
+    {
+        LOG_ERROR(TAG, "Failed to create external discovery timer");
+        return;
+    }
+    args.name = "ext_disc_periodic";
+    if (esp_timer_create(&args, &s_ext_discovery_periodic) == ESP_OK)
+    {
+        esp_timer_start_periodic(s_ext_discovery_periodic, EXT_DISCOVERY_PERIOD_US);
+    }
+    schedule_external_discovery(EXT_DISCOVERY_BOOT_DELAY_US);
+}
+#endif
+
+esp_err_t ble_mesh_send_external_command(uint16_t addr, bool onoff)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Queued (external_node_queue.h) — caller only gets "accepted"; acked sends are retried.
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, onoff]() -> esp_err_t
+        {
+        // Group Sets should be unacknowledged (Mesh spec) since multiple elements may reply.
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_generic_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET : ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK;
+        common.model = onoff_client.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        set_state.onoff_set.op_en = false;
+        set_state.onoff_set.onoff = onoff ? 1 : 0;
+        set_state.onoff_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external OnOff Set to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET,
+    });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_level_command(uint16_t addr, int16_t level)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, level]() -> esp_err_t
+        {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_generic_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET : ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET_UNACK;
+        common.model = level_client.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        set_state.level_set.op_en = false;
+        set_state.level_set.level = level;
+        set_state.level_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external Level Set to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET,
+    });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_lightness_command(uint16_t addr, uint16_t lightness)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, lightness]() -> esp_err_t
+        {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK;
+        common.model = lightness_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        set_state.lightness_set.op_en = false;
+        set_state.lightness_set.lightness = lightness;
+        set_state.lightness_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external Lightness Set to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET,
+    });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_hsl_command(uint16_t addr, uint16_t hue, uint16_t saturation, uint16_t lightness)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    external_mesh_node_t node{};
+    ble_mesh_find_external_node(addr, node); // max_lightness keeps its 65535 default if unknown
+
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, hue, saturation, lightness, max_lightness = node.max_lightness]() -> esp_err_t
+        {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
+        common.model = hsl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        set_state.hsl_set.hsl_hue = hue;
+        set_state.hsl_set.hsl_saturation = saturation;
+        // Same scaling as ble_mesh_light_hsl_set (ble_mesh_commands.cpp): L=0.5 of max is
+        // the pure saturated color in HSL space.
+        set_state.hsl_set.hsl_lightness = max_lightness > 0
+            ? (uint16_t)((uint32_t)lightness * (max_lightness / 2) / max_lightness)
+            : lightness;
+        set_state.hsl_set.op_en = false;
+        set_state.hsl_set.delay = 0;
+        set_state.hsl_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external HSL Set to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET,
+    });
+
+    return ESP_OK;
+}
+
+esp_err_t ble_mesh_send_external_ctl_command(uint16_t addr, uint16_t temperature, uint16_t lightness)
+{
+    if (addr == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const bool acknowledged = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+    external_node_queue().enqueue({
+        .send = [addr, temperature, lightness]() -> esp_err_t
+        {
+        bool unicast = ESP_BLE_MESH_ADDR_IS_UNICAST(addr);
+
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_set_state_t set_state = {0};
+        common.opcode = unicast ? ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET_UNACK;
+        common.model = ctl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        set_state.ctl_set.ctl_temperature = temperature;
+        set_state.ctl_set.ctl_lightness = lightness;
+        set_state.ctl_set.ctl_delta_uv = 0;
+        set_state.ctl_set.op_en = false;
+        set_state.ctl_set.delay = 0;
+        set_state.ctl_set.tid = store.tid++;
+
+        esp_err_t err = esp_ble_mesh_light_client_set_state(&common, &set_state);
+        if (err != ESP_OK)
+        {
+            LOG_ERROR(TAG, "Queued external CTL Set to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = acknowledged ? addr : (uint16_t)0,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET,
+    });
+
+    return ESP_OK;
+}
+
+// Range Get carries no payload — just the opcode — same as the provisioned-node
+// versions (ble_mesh_commands.cpp's ble_mesh_lightness_range_get and friends).
+static void send_external_lightness_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET;
+        common.model = lightness_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external Lightness Range Get to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET,
+    });
+}
+
+static void send_external_hsl_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET;
+        common.model = hsl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external HSL Range Get to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_GET,
+    });
+}
+
+static void send_external_ctl_temperature_range_get(uint16_t addr)
+{
+    external_node_queue().enqueue({
+        .send = [addr]() -> esp_err_t
+        {
+        esp_ble_mesh_client_common_param_t common = {0};
+        esp_ble_mesh_light_client_get_state_t get_state = {0};
+        common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET;
+        common.model = ctl_cli.model;
+        common.ctx.net_idx = store.net_idx;
+        common.ctx.app_idx = store.app_idx;
+        common.ctx.addr = addr;
+        common.ctx.send_ttl = MSG_SEND_TTL;
+        common.msg_timeout = EXTERNAL_SEND_ACK_TIMEOUT_MS;
+
+        esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get_state);
+        if (err != ESP_OK)
+        {
+            LOG_WARN(TAG, "Queued external CTL Temperature Range Get to 0x%04X failed (err %d)", addr, err);
+        }
+        return err; },
+        .ack_addr = addr,
+        .ack_opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET,
+    });
 }
 
 void ble_mesh_refresh_all_nodes()
@@ -990,6 +2269,7 @@ ble_mesh_ctl_bool_set_args_t ctl_bool_set_args;
 
 void ble_mesh_set_provisioning_enabled(bool enabled_value)
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     LOG_INFO(TAG, "Current Value : %s Requested Value : %s", enable_provisioning ? "ON" : "OFF", enabled_value ? "ON" : "OFF");
     if (enabled_value != enable_provisioning)
     {
@@ -997,23 +2277,36 @@ void ble_mesh_set_provisioning_enabled(bool enabled_value)
 
         if (enable_provisioning)
         {
-            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            int err = esp_ble_mesh_provisioner_prov_enable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV enabled");
+                LOG_ERROR(TAG, "Failed to enable PB-ADV | PB-GATT provisioning (err %d)", err);
+            }
+            else
+            {
+                LOG_INFO(TAG, "PB-ADV | PB-GATT provisioning enabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }
         else if (!enable_provisioning)
         {
-            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV));
+            int err = esp_ble_mesh_provisioner_prov_disable((esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
             if (err != ESP_OK)
             {
-                LOG_INFO(TAG, "ESP_BLE_MESH_PROV_ADV disabled");
+                LOG_ERROR(TAG, "Failed to disable PB-ADV | PB-GATT provisioning (err %d)", err);
+            }
+            else
+            {
+                LOG_INFO(TAG, "PB-ADV | PB-GATT provisioning disabled");
             }
             mqtt_publish_provisioning_enabled(enable_provisioning);
         }
     }
+#else
+    // No local provisioner role to toggle in a Node-only build.
+    (void)enabled_value;
+    LOG_WARN(TAG, "ble_mesh_set_provisioning_enabled() ignored — this is a Node-only build");
+#endif // CONFIG_BLE_MESH_PROVISIONER
 }
 
 bool ble_mesh_get_provisioning_enabled(void)

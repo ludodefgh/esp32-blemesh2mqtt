@@ -1,0 +1,24 @@
+# Override some defaults so BT stack is enabled
+# by default in this example
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BTU_TASK_STACK_SIZE=4512
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# Override some defaults of ESP BLE Mesh
+CONFIG_BLE_MESH=y
+CONFIG_BLE_MESH_PROVISIONER=y
+CONFIG_BLE_MESH_PB_GATT=y
+CONFIG_BLE_MESH_TX_SEG_MSG_COUNT=10
+CONFIG_BLE_MESH_RX_SEG_MSG_COUNT=10
+CONFIG_BLE_MESH_CFG_CLI=y
+CONFIG_BLE_MESH_GENERIC_ONOFF_CLI=y
+
+# Persist NetKey/AppKey/node table/sequence across reboots — without this, every
+# reboot of this test-harness provisioner (which happens on every serial port open,
+# a known quirk of this board's USB-Serial-JTAG) forgets all previously-provisioned
+# nodes and restarts address assignment from PROV_START_ADDRESS, colliding with
+# devices it already provisioned in an earlier session.
+CONFIG_BLE_MESH_SETTINGS=y
+
+# Test rig boards are ESP32-C3
+CONFIG_IDF_TARGET="esp32c3"

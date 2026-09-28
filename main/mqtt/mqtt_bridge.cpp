@@ -76,7 +76,7 @@ static cJSON *create_bridge_device_object()
 
     cJSON_AddItemToObject(device, "identifiers", identifiers);
     cJSON_AddStringToObject(device, "manufacturer", "ludodefgh");
-    cJSON_AddStringToObject(device, "model", "Bridge");
+    cJSON_AddStringToObject(device, "model", "Bridge (" FIRMWARE_EDITION " edition)");
     std::string device_name = "BleMesh2MQTT Bridge (" + get_wifi_mac_string() + ")";
     cJSON_AddStringToObject(device, "name", device_name.c_str());
     cJSON_AddStringToObject(device, "sw_version", FIRMWARE_VERSION);
@@ -355,9 +355,22 @@ void publish_bridge_info()
     cJSON_free(json_data);
 }
 
+#ifndef CONFIG_BLE_MESH_PROVISIONER
+static void remove_switch_discovery(CJsonPtr discovery_json)
+{
+    const cJSON *unique_id = cJSON_GetObjectItemCaseSensitive(discovery_json.get(), "unique_id");
+    if (cJSON_IsString(unique_id) && unique_id->valuestring)
+    {
+        const std::string topic = "homeassistant/switch/" + std::string{unique_id->valuestring} + "/config";
+        esp_mqtt_client_publish(mqtt_get_client(), topic.c_str(), "", 0, 0, 0);
+    }
+}
+#endif
+
 // FIX-ME : make it accesible globally
 void send_bridge_discovery()
 {
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     // Publish provisioning switch
     {
         CJsonPtr discovery_json = create_provisioning_json();
@@ -407,6 +420,12 @@ void send_bridge_discovery()
             LOG_ERROR(TAG, "No unique_id found in auto-provisioning switch discovery JSON");
         }
     }
+
+#else
+    // Node SKU provisions nothing: drop these switches if an earlier build created them.
+    remove_switch_discovery(create_provisioning_json());
+    remove_switch_discovery(create_auto_provisioning_json());
+#endif
 
     // Publish restart button
     {
@@ -461,12 +480,14 @@ void send_bridge_discovery()
     {
         publish_bridge_info();
     }
+#ifdef CONFIG_BLE_MESH_PROVISIONER
     {
         mqtt_publish_provisioning_enabled(ble_mesh_get_provisioning_enabled());
     }
     {
         mqtt_publish_auto_provisioning_enabled(ble_mesh_get_auto_provisioning_enabled());
     }
+#endif
 }
 
 #define PUBLISH_INTERVAL_MS 10000
