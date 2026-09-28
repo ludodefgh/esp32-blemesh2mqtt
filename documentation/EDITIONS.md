@@ -95,7 +95,8 @@ The header shows which edition is running: **BleMesh2MQTT Standalone** or
 | Provisioned nodes (with Unprovision) | ✅ | — |
 | External Mesh Nodes (found in your group addresses) | — | ✅ |
 | Bridge's own mesh address, "Leave mesh network" | — | ✅ |
-| Group address subscriptions, Mesh keys | ✅ | ✅ |
+| Group address subscriptions | — | ✅ |
+| Mesh keys | ✅ | ✅ |
 | Light controls, Home Assistant integration | ✅ | ✅ |
 
 ## Common questions

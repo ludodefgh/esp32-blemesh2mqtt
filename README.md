@@ -151,8 +151,8 @@ Access the web interface at your device's IP address after WiFi setup:
 - Standalone: provisioned and unprovisioned devices in one view, one-click provisioning
   and unprovisioning
 - Companion: the lights found in your group addresses (External Mesh Nodes), the bridge's
-  own mesh address, and "Leave mesh network"
-- Group address subscriptions and the network keys
+  own mesh address, its group address subscriptions, and "Leave mesh network"
+- The network keys
 - Per-node controls (on/off, brightness, HSL colour, colour temperature, level) shown
   according to the models each node reports
 
@@ -165,7 +165,7 @@ Live system logs are available from a collapsible dock at the bottom of every pa
 ## ⚙️ Configuration
 
 Everything is configured from the web interface: WiFi (setup access point on first boot),
-MQTT broker (host, port, credentials) and group addresses. Standalone generates the mesh
+MQTT broker (host, port, credentials) and, in Companion, group addresses. Standalone generates the mesh
 keys and device addresses itself; Companion receives them from the app that adds it to
 your network. Credentials are stored encrypted.
 

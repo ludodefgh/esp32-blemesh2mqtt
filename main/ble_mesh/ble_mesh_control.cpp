@@ -1439,6 +1439,7 @@ void ble_mesh_unsubscribe_group_addr(uint16_t group_addr)
     }
 }
 
+#ifdef CONFIG_BLE_MESH_NODE // Standalone puts none of its nodes in a group
 static void ble_mesh_subscribe_all_configured_groups(void)
 {
     uint16_t group_addrs[MESH_MAX_GROUP_ADDRS] = {0};
@@ -1448,6 +1449,7 @@ static void ble_mesh_subscribe_all_configured_groups(void)
         ble_mesh_subscribe_group_addr(group_addrs[i]);
     }
 }
+#endif
 
 static void ble_mesh_config_server_cb(esp_ble_mesh_cfg_server_cb_event_t event,
                                        esp_ble_mesh_cfg_server_cb_param_t *param)
@@ -1613,8 +1615,6 @@ esp_err_t ble_mesh_init(void)
         LOG_ERROR(TAG, "Failed to set AppKey (err %d)", err);
         return err;
     }
-
-    ble_mesh_subscribe_all_configured_groups();
 
     LOG_INFO(TAG, "BLE Mesh Provisioner initialized (mode=standalone)");
 

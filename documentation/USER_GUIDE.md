@@ -82,12 +82,10 @@ Firmware version, git version, ESP-IDF version and build date of what's running.
 ![Mesh Page](Bridge-2.png)
 *Screenshot from an earlier version, to be updated.*
 
-#### Group Address Subscriptions
-The group addresses the bridge listens to (up to 3, e.g. `0xC000`). Add one with **Add**,
-remove one with its ×. Changes apply immediately, no restart needed.
-- *Companion:* enter the group(s) your lights are subscribed to in your mesh app. That's
-  where the bridge looks for lights.
-- *Standalone:* optional. It's only needed to control a group of lights at once.
+#### Group Address Subscriptions *(Companion only)*
+The group addresses your lights are subscribed to in your mesh app (up to 3, e.g.
+`0xC000`). That's where the bridge looks for lights. Add one with **Add**, remove one with
+its ×. Changes apply immediately, no restart needed.
 
 #### Mesh Network
 - **Address** *(Companion only)*: the bridge's own address in your network, given by your

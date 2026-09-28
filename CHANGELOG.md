@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AppKey gets bound, and every 10 minutes. **Forget** drops one from the bridge and HA.
 - Companion: **Leave mesh network**, and "Reset node" from the provisioning app, return the
   bridge to unprovisioned without a reboot.
-- Up to 3 group address subscriptions, managed live from the dashboard's Mesh page, which
-  also shows the mesh keys (and, in Companion, the bridge's address).
+- Companion: up to 3 group address subscriptions (where the bridge looks for lights),
+  managed live from the dashboard's Mesh page.
+- The Mesh page shows the mesh keys (and, in Companion, the bridge's address).
 - Level-only devices (Generic Level Server, e.g. shutter motors) appear in Home Assistant as
   covers with a position.
 - Standalone: devices advertising over PB-GATT can be provisioned too.
