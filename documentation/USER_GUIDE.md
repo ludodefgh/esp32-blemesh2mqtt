@@ -81,6 +81,8 @@ Firmware version, git version, ESP-IDF version and build date of what's running.
 
 ![Mesh Page (Standalone)](images/dashboard-mesh-standalone.png)
 
+![Mesh Page (Companion)](images/dashboard-mesh-companion.png)
+
 #### Group Address Subscriptions *(Companion only)*
 The group addresses your lights are subscribed to in your mesh app (up to 3, e.g.
 `0xC000`). That's where the bridge looks for lights. Add one with **Add**, remove one with
