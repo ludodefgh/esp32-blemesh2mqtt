@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] Performance optimizations
 - [ ] SSL/TLS support for MQTT
 
+## [0.2.0] - 2026-10-07
+
+### Added
+- Home Assistant: the bridge device now reports its hardware (chip) and a **Visit** link to
+  the dashboard (`hw_version`, `configuration_url`) (#30).
+
+### Fixed
+- Standalone: on/off-only devices (e.g. LEDVANCE / Sylvania Smart+ plug) were rejected by
+  Home Assistant with `Invalid supported_color_modes []`. They are now announced as on/off
+  lights, without brightness (#48).
+- Standalone: provisioned nodes' discovery reported a hardcoded `0.0.1` as the firmware
+  version; it is now the real one (#30).
+
 ## [0.1.9] - 2026-09-28
 
 ### Added
