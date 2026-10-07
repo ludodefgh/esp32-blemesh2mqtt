@@ -444,8 +444,14 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
             const std::string uniq_id = std::string{buf} + "_light";
             cJSON_AddItemToObject(root, "uniq_id", cJSON_CreateString(uniq_id.c_str()));
             cJSON_AddItemToObject(root, "schema", cJSON_CreateString("json"));
-            cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
-            cJSON_AddNumberToObject(root, "brightness_scale", node->max_lightness);
+
+            const uint16_t light_features = FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+            if (node->features & light_features)
+            {
+                cJSON_AddItemToObject(root, "brightness", cJSON_CreateBool(1));
+                cJSON_AddNumberToObject(root, "brightness_scale", node->max_lightness);
+            }
+
             cJSON *sup_clrm = nullptr;
             cJSON_AddItemToObject(root, "sup_clrm", sup_clrm = cJSON_CreateArray());
             if (sup_clrm != nullptr)
@@ -467,6 +473,11 @@ std::unique_ptr<cJSON> make_node_discovery_message(std::shared_ptr<bm2mqtt_node_
                 if (!has_color && (node->features & FEATURE_LIGHT_LIGHTNESS))
                 {
                     cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("brightness"));
+                }
+                // OnOff-only node: HA rejects an empty supported_color_modes list.
+                else if (!(node->features & light_features))
+                {
+                    cJSON_AddItemToArray(sup_clrm, cJSON_CreateString("onoff"));
                 }
             }
         }
@@ -497,7 +508,12 @@ std::unique_ptr<cJSON> make_status_message(const std::shared_ptr<bm2mqtt_node_in
         {
             cJSON_AddStringToObject(root, "state", node_info->onoff ? "ON" : "OFF");
 
-            if (node_info->color_mode == color_mode_t::brightness)
+            const uint16_t light_features = FEATURE_LIGHT_LIGHTNESS | FEATURE_LIGHT_HSL | FEATURE_LIGHT_CTL;
+            if (!(node_info->features & light_features))
+            {
+                // OnOff-only node: state alone, no color_mode/brightness
+            }
+            else if (node_info->color_mode == color_mode_t::brightness)
             {
                 cJSON_AddStringToObject(root, "color_mode", "brightness");
                 cJSON_AddNumberToObject(root, "brightness", node_info->hsl_l);
