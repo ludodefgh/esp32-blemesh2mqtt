@@ -122,7 +122,7 @@ listed there until you remove it.
 
 **Which file do I download?**
 Release files are named `BleMesh2Mqtt-<Edition>-<version>-<chip>.zip`, e.g.
-`BleMesh2Mqtt-Companion-v0.1.9-esp32.zip`. Pick the edition, then your chip.
+`BleMesh2Mqtt-Companion-v0.2.0-esp32.zip`. Pick the edition, then your chip.
 
 ## For developers
 
