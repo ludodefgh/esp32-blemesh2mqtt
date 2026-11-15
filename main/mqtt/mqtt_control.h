@@ -12,7 +12,6 @@ void mqtt5_app_stop();
 void mqtt5_app_restart();
 void register_mqtt_commands();
 void mqtt_parse_event_data(esp_mqtt_event_handle_t event);
-void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client);
 void mqtt_subscribe_node(esp_mqtt_client_handle_t client, const std::shared_ptr<bm2mqtt_node_info>& node_info);
 
 // Node topic generation functions

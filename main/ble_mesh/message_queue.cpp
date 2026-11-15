@@ -22,143 +22,164 @@ message_queue_manager &message_queue()
     return instance;
 }
 
-void node_message_queue::enqueue(const message_payload &msg)
+// State Sets carry absolute values and status publishes read live state, so only the
+// newest queued one matters.
+static bool is_superseded_by_newer(uint32_t opcode)
 {
-    queue.push(msg);
-    if (!waiting)
+    switch (opcode)
     {
-        try_send_next();
+    case STATUS_PUBLISH_OPCODE:
+    case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET:
+    case ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET:
+    case ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET:
+    case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET:
+    case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET:
+        return true;
+    default:
+        return false;
     }
 }
-void node_message_queue::set_node(std::shared_ptr<bm2mqtt_node_info> &in_node)
+
+// The front message is in flight and this opcode answers it.
+static bool awaits_ack(const node_message_queue &node_queue, uint32_t opcode)
 {
-    if (node == nullptr)
-    {
-        node = in_node;
-    }
+    return node_queue.waiting && !node_queue.queue.empty() && node_queue.queue.front().opcode == opcode;
 }
 
-void node_message_queue::try_send_next()
+node_message_queue::~node_message_queue()
 {
-    if (queue.empty())
-        return;
-
-    auto &msg = queue.front();
-    msg.send(node);
-    if (msg.type == message_type_t::ble_mesh_message)
-    {
-        waiting = true;
-
-        ensure_failsafe_timer();
-        esp_timer_start_once(failsafe_timer, 10 * 1000000); // 10 sec
-    }
-    else if (msg.type == message_type_t::mqtt_message)
-    {
-        // For MQTT messages, we don't need a failsafe timer
-        waiting = false;
-        queue.pop();
-        try_send_next();
-    }
-
-    LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u", msg.opcode, msg.retries_left);
-}
-
-void node_message_queue::handle_ack(uint32_t opcode)
-{
-    LOG_WARN(TAG, "Ack received for opcode 0x%08X", opcode);
-    if (!queue.empty() && queue.front().opcode == opcode)
+    if (failsafe_timer)
     {
         esp_timer_stop(failsafe_timer);
-        queue.pop();
-        waiting = false;
-        try_send_next();
-    }
-    else if (!queue.empty())
-    {
-        LOG_WARN(TAG, "Opcode 0x%08X not found in the front [0x%08X] of the queue, waiting for next message", opcode, queue.front().opcode);
-    }
-
-    if (queue.size() > 0)
-    {
-        LOG_WARN(TAG, "Current queue size: %zu", queue.size());
+        esp_timer_delete(failsafe_timer);
     }
 }
 
-void node_message_queue::handle_timeout(uint32_t opcode)
-{
-    if (queue.empty())
-        return;
-
-    auto &msg = queue.front();
-    if (msg.opcode == opcode)
-    {
-        if (msg.retries_left > 0 && --msg.retries_left > 0)
-        {
-            LOG_WARN(TAG, "Retrying opcode 0x%08X", opcode);
-            waiting = false;
-            try_send_next();
-        }
-        else
-        {
-            LOG_ERROR(TAG, "Message dropped: opcode 0x%08X", opcode);
-            esp_timer_stop(failsafe_timer);
-            queue.pop();
-            waiting = false;
-            try_send_next();
-        }
-    }
-
-    LOG_WARN(TAG, "Timeout for opcode 0x%08X", opcode);
-    LOG_WARN(TAG, "Current queue size: %zu", queue.size());
-}
-
-void node_message_queue::ensure_failsafe_timer()
-{
-    if (!failsafe_timer)
-    {
-        esp_timer_create_args_t args = {
-            .callback = &node_message_queue::failsafe_callback,
-            .arg = this,
-            .name = "msgqueue_failsafe"};
-        esp_timer_create(&args, &failsafe_timer);
-    }
-    else
-    {
-        esp_timer_stop(failsafe_timer);
-    }
-}
-
-void node_message_queue::failsafe_callback(void *arg)
-{
-    auto *self = static_cast<node_message_queue *>(arg);
-    self->on_failsafe_trigger();
-}
-
-void node_message_queue::on_failsafe_trigger()
-{
-    if (!queue.empty())
-    {
-        LOG_ERROR(TAG, "Failsafe timeout for opcode 0x%08X", queue.front().opcode);
-        handle_timeout(queue.front().opcode); // acts like timeout handler
-    }
-}
 void message_queue_manager::enqueue(std::shared_ptr<bm2mqtt_node_info> node, const message_payload &msg)
 {
     if (!node)
         return;
 
     LOG_DEBUG(TAG, "Enqueueing message for node 0x%04X, opcode 0x%08X", node->unicast, msg.opcode);
-    auto it = node_queues.find(node);
-    if (it == node_queues.end())
+    std::unique_lock<std::mutex> lock(mutex);
+    auto [it, inserted] = node_queues.try_emplace(node);
+    if (inserted)
     {
-        // Set the node in the message queue
-        auto &new_queue = node_queues[node];
-        new_queue.set_node(node);
-        new_queue.enqueue(msg);
+        it->second.id = ++next_id;
     }
-    else
+    auto &queue = it->second.queue;
+    if (is_superseded_by_newer(msg.opcode))
     {
-        it->second.enqueue(msg);
+        // Drop the still-queued older one and queue the new one at the back: replacing it in
+        // place would reorder it against other commands (HA slider bursts).
+        const auto first_unsent = queue.begin() + (it->second.waiting ? 1 : 0);
+        for (auto queued = first_unsent; queued != queue.end(); ++queued)
+        {
+            if (queued->type == msg.type && queued->opcode == msg.opcode)
+            {
+                queue.erase(queued);
+                break;
+            }
+        }
+    }
+    queue.push_back(msg);
+    dispatch(lock, node);
+}
+
+// Sends the node's next message(s) unless one is already awaiting its ack. Returns with
+// the lock held; the queue may have been acked, cleared or erased while it was released.
+void message_queue_manager::dispatch(std::unique_lock<std::mutex> &lock, const std::shared_ptr<bm2mqtt_node_info> &node)
+{
+    while (true)
+    {
+        auto it = node_queues.find(node);
+        if (it == node_queues.end() || it->second.waiting || it->second.queue.empty())
+            return;
+
+        node_message_queue &node_queue = it->second;
+        const message_payload &msg = node_queue.queue.front();
+        auto send = msg.send;
+        const uint32_t opcode = msg.opcode;
+        const uint8_t retries_left = msg.retries_left;
+        auto send_node = node;
+
+        if (msg.type == message_type_t::mqtt_message)
+        {
+            node_queue.queue.pop_front();
+            lock.unlock();
+            send(send_node);
+            lock.lock();
+            continue;
+        }
+
+        // Marked in flight before sending: the ack can arrive before the lock is retaken.
+        node_queue.waiting = true;
+        const uint32_t id = node_queue.id;
+        const uint32_t generation = ++node_queue.send_generation;
+        lock.unlock();
+        send(send_node);
+        lock.lock();
+        LOG_INFO(TAG, "Sent message with opcode 0x%08X, retries left: %u", opcode, retries_left);
+
+        it = node_queues.find(node);
+        if (it == node_queues.end() || it->second.id != id || !it->second.waiting || it->second.send_generation != generation)
+            return; // already acked / timed out / cleared
+
+        node_message_queue &in_flight = it->second;
+        if (!in_flight.failsafe_timer)
+        {
+            esp_timer_create_args_t args = {
+                .callback = &message_queue_manager::failsafe_callback,
+                .arg = reinterpret_cast<void *>(static_cast<uintptr_t>(id)),
+                .name = "msgqueue_failsafe"};
+            esp_timer_create(&args, &in_flight.failsafe_timer);
+        }
+        if (in_flight.failsafe_timer)
+        {
+            esp_timer_stop(in_flight.failsafe_timer);
+            in_flight.failsafe_generation = generation;
+            esp_timer_start_once(in_flight.failsafe_timer, 10 * 1000000); // 10 sec
+        }
+        return;
+    }
+}
+
+void message_queue_manager::failsafe_callback(void *arg)
+{
+    const uint32_t id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg));
+    auto &self = message_queue();
+    std::unique_lock<std::mutex> lock(self.mutex);
+    for (const auto &[key, candidate] : self.node_queues)
+    {
+        if (candidate.id == id)
+        {
+            // Re-armed while this firing waited for the lock: it belongs to an earlier send.
+            if (esp_timer_is_active(candidate.failsafe_timer))
+                return;
+            if (candidate.waiting && candidate.failsafe_generation == candidate.send_generation && !candidate.queue.empty())
+            {
+                const auto node = key;
+                const uint32_t opcode = candidate.queue.front().opcode;
+                LOG_ERROR(TAG, "Failsafe timeout for opcode 0x%08X", opcode);
+                // Without releasing the lock: an ack landing in between would let this
+                // timeout hit the next in-flight message with the same opcode.
+                self.on_timeout(lock, node, opcode);
+            }
+            return;
+        }
+    }
+}
+
+// A NODE_RESET ack/timeout with nothing left queued: the node goes, queue included.
+void message_queue_manager::unlock_and_reset_if_done(std::unique_lock<std::mutex> &lock, const std::shared_ptr<bm2mqtt_node_info> &node, uint32_t opcode)
+{
+    auto it = node_queues.find(node);
+    const bool reset = opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it != node_queues.end() && it->second.queue.empty();
+    lock.unlock();
+    if (reset)
+    {
+        LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
+        ble_mesh_reset_node(node);
     }
 }
 
@@ -168,22 +189,28 @@ void message_queue_manager::handle_ack(const std::shared_ptr<bm2mqtt_node_info>&
         return;
 
     LOG_INFO(TAG, "Ack for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
+    std::unique_lock<std::mutex> lock(mutex);
     auto it = node_queues.find(node);
-    if (it != node_queues.end())
-    {
-        it->second.handle_ack(opcode);
-    }
-    else
+    if (it == node_queues.end())
     {
         LOG_ERROR(TAG, "No message queue found for node 0x%04X", node->unicast);
+        return;
     }
 
-    if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
+    node_message_queue &node_queue = it->second;
+    if (awaits_ack(node_queue, opcode))
     {
-        // Special handling for node reset
-        LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
-        ble_mesh_reset_node(node);
+        esp_timer_stop(node_queue.failsafe_timer);
+        node_queue.queue.pop_front();
+        node_queue.waiting = false;
+        dispatch(lock, node);
     }
+    else if (!node_queue.queue.empty())
+    {
+        LOG_WARN(TAG, "Opcode 0x%08X not found in the front [0x%08X] of the queue, waiting for next message", opcode, node_queue.queue.front().opcode);
+    }
+
+    unlock_and_reset_if_done(lock, node, opcode);
 }
 
 void message_queue_manager::handle_timeout(const std::shared_ptr<bm2mqtt_node_info>& node, uint32_t opcode)
@@ -192,22 +219,40 @@ void message_queue_manager::handle_timeout(const std::shared_ptr<bm2mqtt_node_in
         return;
 
     LOG_WARN(TAG, "Timeout for opcode 0x%08X on node 0x%04X", opcode, node->unicast);
+    std::unique_lock<std::mutex> lock(mutex);
+    on_timeout(lock, node, opcode);
+}
+
+// Releases the lock.
+void message_queue_manager::on_timeout(std::unique_lock<std::mutex> &lock, const std::shared_ptr<bm2mqtt_node_info> &node, uint32_t opcode)
+{
     auto it = node_queues.find(node);
-    if (it != node_queues.end())
+    if (it == node_queues.end())
     {
-        it->second.handle_timeout(opcode);
-    }
-    else
-    {
+        lock.unlock();
         LOG_ERROR(TAG, "No message queue found for node 0x%04X", node->unicast);
+        return;
     }
 
-    if (opcode == ESP_BLE_MESH_MODEL_OP_NODE_RESET && it->second.size() == 0)
+    node_message_queue &node_queue = it->second;
+    if (awaits_ack(node_queue, opcode))
     {
-        // Special handling for node reset
-        LOG_WARN(TAG, "Node reset opcode 0x%08X received, removing node queue", opcode);
-        ble_mesh_reset_node(node);
+        esp_timer_stop(node_queue.failsafe_timer);
+        auto &msg = node_queue.queue.front();
+        if (msg.retries_left > 0 && --msg.retries_left > 0)
+        {
+            LOG_WARN(TAG, "Retrying opcode 0x%08X", opcode);
+        }
+        else
+        {
+            LOG_ERROR(TAG, "Message dropped: opcode 0x%08X", opcode);
+            node_queue.queue.pop_front();
+        }
+        node_queue.waiting = false;
+        dispatch(lock, node);
     }
+
+    unlock_and_reset_if_done(lock, node, opcode);
 }
 
 void message_queue_manager::clear_queue(const std::shared_ptr<bm2mqtt_node_info>& node)
@@ -215,27 +260,24 @@ void message_queue_manager::clear_queue(const std::shared_ptr<bm2mqtt_node_info>
     if (!node)
         return;
 
+    std::lock_guard<std::mutex> lock(mutex);
     node_queues.erase(node);
 }
 
 void message_queue_manager::print_debug() const
 {
+    std::lock_guard<std::mutex> lock(mutex);
     LOG_INFO(TAG, "=== Message Queue Status ===");
-    for (const auto &entry : node_queues)
+    for (const auto &[node, node_queue] : node_queues)
     {
-        const auto &queue = entry.second;
-        size_t queue_size = queue.size();
-        bool waiting = queue.is_waiting();
-
         LOG_INFO(TAG, "Node 0x%04X: %zu message(s), waiting: %s",
-                 entry.first->unicast, queue_size, waiting ? "yes" : "no");
+                 node->unicast, node_queue.queue.size(), node_queue.waiting ? "yes" : "no");
 
         // List opcodes in the queue
-        if (queue_size > 0)
+        if (!node_queue.queue.empty())
         {
-            const auto &internal_queue = queue.get_queue();
             LOG_INFO(TAG, "    opcode: 0x%08X (retries left: %u)",
-                     internal_queue.front().opcode, internal_queue.front().retries_left);
+                     node_queue.queue.front().opcode, node_queue.queue.front().retries_left);
         }
     }
 }

@@ -133,12 +133,6 @@ std::string mqtt_get_node_discovery_id(const std::shared_ptr<bm2mqtt_node_info>&
     return {};
 }
 
-void mqtt_subscribe_all_nodes(esp_mqtt_client_handle_t client)
-{
-    node_manager().for_each_node([&client](std::shared_ptr<bm2mqtt_node_info>& node_info)
-                                 { mqtt_subscribe_node(client, node_info); });
-}
-
 void mqtt_subscribe_node(esp_mqtt_client_handle_t client, const std::shared_ptr<bm2mqtt_node_info>& node_info)
 {
     int msg_id = esp_mqtt_client_subscribe(client, mqtt_get_node_set_topic(node_info).c_str(), 0);
@@ -176,7 +170,8 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
         esp_mqtt5_client_set_publish_property(client, &publish_property);
         esp_mqtt5_client_set_subscribe_property(client, &subscribe_property);
 
-        mqtt_subscribe_all_nodes(client);
+        // Node discovery isn't retained, and a retained HA "online" is ignored: announce here.
+        ble_mesh_republish_all_nodes_to_mqtt(); // subscribes + (re)announces provisioned nodes
         mqtt_republish_all_external_nodes(); // subscribes + (re)announces restored/known nodes
         mqtt_bridge_subscribe(client);
 
@@ -540,14 +535,12 @@ std::unique_ptr<cJSON> make_status_message(const std::shared_ptr<bm2mqtt_node_in
 
 esp_timer_handle_t home_assistant_restart_timer = nullptr;
 static uint8_t num_try = 3;
+// Subscriptions survive an HA restart (and MQTT_EVENT_CONNECTED redoes them after a broker
+// one): resubscribing here would re-deliver a retained homeassistant/status and loop.
 void on_home_assistant_restart_timer(void *arg)
 {
     if (mqtt_credentials().get_connection_state() == mqtt_connection_state_t::CONNECTED)
     {
-        --num_try;
-
-        mqtt_subscribe_all_nodes(mqtt_get_client());
-        mqtt_bridge_subscribe(mqtt_get_client());
         send_bridge_discovery();
         esp_mqtt_client_publish(mqtt_get_client(), get_bridge_availability_topic(), "on", 0, 0, 0);
         publish_bridge_info();
@@ -556,18 +549,20 @@ void on_home_assistant_restart_timer(void *arg)
     }
     else
     {
-        LOG_WARN(TAG, "MQTT client not connected, skipping resubscribe");
+        LOG_WARN(TAG, "MQTT client not connected, skipping republish");
     }
-    if (num_try == 0)
+    if (--num_try == 0)
     {
         LOG_WARN(TAG, "home_assistant_restart_timer expired - stopping timer and cleaning up");
-        if (home_assistant_restart_timer)
-        {
-            esp_timer_stop(home_assistant_restart_timer);
-            esp_timer_delete(home_assistant_restart_timer);
-            home_assistant_restart_timer = nullptr;
-        }
+        esp_timer_stop(home_assistant_restart_timer);
+        esp_timer_delete(home_assistant_restart_timer);
+        home_assistant_restart_timer = nullptr;
     }
+}
+
+static bool mqtt_field_equals(const char *field, int field_len, const char *expected)
+{
+    return static_cast<size_t>(field_len) == strlen(expected) && memcmp(field, expected, field_len) == 0;
 }
 
 // Queued behind the Set it follows, so the published state reflects the ack.
@@ -576,7 +571,7 @@ static void enqueue_node_status_publish(std::shared_ptr<bm2mqtt_node_info> &node
     message_queue().enqueue(node_info, message_payload{
                                            .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                            { mqtt_node_send_status(node_info); },
-                                           .opcode = 0x0000,
+                                           .opcode = STATUS_PUBLISH_OPCODE,
                                            .retries_left = 0,
                                            .type = message_type_t::mqtt_message,
                                        });
@@ -584,19 +579,21 @@ static void enqueue_node_status_publish(std::shared_ptr<bm2mqtt_node_info> &node
 
 void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
 {
-    if (strncmp(event->topic, "homeassistant/status", event->topic_len) == 0)
+    if (mqtt_field_equals(event->topic, event->topic_len, "homeassistant/status"))
     {
-        if (strncmp(event->data, "online", event->data_len) == 0)
+        // A retained "online" is replayed on every (re)subscribe, not an HA restart.
+        if (event->retain)
         {
-            LOG_INFO(TAG, "Home Assistant is online - scheduling discovery republish");
-
-            // Stop existing timer if running
+            LOG_INFO(TAG, "Ignoring retained homeassistant/status");
+        }
+        else if (mqtt_field_equals(event->data, event->data_len, "online"))
+        {
             if (home_assistant_restart_timer)
             {
-                esp_timer_stop(home_assistant_restart_timer);
-                esp_timer_delete(home_assistant_restart_timer);
-                home_assistant_restart_timer = nullptr;
+                LOG_INFO(TAG, "Home Assistant is online - republish cycle already running");
+                return;
             }
+            LOG_INFO(TAG, "Home Assistant is online - scheduling discovery republish");
 
             esp_timer_create_args_t args = {
                 .callback = &on_home_assistant_restart_timer,
@@ -605,15 +602,17 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
             esp_err_t err = esp_timer_create(&args, &home_assistant_restart_timer);
             if (err == ESP_OK)
             {
+                num_try = 3;
                 err = esp_timer_start_periodic(home_assistant_restart_timer, 60 * 1000 * 1000); // 60 second intervals
                 if (err == ESP_OK)
                 {
-                    num_try = 3;
                     LOG_INFO(TAG, "Started Home Assistant restart timer (60s intervals, 3 retries)");
                 }
                 else
                 {
                     LOG_ERROR(TAG, "Failed to start Home Assistant restart timer: %s", esp_err_to_name(err));
+                    esp_timer_delete(home_assistant_restart_timer);
+                    home_assistant_restart_timer = nullptr;
                 }
             }
             else
@@ -621,33 +620,35 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                 LOG_ERROR(TAG, "Failed to create Home Assistant restart timer: %s", esp_err_to_name(err));
             }
         }
-        else if (strncmp(event->data, "offline", event->data_len) == 0)
+        else if (mqtt_field_equals(event->data, event->data_len, "offline"))
         {
             LOG_INFO(TAG, "Home Assistant is offline - doing nothing");
         }
+        return;
     }
 
-    if (strncmp(event->topic, get_bridge_provisioning_set_topic(), event->topic_len) == 0)
+    if (mqtt_field_equals(event->topic, event->topic_len, get_bridge_provisioning_set_topic()))
     {
         LOG_INFO(TAG, "Received provisioning command from MQTT: [%.*s]", event->data_len, event->data);
-        ble_mesh_set_provisioning_enabled(strncmp(event->data, "ON", event->data_len) == 0);
+        ble_mesh_set_provisioning_enabled(mqtt_field_equals(event->data, event->data_len, "ON"));
 
         return;
     }
 
-    if (strncmp(event->topic, get_bridge_auto_provisioning_set_topic(), event->topic_len) == 0)
+    if (mqtt_field_equals(event->topic, event->topic_len, get_bridge_auto_provisioning_set_topic()))
     {
         LOG_INFO(TAG, "Received auto-provisioning command from MQTT: [%.*s]", event->data_len, event->data);
-        ble_mesh_set_auto_provisioning_enabled(strncmp(event->data, "ON", event->data_len) == 0);
+        ble_mesh_set_auto_provisioning_enabled(mqtt_field_equals(event->data, event->data_len, "ON"));
 
         return;
     }
 
-    if (strncmp(event->topic, get_bridge_restart_set_topic(), event->topic_len) == 0)
+    if (mqtt_field_equals(event->topic, event->topic_len, get_bridge_restart_set_topic()))
     {
         LOG_INFO(TAG, "Received restart command from MQTT: [%.*s]", event->data_len, event->data);
 
-        if (strncmp(event->data, "RESTART", event->data_len) == 0)
+        // A retained RESTART would reboot-loop the bridge.
+        if (!event->retain && mqtt_field_equals(event->data, event->data_len, "RESTART"))
         {
             LOG_WARN(TAG, "Bridge restart requested via MQTT - restarting in 2 seconds...");
 
@@ -711,18 +712,13 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
             {
                 if (const cJSON *name = cJSON_GetObjectItemCaseSensitive(response.get(), "state"))
                 {
-                    if (cJSON_IsString(name) && (name->valuestring != NULL))
+                    const char *state = cJSON_GetStringValue(name);
+                    const bool turn_on = state && strcmp(state, "ON") == 0;
+                    const bool turn_off = state && strcmp(state, "OFF") == 0;
+                    if (turn_off)
                     {
-                        if (strcmp(name->valuestring, "ON") == 0)
-                        {
-                            node_info->onoff = true;
-                            ble_mesh_gen_onoff_set(node_info);
-                        }
-                        else if (strcmp(name->valuestring, "OFF") == 0)
-                        {
-                            node_info->onoff = false;
-                            ble_mesh_gen_onoff_set(node_info);
-                        }
+                        node_info->onoff = false;
+                        ble_mesh_gen_onoff_set(node_info);
                     }
 
                     bool light_value_changed = false;
@@ -787,6 +783,18 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         }
                     }
 
+                    // A non-zero Lightness/HSL/CTL Set turns the light on through the bound
+                    // Generic OnOff state, so HA's "ON + brightness" needs no separate OnOff Set.
+                    const bool light_set_turns_on = light_value_changed && node_info->hsl_l > 0;
+                    if (turn_on)
+                    {
+                        node_info->onoff = true;
+                        if (!light_set_turns_on)
+                        {
+                            ble_mesh_gen_onoff_set(node_info);
+                        }
+                    }
+
                     if (light_value_changed)
                     {
                         if (current_mode == color_mode_t::color_temp)
@@ -798,7 +806,7 @@ void mqtt_parse_event_data(esp_mqtt_event_handle_t event)
                         {
                             ble_mesh_light_hsl_set(node_info);
                         }
-                        else if (current_mode == color_mode_t::brightness)
+                        else
                         {
                             ble_mesh_lightness_set(node_info);
                         }

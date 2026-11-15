@@ -63,8 +63,14 @@ extern struct mesh_network_info_store store;
 
 void ble2mqtt_node_manager::for_each_node(std::function<void(std::shared_ptr<bm2mqtt_node_info>&)> func)
 {
-    std::lock_guard<std::mutex> lock(tn_mutex);
-    for (auto &node : tracked_nodes)
+    // Called unlocked: func may publish (MQTT client lock) while the MQTT task, holding
+    // that lock, waits on tn_mutex in get_node() — a lock-order deadlock.
+    decltype(tracked_nodes) nodes;
+    {
+        std::lock_guard<std::mutex> lock(tn_mutex);
+        nodes = tracked_nodes;
+    }
+    for (auto &node : nodes)
     {
         if (node && node->unicast != ESP_BLE_MESH_ADDR_UNASSIGNED)
         {

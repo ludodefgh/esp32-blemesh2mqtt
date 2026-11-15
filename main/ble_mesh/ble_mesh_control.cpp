@@ -1134,8 +1134,6 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         }
         break;
     case ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT:
-        message_queue().handle_ack(node, opcode);
-
         switch (opcode)
         {
         case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET:
@@ -1153,6 +1151,8 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         default:
             break;
         }
+        // After the state update: the ack releases the queued status publish.
+        message_queue().handle_ack(node, opcode);
         break;
     case ESP_BLE_MESH_GENERIC_CLIENT_PUBLISH_EVT:
         LOG_INFO(TAG, "ESP_BLE_MESH_GENERIC_CLIENT_PUBLISH_EVT");
@@ -1171,8 +1171,8 @@ static void ble_mesh_generic_client_cb(esp_ble_mesh_generic_client_cb_event_t ev
         }
         case ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET:
         {
-            node->onoff = param->status_cb.onoff_status.present_onoff;
-            LOG_WARN(TAG, "TIMEOUT: OnOFF Set: 0x%02x", node->onoff);
+            // No status on a timeout: status_cb is garbage, keep the last known state.
+            LOG_WARN(TAG, "TIMEOUT: OnOFF Set");
 
             break;
         }
@@ -1367,19 +1367,24 @@ void ble_mesh_light_client_cb(esp_ble_mesh_light_client_cb_event_t event,
             LOG_INFO("[ble_mesh_light_client_cb] [ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT]", "Set state response: Error Code : %i", param->error_code);
         }
 
-        message_queue().handle_ack(node, opcode);
-
+        // Light states are bound to Generic OnOff: a light Set can switch the node on or off
+        // without any OnOff Set, so take onoff from its ack.
         switch (opcode)
         {
-        case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_SET:
-        {
-            // node->hsl_h = param->status_cb.hsl_status.hsl_hue;
-            // node->hsl_l = param->status_cb.hsl_status.hsl_lightness;
-            // node->hsl_s = param->status_cb.hsl_status.hsl_saturation;
-            // LOG_INFO(TAG, "ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS h=%d s=%d l=%d", node->hsl_h, node->hsl_s ,node->hsl_l);
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET:
+            node->onoff = param->status_cb.lightness_status.present_lightness > 0;
+            break;
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET:
+            node->onoff = param->status_cb.hsl_status.hsl_lightness > 0;
+            break;
+        case ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET:
+            node->onoff = param->status_cb.ctl_status.present_ctl_lightness > 0;
+            break;
+        default:
+            break;
         }
-        break;
-        }
+
+        message_queue().handle_ack(node, opcode);
         break;
 
     case ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT:
