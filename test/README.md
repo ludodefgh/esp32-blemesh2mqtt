@@ -3,7 +3,9 @@
 Firmware and scripts for testing the bridge against real BLE Mesh devices, without a
 phone or nRF Mesh in the loop. Each `firmware/*` directory is a standalone ESP-IDF
 project for an ESP32-C3 (target set in its `sdkconfig.defaults`); they depend only on
-ESP-IDF's `example_init` component, found through `IDF_PATH`.
+ESP-IDF's `example_init` component, found through `IDF_PATH`. `hsl_server` also builds
+for an ESP32-S3 (`sdkconfig.defaults.esp32s3`), in its own build dir:
+`idf.py -B build_s3 -D IDF_TARGET=esp32s3 -D SDKCONFIG=build_s3/sdkconfig -p <port> flash`.
 
 | Firmware | Role |
 |---|---|
@@ -33,3 +35,21 @@ MQTT credentials come from the environment or the repo's `.env`
 
 Each command waits until neither the bulb nor HA has changed for 3 s (15 s max, longer than one ack retry), since
 a lost ack is retried by the bridge and can legitimately take a few seconds.
+
+`scripts/standalone_node_regression.py` does the same for nodes the bridge provisioned
+itself (Standalone edition, no test provisioner): flash `hsl_server` on one or more
+boards, provision them from the dashboard, then pass each node's MAC (from its
+`<bridge topic>/node_<mac>` topic) and bulb port:
+
+```bash
+python3 test/scripts/standalone_node_regression.py --bridge-topic blemesh2mqtt_<bridge-mac> \
+    --node <mac>:/dev/ttyACM0 --node <mac>:/dev/ttyACM1 [--bridge-url http://<bridge-ip>] \
+    [--retained-status]
+```
+
+It covers on/off, "ON + brightness" sending only the light Set, a quick ON→OFF ending
+OFF, and a burst on all nodes at once (a command every 0.5 s each) ending on the last
+command without a bridge reboot. A command is done once HA got its status, which the
+bridge publishes after the node's ack. `--retained-status` also checks that a retained
+`homeassistant/status` doesn't make the bridge republish in a loop: it leaves one on the
+broker for ~3 min and restarts the bridge, so every bridge on that broker sees it.
