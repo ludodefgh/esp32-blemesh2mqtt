@@ -2073,9 +2073,24 @@ esp_err_t rename_node_handler(httpd_req_t *req)
 // firmware + storage + 16-byte bundle header
 #define OTA_MAX_BUNDLE_SIZE (OTA_MAX_FIRMWARE_SIZE + OTA_MAX_STORAGE_SIZE + 64)
 #define OTA_BUFFER_SIZE 1024
+// recv_wait_timeout (3 s) per try: tolerates ~30 s of stall on a weak link
+#define OTA_RECV_MAX_TIMEOUTS 10
 #define OTA_API_KEY_LENGTH 32  // 32 characters for base64-like encoding
 #define OTA_NVS_NAMESPACE "ota_config"
 #define OTA_NVS_KEY "api_key"
+
+// A weak link can stall an upload for longer than recv_wait_timeout: retry instead of failing it.
+static int recv_upload_chunk(httpd_req_t *req, char *buffer, size_t len)
+{
+    for (int timeouts = 0; timeouts < OTA_RECV_MAX_TIMEOUTS; ++timeouts)
+    {
+        const int received = httpd_req_recv(req, buffer, len);
+        if (received != HTTPD_SOCK_ERR_TIMEOUT)
+            return received;
+        LOG_WARN(TAG, "Upload receive timed out, retrying");
+    }
+    return HTTPD_SOCK_ERR_TIMEOUT;
+}
 
 // Cryptographically secure OTA API key (generated once at first boot)
 static char ota_api_key[OTA_API_KEY_LENGTH + 1] = {0};  // +1 for null terminator
@@ -2303,7 +2318,7 @@ esp_err_t ota_upload_handler(httpd_req_t *req)
     while (remaining > 0)
     {
         size_t chunk_size = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
-        recv_len = httpd_req_recv(req, buffer, chunk_size);
+        recv_len = recv_upload_chunk(req, buffer, chunk_size);
 
         if (recv_len <= 0)
         {
@@ -2434,7 +2449,7 @@ esp_err_t storage_upload_handler(httpd_req_t *req)
     while (remaining > 0)
     {
         size_t chunk_size = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
-        recv_len = httpd_req_recv(req, buffer, chunk_size);
+        recv_len = recv_upload_chunk(req, buffer, chunk_size);
 
         if (recv_len <= 0)
         {
@@ -2539,7 +2554,7 @@ static esp_err_t recv_exact(httpd_req_t *req, void *dst, size_t len)
     size_t got = 0;
     while (got < len)
     {
-        int r = httpd_req_recv(req, static_cast<char *>(dst) + got, len - got);
+        int r = recv_upload_chunk(req, static_cast<char *>(dst) + got, len - got);
         if (r <= 0)
             return ESP_FAIL;
         got += static_cast<size_t>(r);
@@ -2554,7 +2569,7 @@ static esp_err_t stream_body_to_ota(httpd_req_t *req, char *buffer, size_t len)
     while (remaining > 0)
     {
         size_t chunk = (remaining > OTA_BUFFER_SIZE) ? OTA_BUFFER_SIZE : remaining;
-        int r = httpd_req_recv(req, buffer, chunk);
+        int r = recv_upload_chunk(req, buffer, chunk);
         if (r <= 0)
             return ESP_FAIL;
         esp_err_t err = ota_manager_write(reinterpret_cast<const uint8_t *>(buffer), static_cast<size_t>(r));
