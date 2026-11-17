@@ -385,19 +385,12 @@ bool external_node_apply_ha_command(uint16_t addr, const cJSON *payload)
         return false;
     }
 
-    if (const cJSON *state = cJSON_GetObjectItemCaseSensitive(payload, "state"))
+    const char *state = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "state"));
+    const bool turn_on = state && strcmp(state, "ON") == 0;
+    const bool turn_off = state && strcmp(state, "OFF") == 0;
+    if (turn_off)
     {
-        if (cJSON_IsString(state) && state->valuestring)
-        {
-            if (strcmp(state->valuestring, "ON") == 0)
-            {
-                ble_mesh_send_external_command(addr, true);
-            }
-            else if (strcmp(state->valuestring, "OFF") == 0)
-            {
-                ble_mesh_send_external_command(addr, false);
-            }
-        }
+        ble_mesh_send_external_command(addr, false);
     }
 
     // Same shape as mqtt_parse_event_data's provisioned-node flow: collect every light
@@ -458,7 +451,17 @@ bool external_node_apply_ha_command(uint16_t addr, const cJSON *payload)
         {
             lightness = node.last_lightness ? node.last_lightness : node.max_lightness;
         }
+    }
 
+    // A non-zero Lightness/HSL/CTL Set turns the light on through the bound Generic
+    // OnOff state, so HA's "ON + brightness" needs no separate OnOff Set.
+    if (turn_on && !(light_value_changed && lightness > 0))
+    {
+        ble_mesh_send_external_command(addr, true);
+    }
+
+    if (light_value_changed)
+    {
         if (current_mode == color_mode_t::color_temp)
         {
             ble_mesh_send_external_ctl_command(addr, temperature, lightness);

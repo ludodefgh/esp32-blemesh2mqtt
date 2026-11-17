@@ -1891,7 +1891,8 @@ function uploadFirmware() {
       ok = xhr.status === 200 && response.success;
       msg = response.message || '';
     } catch (e) {
-      msg = 'Invalid server response';
+      // httpd errors come back as plain text
+      msg = xhr.responseText.trim();
     }
     if (ok) {
       updateProgress('Done — device restarting…', 100);

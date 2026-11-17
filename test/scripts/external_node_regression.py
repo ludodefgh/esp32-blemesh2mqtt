@@ -47,18 +47,38 @@ def load_dotenv():
 
 
 class Bulb:
-    """Latest real state of the HSL test bulb, parsed from its serial log."""
+    """Latest real state of the HSL test bulb, parsed from its serial log.
+
+    Survives its port going away: an ESP32-S3 re-enumerates over USB when it resets.
+    """
 
     def __init__(self, port):
-        self._serial = serial.Serial(port, 115200, timeout=0.2)
+        self._port = port
         self._lock = threading.Lock()
         self._states = []
         self._stop = False
+        self._serial = self._open()
         threading.Thread(target=self._read, daemon=True).start()
+
+    def _open(self):
+        port = serial.Serial()
+        port.port, port.baudrate, port.timeout = self._port, 115200, 0.2
+        port.dtr = port.rts = False  # don't toggle the reset lines on open
+        port.open()
+        return port
 
     def _read(self):
         while not self._stop:
-            line = self._serial.readline().decode(errors="replace")
+            try:
+                line = self._serial.readline().decode(errors="replace")
+            except (serial.SerialException, OSError, TypeError):
+                self._serial.close()
+                time.sleep(1)
+                try:
+                    self._serial = self._open()
+                except serial.SerialException:
+                    pass
+                continue
             match = STATE_RE.search(line)
             if match:
                 state = {k: (int(v) if v.isdigit() else v) for k, v in match.groupdict().items()}
@@ -74,6 +94,10 @@ class Bulb:
     def latest_since(self, mark):
         with self._lock:
             return self._states[-1] if len(self._states) > mark else None
+
+    def states_since(self, mark):
+        with self._lock:
+            return list(self._states[mark:])
 
     def close(self):
         self._stop = True

@@ -42,9 +42,12 @@ void ble_mesh_ctl_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
         return;
 
     node_info->color_mode = color_mode_t::color_temp;
+    // Values captured now: node_info may change (or be rewritten) before this is sent or retried.
+    const uint16_t temperature = node_info->curr_temp;
+    const uint16_t lightness = node_info->hsl_l;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
+                                .send = [temperature, lightness](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                 {
                                     LOG_WARN(TAG, "[ble_mesh_ctl_set] Setting CTL for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -52,8 +55,8 @@ void ble_mesh_ctl_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 
                                     node_manager().ble_mesh_set_msg_common(&common, node_info, ctl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET);
 
-                                    set_state_light.ctl_set.ctl_temperature = node_info->curr_temp;
-                                    set_state_light.ctl_set.ctl_lightness = node_info->hsl_l;
+                                    set_state_light.ctl_set.ctl_temperature = temperature;
+                                    set_state_light.ctl_set.ctl_lightness = lightness;
                                     set_state_light.ctl_set.ctl_delta_uv = 0;
                                     set_state_light.ctl_set.op_en = false;
                                     set_state_light.ctl_set.delay = 0;
@@ -96,9 +99,17 @@ void ble_mesh_light_hsl_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
     if (!node_info)
         return;
 
+    node_info->color_mode = color_mode_t::hs;
+    // In HSL color space, L=0.5 (half of max) is the pure saturated color.
+    // Scale HA range [0, max_lightness] → [0, max_lightness/2]; CTL mode gets the full range.
+    const uint16_t hue = node_info->hsl_h;
+    const uint16_t saturation = node_info->hsl_s;
+    const uint16_t lightness = node_info->max_lightness > 0
+                                   ? (uint16_t)((uint32_t)node_info->hsl_l * (node_info->max_lightness / 2) / node_info->max_lightness)
+                                   : node_info->hsl_l;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
+                                .send = [hue, saturation, lightness](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                 {
                                     LOG_WARN(TAG, "[ble_mesh_light_hsl_set] Setting HSL for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -106,15 +117,9 @@ void ble_mesh_light_hsl_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 
                                     node_manager().ble_mesh_set_msg_common(&common, node_info, hsl_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET);
 
-                                    node_info->color_mode = color_mode_t::hs;
-                                    set_state.hsl_set.hsl_hue = node_info->hsl_h;
-                                    set_state.hsl_set.hsl_saturation = node_info->hsl_s;
-                                    // In HSL color space, L=0.5 (half of max) is the pure saturated color.
-                                    // Scale HA range [0, max_lightness] → [0, max_lightness/2] at send time.
-                                    // CTL mode sends hsl_l as-is and gets the full brightness range.
-                                    set_state.hsl_set.hsl_lightness = node_info->max_lightness > 0
-                                        ? (uint16_t)((uint32_t)node_info->hsl_l * (node_info->max_lightness / 2) / node_info->max_lightness)
-                                        : node_info->hsl_l;
+                                    set_state.hsl_set.hsl_hue = hue;
+                                    set_state.hsl_set.hsl_saturation = saturation;
+                                    set_state.hsl_set.hsl_lightness = lightness;
                                     set_state.hsl_set.op_en = false;
                                     set_state.hsl_set.delay = 0;
                                     set_state.hsl_set.tid = store.tid++; // Transaction ID (should increment on each new transaction)
@@ -134,9 +139,10 @@ void ble_mesh_gen_onoff_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
     if (!node_info)
         return;
 
+    const bool onoff = node_info->onoff;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
+                                .send = [onoff](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                 {
                                     LOG_WARN(TAG, "[gen_onoff_set] Generic on/off model for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -144,7 +150,7 @@ void ble_mesh_gen_onoff_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
 
                                     node_manager().ble_mesh_set_msg_common(&common, node_info, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET);
                                     set_state.onoff_set.op_en = false;
-                                    set_state.onoff_set.onoff = node_info->onoff;
+                                    set_state.onoff_set.onoff = onoff;
                                     set_state.onoff_set.tid = store.tid++;
                                     esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
                                     if (err)
@@ -162,17 +168,18 @@ void ble_mesh_gen_level_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
     if (!node_info)
         return;
 
+    const int16_t level = node_info->level;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info)
+                                .send = [level](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                 {
-                                    LOG_INFO(TAG, "[gen_level_set] Generic Level for node 0x%04X: %d", node_info->unicast, node_info->level);
+                                    LOG_INFO(TAG, "[gen_level_set] Generic Level for node 0x%04X: %d", node_info->unicast, level);
                                     esp_ble_mesh_client_common_param_t common = {0};
                                     esp_ble_mesh_generic_client_set_state_t set_state = {0};
 
                                     node_manager().ble_mesh_set_msg_common(&common, node_info, level_client.model, ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET);
                                     set_state.level_set.op_en = false;
-                                    set_state.level_set.level = node_info->level;
+                                    set_state.level_set.level = level;
                                     set_state.level_set.tid = store.tid++;
                                     esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set_state);
                                     if (err)
@@ -391,9 +398,10 @@ void ble_mesh_lightness_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
     if (!node_info)
         return;
 
+    const uint16_t lightness = node_info->hsl_l;
     message_queue().enqueue(node_info,
                             message_payload{
-                                .send = [](std::shared_ptr<bm2mqtt_node_info> &node_info) // shared_ptr captured by value, keeps node alive
+                                .send = [lightness](std::shared_ptr<bm2mqtt_node_info> &node_info)
                                 {
                                     LOG_WARN(TAG, "Setting Lightness for node 0x%04X", node_info->unicast);
                                     esp_ble_mesh_client_common_param_t common = {0};
@@ -402,7 +410,7 @@ void ble_mesh_lightness_set(const std::shared_ptr<bm2mqtt_node_info>& node_info)
                                     node_manager().ble_mesh_set_msg_common(&common, node_info, lightness_cli.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET);
                                     common.ctx.addr = node_info->unicast;
 
-                                    set_state_light.lightness_set.lightness = node_info->hsl_l;
+                                    set_state_light.lightness_set.lightness = lightness;
                                     set_state_light.lightness_set.op_en = false;
                                     set_state_light.lightness_set.delay = 0;
                                     set_state_light.lightness_set.tid = store.tid++;
